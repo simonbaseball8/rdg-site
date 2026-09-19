@@ -448,21 +448,46 @@ export async function GET() {
     const oddsEvents =
       oddsData.events ?? [];
 
+    // Oddize can return more than one event record for the same MLB matchup.
+    // Keep one Hard Rock event per actual MLB game so the board does not duplicate games.
+    const matchedOddsByGamePk =
+      new Map<number, any>();
+
+    for (const event of oddsEvents) {
+      const matchedGame =
+        mlbGames.find(
+          (game: any) =>
+            teamsMatch(
+              event.team1,
+              game.teams?.away?.team?.name
+            ) &&
+            teamsMatch(
+              event.team2,
+              game.teams?.home?.team?.name
+            )
+        );
+
+      if (!matchedGame?.gamePk) continue;
+
+      const existing =
+        matchedOddsByGamePk.get(
+          matchedGame.gamePk
+        );
+
+      if (
+        !existing ||
+        (event.odds?.length ?? 0) >
+          (existing.odds?.length ?? 0)
+      ) {
+        matchedOddsByGamePk.set(
+          matchedGame.gamePk,
+          event
+        );
+      }
+    }
+
     const todaysOddsEvents =
-      oddsEvents.filter(
-        (event: any) =>
-          mlbGames.some(
-            (game: any) =>
-              teamsMatch(
-                event.team1,
-                game.teams?.away?.team?.name
-              ) &&
-              teamsMatch(
-                event.team2,
-                game.teams?.home?.team?.name
-              )
-          )
-      );
+      [...matchedOddsByGamePk.values()];
 
     const pitcherIds =
       new Set<number>();
