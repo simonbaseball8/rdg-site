@@ -2,80 +2,96 @@ import { NextResponse } from "next/server";
 
 function normalizeTeam(team: string) {
   const teamMap: Record<string, string> = {
-  ARI: "ARI",
-  CRD: "ARI",
-
-  ATL: "ATL",
-
-  BAL: "BAL",
-  RAV: "BAL",
-
-  BUF: "BUF",
-  CAR: "CAR",
-  CHI: "CHI",
-  CIN: "CIN",
-
-  CLE: "CLE",
-  CLV: "CLE",
-
-  DAL: "DAL",
-  DEN: "DEN",
-  DET: "DET",
-
-  GB: "GB",
-  GNB: "GB",
-
-  HOU: "HOU",
-  HTX: "HOU",
-
-  IND: "IND",
-  CLT: "IND",
-
-  JAX: "JAX",
-
-  KC: "KC",
-  KAN: "KC",
-
-  LAC: "LAC",
-  SDG: "LAC",
-
-  LA: "LA",
-  LAR: "LA",
-  RAM: "LA",
-
-  LV: "LV",
-  RAI: "LV",
-
-  MIA: "MIA",
-  MIN: "MIN",
-
-  NE: "NE",
-  NWE: "NE",
-
-  NO: "NO",
-  NOR: "NO",
-
-  NYG: "NYG",
-  NYJ: "NYJ",
-
-  PHI: "PHI",
-  PIT: "PIT",
-
-  SEA: "SEA",
-
-  SF: "SF",
-  SFO: "SF",
-
-  TB: "TB",
-  TAM: "TB",
-
-  TEN: "TEN",
-  OTI: "TEN",
-
-  WAS: "WAS",
-};
+    ARI: "ARI", CRD: "ARI",
+    ATL: "ATL",
+    BAL: "BAL", RAV: "BAL",
+    BUF: "BUF",
+    CAR: "CAR",
+    CHI: "CHI",
+    CIN: "CIN",
+    CLE: "CLE", CLV: "CLE",
+    DAL: "DAL",
+    DEN: "DEN",
+    DET: "DET",
+    GB: "GB", GNB: "GB",
+    HOU: "HOU", HTX: "HOU",
+    IND: "IND", CLT: "IND",
+    JAX: "JAX",
+    KC: "KC", KAN: "KC",
+    LAC: "LAC", SDG: "LAC",
+    LA: "LA", LAR: "LA", RAM: "LA",
+    LV: "LV", RAI: "LV",
+    MIA: "MIA",
+    MIN: "MIN",
+    NE: "NE", NWE: "NE",
+    NO: "NO", NOR: "NO",
+    NYG: "NYG",
+    NYJ: "NYJ",
+    PHI: "PHI",
+    PIT: "PIT",
+    SEA: "SEA",
+    SF: "SF", SFO: "SF",
+    TB: "TB", TAM: "TB",
+    TEN: "TEN", OTI: "TEN",
+    WAS: "WAS",
+  };
 
   return teamMap[team] ?? team;
+}
+
+function number(value: string | undefined) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function average(
+  rows: Record<string, string>[],
+  field: string
+) {
+  if (!rows.length) return 0;
+
+  return (
+    rows.reduce(
+      (sum, row) => sum + number(row[field]),
+      0
+    ) / rows.length
+  );
+}
+
+function buildTeamMetrics(
+  rows: Record<string, string>[]
+) {
+  return {
+    games: rows.length,
+
+    passing_yards_per_game: Number(
+      average(rows, "passing_yards").toFixed(1)
+    ),
+
+    rushing_yards_per_game: Number(
+      average(rows, "rushing_yards").toFixed(1)
+    ),
+
+    passing_tds_per_game: Number(
+      average(rows, "passing_tds").toFixed(2)
+    ),
+
+    rushing_tds_per_game: Number(
+      average(rows, "rushing_tds").toFixed(2)
+    ),
+
+    sacks_allowed_per_game: Number(
+      average(rows, "sacks_suffered").toFixed(2)
+    ),
+
+    passing_epa_per_game: Number(
+      average(rows, "passing_epa").toFixed(2)
+    ),
+
+    rushing_epa_per_game: Number(
+      average(rows, "rushing_epa").toFixed(2)
+    ),
+  };
 }
 
 export async function GET() {
@@ -89,10 +105,7 @@ export async function GET() {
       );
     }
 
-    // -------------------------
     // HARD ROCK ODDS
-    // -------------------------
-
     const oddsResponse = await fetch(
       "https://oddize.com/api/v1/odds/latest?sport=nfl&books=hrb",
       {
@@ -115,15 +128,10 @@ export async function GET() {
 
     const oddsData = await oddsResponse.json();
 
-    // -------------------------
-    // NFLVERSE STATS
-    // -------------------------
-
+    // NFLVERSE TEAM STATS
     const statsResponse = await fetch(
       "https://github.com/nflverse/nflverse-data/releases/download/stats_team/stats_team_week_2026.csv",
-      {
-        cache: "no-store",
-      }
+      { cache: "no-store" }
     );
 
     if (!statsResponse.ok) {
@@ -139,7 +147,6 @@ export async function GET() {
     const statsCsv = await statsResponse.text();
 
     const lines = statsCsv.trim().split(/\r?\n/);
-
     const headers = lines[0]
       .split(",")
       .map((header) => header.trim());
@@ -156,10 +163,6 @@ export async function GET() {
       return row;
     });
 
-    // -------------------------
-    // ORGANIZE STATS BY TEAM
-    // -------------------------
-
     const teamStats = new Map<
       string,
       Record<string, string>[]
@@ -175,10 +178,6 @@ export async function GET() {
       teamStats.get(row.team)!.push(row);
     }
 
-    // -------------------------
-    // MATCH ODDS + STATS
-    // -------------------------
-
     const games = (oddsData.events ?? [])
       .map((event: any) => {
         const odds = event.odds ?? [];
@@ -193,35 +192,26 @@ export async function GET() {
           teamStats.get(homeCode) ?? [];
 
         const moneyline = odds
-          .filter(
-            (odd: any) =>
-              odd.market === "moneyline"
-          )
-          .map((odd: any) => ({
-            team: odd.team,
-            odds: odd.american_odds,
+          .filter((o: any) => o.market === "moneyline")
+          .map((o: any) => ({
+            team: o.team,
+            odds: o.american_odds,
           }));
 
         const spread = odds
-          .filter(
-            (odd: any) =>
-              odd.market === "spread"
-          )
-          .map((odd: any) => ({
-            team: odd.team,
-            line: odd.line,
-            odds: odd.american_odds,
+          .filter((o: any) => o.market === "spread")
+          .map((o: any) => ({
+            team: o.team,
+            line: o.line,
+            odds: o.american_odds,
           }));
 
         const total = odds
-          .filter(
-            (odd: any) =>
-              odd.market === "total"
-          )
-          .map((odd: any) => ({
-            side: odd.team,
-            line: odd.line,
-            odds: odd.american_odds,
+          .filter((o: any) => o.market === "total")
+          .map((o: any) => ({
+            side: o.team,
+            line: o.line,
+            odds: o.american_odds,
           }));
 
         return {
@@ -231,36 +221,27 @@ export async function GET() {
           away_team: event.team1,
           home_team: event.team2,
 
-          away_stats_code: awayCode,
-          home_stats_code: homeCode,
-
           moneyline,
           spread,
           total,
 
-          stats_match: {
-            away_games_found:
-              awayStats.length,
-
-            home_games_found:
-              homeStats.length,
-          },
-
           stats_connected:
             awayStats.length > 0 &&
             homeStats.length > 0,
+
+          away_metrics:
+            buildTeamMetrics(awayStats),
+
+          home_metrics:
+            buildTeamMetrics(homeStats),
         };
       })
-
-      // Remove games without active Hard Rock lines
       .filter(
         (game: any) =>
           game.moneyline.length > 0 ||
           game.spread.length > 0 ||
           game.total.length > 0
       )
-
-      // Sort upcoming games first
       .sort(
         (a: any, b: any) =>
           new Date(a.start_date).getTime() -
@@ -269,9 +250,7 @@ export async function GET() {
 
     return NextResponse.json({
       sportsbook: "Hard Rock Bet",
-
       sport: "NFL",
-
       games_found: games.length,
 
       games_with_stats: games.filter(
