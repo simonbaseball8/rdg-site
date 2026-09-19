@@ -786,7 +786,7 @@ const [cfbError, setCfbError] =
       </header>
 
       <div className="mx-auto max-w-7xl px-6 py-8">
-        <div className="mb-8 flex gap-3">
+        <div className="sticky top-0 z-30 -mx-6 mb-8 flex gap-2 overflow-x-auto border-b border-white/10 bg-[#020806]/95 px-6 py-3 backdrop-blur">
   <button
     onClick={() => setActiveSport("NFL")}
     className={
@@ -823,6 +823,23 @@ const [cfbError, setCfbError] =
     NHL
   </button>
 </div>
+        <div className="mb-8 grid gap-3 sm:grid-cols-3">
+          <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] p-4">
+            <p className="text-[10px] font-black uppercase tracking-widest text-emerald-400">1 • START HERE</p>
+            <p className="mt-1 text-sm font-bold">Top RDG Parlay</p>
+            <p className="mt-1 text-xs text-slate-500">The strongest combination that passes the sport&apos;s stricter model filters.</p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">2 • COMPARE</p>
+            <p className="mt-1 text-sm font-bold">Model vs Market</p>
+            <p className="mt-1 text-xs text-slate-500">See where RDG differs from the current Hard Rock market.</p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">3 • CHECK HISTORY</p>
+            <p className="mt-1 text-sm font-bold">Performance Dashboard</p>
+            <p className="mt-1 text-xs text-slate-500">Review tracked results separately from today&apos;s model signals.</p>
+          </div>
+        </div>
         {activeSport === "MLB" && (
           <MLBSection mlb={mlb} loading={mlbLoading} error={mlbError} />
         )}
@@ -1117,9 +1134,7 @@ const [cfbError, setCfbError] =
                 <BuilderCard
                   title="TOP RDG PARLAY"
                   subtitle="Strongest Stricter-Filter Combination"
-                  candidates={
-                    saferTwoLeg
-                  }
+                  candidates={saferTwoLeg}
                   required={2}
                   featured
                 />
@@ -1472,26 +1487,17 @@ function BuilderCard({
     candidates.length >= required;
 
   return (
-    <article
-      className={
-        featured
-          ? "relative overflow-hidden rounded-xl border-2 border-emerald-400/70 bg-emerald-500/[0.10] p-6 shadow-[0_0_35px_rgba(16,185,129,0.16)] lg:col-span-2"
-          : "rounded-xl border border-green-500/20 bg-white/[0.04] p-6"
-      }
-    >
+    <article className={featured
+      ? "relative overflow-hidden rounded-2xl border-2 border-emerald-400/70 bg-emerald-500/[0.10] p-6 shadow-[0_0_35px_rgba(16,185,129,0.16)] lg:col-span-2"
+      : "rounded-xl border border-white/10 bg-white/[0.035] p-6 transition hover:border-green-500/30"
+    }>
       {featured && (
-        <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-4 py-3">
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3">
           <div>
-            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-emerald-300">
-              RDG FEATURED
-            </p>
-            <p className="mt-1 text-sm font-semibold text-white">
-              Strongest current combination under the stricter RDG filters
-            </p>
+            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-emerald-300">RDG FEATURED</p>
+            <p className="mt-1 text-sm font-semibold text-white">Strongest current combination under the stricter model filters</p>
           </div>
-          <span className="rounded-full bg-emerald-400 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-black">
-            TOP MODEL FILTER
-          </span>
+          <span className="rounded-full bg-emerald-400 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-black">TOP MODEL FILTER</span>
         </div>
       )}
       <div className="flex items-start justify-between gap-4">
@@ -1926,12 +1932,12 @@ function CFBBuilderSection({ cfb }: { cfb: CFBAnalysis }) {
   const broader = candidates.filter((x) => x.signal !== "Pass");
   const cards = [
     ["BEST STRAIGHT", "Stricter CFB Filter", stricter.slice(0, 1), 1],
-    ["STRONGER 2-LEG", "Priority + Strong Reviews", diversifiedSelection(stricter, 2, 0, 1), 2],
+    ["TOP RDG PARLAY", "Priority + Strong Reviews", diversifiedSelection(stricter, 2, 0, 1), 2],
     ["BALANCED 3-LEG", "Diversified Review Mix", diversifiedSelection(broader, 3, 1, 2), 3],
     ["WIDER 4-LEG", "Diversified Review Mix", diversifiedSelection(broader, 4, 2, 3), 4],
-    ["5-LEG", "Diversified Review Card", diversifiedSelection(broader, 5, 0, 2), 5],
-    ["6-LEG", "Diversified Review Card", diversifiedSelection(broader, 6, 1, 3), 6],
-    ["8-LEG", "Diversified Long-Shot Card", diversifiedSelection(broader, 8, 3, 5), 8],
+    ["5-LEG • HIGH RISK", "Diversified Review Card", diversifiedSelection(broader, 5, 0, 2), 5],
+    ["6-LEG • HIGH RISK", "Diversified Review Card", diversifiedSelection(broader, 6, 1, 3), 6],
+    ["8-LEG • LONG SHOT", "Diversified Long-Shot Card", diversifiedSelection(broader, 8, 3, 5), 8],
   ] as const;
 
   return (
@@ -1943,7 +1949,7 @@ function CFBBuilderSection({ cfb }: { cfb: CFBAnalysis }) {
       </div>
       <section className="mt-8 grid gap-5 lg:grid-cols-2">
         {cards.map(([title, subtitle, picks, required]) => (
-          <CFBBuilderCard key={title} title={title} subtitle={subtitle} candidates={[...picks]} required={required} />
+          <CFBBuilderCard key={title} title={title} subtitle={subtitle} candidates={[...picks]} required={required} featured={title === "TOP RDG PARLAY"} />
         ))}
       </section>
       <div className="mt-5 rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 text-xs text-slate-400">
@@ -1953,10 +1959,11 @@ function CFBBuilderSection({ cfb }: { cfb: CFBAnalysis }) {
   );
 }
 
-function CFBBuilderCard({ title, subtitle, candidates, required }: { title: string; subtitle: string; candidates: CFBBetCandidate[]; required: number }) {
+function CFBBuilderCard({ title, subtitle, candidates, required, featured = false }: { title: string; subtitle: string; candidates: CFBBetCandidate[]; required: number; featured?: boolean }) {
   const qualified = candidates.length >= required;
   return (
-    <article className="rounded-xl border border-green-500/20 bg-white/[0.04] p-6">
+    <article className={featured ? "rounded-2xl border-2 border-emerald-400/70 bg-emerald-500/[0.10] p-6 shadow-[0_0_35px_rgba(16,185,129,0.16)] lg:col-span-2" : "rounded-xl border border-white/10 bg-white/[0.035] p-6 transition hover:border-green-500/30"}>
+      {featured && <div className="mb-5 rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3"><p className="text-[10px] font-black uppercase tracking-[0.24em] text-emerald-300">RDG FEATURED • TOP MODEL FILTER</p><p className="mt-1 text-sm font-semibold">Strongest current combination under the stricter CFB review filters</p></div>}
       <div className="flex items-start justify-between gap-4">
         <div><p className="text-xs font-bold uppercase tracking-widest text-green-400">{subtitle}</p><h3 className="mt-2 text-xl font-bold">{title}</h3></div>
         <span className={qualified ? "rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-bold text-green-400" : "rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-400"}>{qualified ? "QUALIFIED" : "NOT ENOUGH LEGS"}</span>
@@ -1985,7 +1992,7 @@ function NHLSection({ nhl, loading, error }: { nhl: NHLAnalysis | null; loading:
   const stricter = candidates.filter((x) => x.signal === "Priority Review" || x.signal === "Strong Review");
   const broader = candidates.filter((x) => x.signal === "Priority Review" || x.signal === "Strong Review" || x.signal === "Watch");
   const cards = [
-    ["BEST STRAIGHT", "Stricter NHL Filter", stricter.slice(0,1), 1], ["STRONGER 2-LEG", "Priority + Strong Reviews", diversifiedSelection(stricter,2,0,1), 2], ["BALANCED 3-LEG", "Diversified Review Mix", diversifiedSelection(broader,3,1,2), 3], ["WIDER 4-LEG", "Diversified Review Mix", diversifiedSelection(broader,4,2,3), 4], ["5-LEG", "Diversified Review Card", diversifiedSelection(broader,5,0,2), 5], ["6-LEG", "Diversified Review Card", diversifiedSelection(broader,6,1,3), 6], ["8-LEG", "Diversified Long-Shot Card", diversifiedSelection(broader,8,3,5), 8]
+    ["BEST STRAIGHT", "Stricter NHL Filter", stricter.slice(0,1), 1], ["TOP RDG PARLAY", "Priority + Strong Reviews", diversifiedSelection(stricter,2,0,1), 2], ["BALANCED 3-LEG", "Diversified Review Mix", diversifiedSelection(broader,3,1,2), 3], ["WIDER 4-LEG", "Diversified Review Mix", diversifiedSelection(broader,4,2,3), 4], ["5-LEG", "Diversified Review Card", diversifiedSelection(broader,5,0,2), 5], ["6-LEG", "Diversified Review Card", diversifiedSelection(broader,6,1,3), 6], ["8-LEG", "Diversified Long-Shot Card", diversifiedSelection(broader,8,3,5), 8]
   ] as const;
   return <div>
     <p className="text-xs font-bold uppercase tracking-[0.25em] text-green-400">RDG NHL MODEL • v1.0</p>
@@ -2166,8 +2173,9 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
               required={1}
             />
             <MLBBuilderCard
-              title="STRONGER 2-LEG"
-              subtitle="Priority + Strong Reviews"
+              title="TOP RDG PARLAY"
+              subtitle="Strongest Priority + Strong Combination"
+              featured
               candidates={twoLeg}
               required={2}
             />
@@ -2184,19 +2192,19 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
               required={4}
             />
             <MLBBuilderCard
-              title="5-LEG"
+              title="5-LEG • HIGH RISK"
               subtitle="Extended Review Card"
               candidates={fiveLeg}
               required={5}
             />
             <MLBBuilderCard
-              title="6-LEG"
+              title="6-LEG • HIGH RISK"
               subtitle="Extended Review Card"
               candidates={sixLeg}
               required={6}
             />
             <MLBBuilderCard
-              title="8-LEG"
+              title="8-LEG • LONG SHOT"
               subtitle="Long-Shot Review Card"
               candidates={eightLeg}
               required={8}
@@ -2233,16 +2241,19 @@ function MLBBuilderCard({
   subtitle,
   candidates,
   required,
+  featured = false,
 }: {
   title: string;
   subtitle: string;
   candidates: MLBBetCandidate[];
   required: number;
+  featured?: boolean;
 }) {
   const qualified = candidates.length >= required;
 
   return (
-    <article className="rounded-xl border border-green-500/20 bg-white/[0.04] p-6">
+    <article className={featured ? "rounded-2xl border-2 border-emerald-400/70 bg-emerald-500/[0.10] p-6 shadow-[0_0_35px_rgba(16,185,129,0.16)] lg:col-span-2" : "rounded-xl border border-white/10 bg-white/[0.035] p-6 transition hover:border-green-500/30"}>
+      {featured && <div className="mb-5 rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3"><p className="text-[10px] font-black uppercase tracking-[0.24em] text-emerald-300">RDG FEATURED • TOP MODEL FILTER</p><p className="mt-1 text-sm font-semibold">Strongest current combination under the stricter MLB review filters</p></div>}
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-xs font-bold uppercase tracking-widest text-green-400">
