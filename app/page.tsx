@@ -276,6 +276,78 @@ type BetCandidate = {
   score: number;
 };
 
+function diversifiedSelection<T>(items: T[], count: number, offset: number, stride: number) {
+  if (count <= 0 || items.length === 0) return [];
+
+  const result: T[] = [];
+  const used = new Set<number>();
+  let index = ((offset % items.length) + items.length) % items.length;
+  let attempts = 0;
+
+  while (result.length < Math.min(count, items.length) && attempts < items.length * 3) {
+    if (!used.has(index)) {
+      used.add(index);
+      result.push(items[index]);
+    }
+    index = (index + stride) % items.length;
+    attempts += 1;
+  }
+
+  if (result.length < Math.min(count, items.length)) {
+    for (let i = 0; i < items.length && result.length < count; i += 1) {
+      if (!used.has(i)) {
+        used.add(i);
+        result.push(items[i]);
+      }
+    }
+  }
+
+  return result;
+}
+
+function TeamLogo({ sport, team }: { sport: "NFL" | "MLB" | "NHL"; team: string }) {
+  const aliases: Record<string, Record<string, string>> = {
+    NFL: {
+      ARI: "ari", ATL: "atl", BAL: "bal", BUF: "buf", CAR: "car", CHI: "chi", CIN: "cin", CLE: "cle",
+      DAL: "dal", DEN: "den", DET: "det", GB: "gb", HOU: "hou", IND: "ind", JAX: "jax", JAC: "jax",
+      KC: "kc", LV: "lv", LAC: "lac", LAR: "lar", MIA: "mia", MIN: "min", NE: "ne", NO: "no",
+      NYG: "nyg", NYJ: "nyj", PHI: "phi", PIT: "pit", SEA: "sea", SF: "sf", TB: "tb", TEN: "ten", WAS: "wsh", WSH: "wsh",
+      "ARIZONA CARDINALS": "ari", "ATLANTA FALCONS": "atl", "BALTIMORE RAVENS": "bal", "BUFFALO BILLS": "buf",
+      "CAROLINA PANTHERS": "car", "CHICAGO BEARS": "chi", "CINCINNATI BENGALS": "cin", "CLEVELAND BROWNS": "cle",
+      "DALLAS COWBOYS": "dal", "DENVER BRONCOS": "den", "DETROIT LIONS": "det", "GREEN BAY PACKERS": "gb",
+      "HOUSTON TEXANS": "hou", "INDIANAPOLIS COLTS": "ind", "JACKSONVILLE JAGUARS": "jax", "KANSAS CITY CHIEFS": "kc",
+      "LAS VEGAS RAIDERS": "lv", "LOS ANGELES CHARGERS": "lac", "LOS ANGELES RAMS": "lar", "MIAMI DOLPHINS": "mia",
+      "MINNESOTA VIKINGS": "min", "NEW ENGLAND PATRIOTS": "ne", "NEW ORLEANS SAINTS": "no", "NEW YORK GIANTS": "nyg",
+      "NEW YORK JETS": "nyj", "PHILADELPHIA EAGLES": "phi", "PITTSBURGH STEELERS": "pit", "SEATTLE SEAHAWKS": "sea",
+      "SAN FRANCISCO 49ERS": "sf", "TAMPA BAY BUCCANEERS": "tb", "TENNESSEE TITANS": "ten", "WASHINGTON COMMANDERS": "wsh"
+    },
+    MLB: {
+      ARI: "ari", ATH: "ath", ATL: "atl", BAL: "bal", BOS: "bos", CHC: "chc", CWS: "chw", CHW: "chw", CIN: "cin", CLE: "cle",
+      COL: "col", DET: "det", HOU: "hou", KC: "kc", LAA: "laa", LAD: "lad", MIA: "mia", MIL: "mil", MIN: "min", NYM: "nym",
+      NYY: "nyy", OAK: "oak", PHI: "phi", PIT: "pit", SD: "sd", SEA: "sea", SF: "sf", SFG: "sf", STL: "stl", TB: "tb", TEX: "tex", TOR: "tor", WSH: "wsh"
+    },
+    NHL: {
+      ANA: "ana", BOS: "bos", BUF: "buf", CAR: "car", CBJ: "cbj", CGY: "cgy", CHI: "chi", COL: "col", DAL: "dal", DET: "det",
+      EDM: "edm", FLA: "fla", LAK: "la", LA: "la", MIN: "min", MTL: "mtl", NJD: "nj", NJ: "nj", NSH: "nsh", NYI: "nyi", NYR: "nyr",
+      OTT: "ott", PHI: "phi", PIT: "pit", SEA: "sea", SJS: "sj", SJ: "sj", STL: "stl", TBL: "tb", TB: "tb", TOR: "tor", UTA: "utah", VAN: "van", VGK: "vgk", WPG: "wpg", WSH: "wsh"
+    }
+  };
+
+  const key = team.trim().toUpperCase();
+  const code = aliases[sport]?.[key] || key.toLowerCase();
+  const url = `https://a.espncdn.com/i/teamlogos/${sport.toLowerCase()}/500/${code}.png`;
+
+  return (
+    <img
+      src={url}
+      alt={`${team} logo`}
+      className="h-8 w-8 shrink-0 object-contain"
+      loading="lazy"
+      onError={(event) => { event.currentTarget.style.display = "none"; }}
+    />
+  );
+}
+
 export default function Home() {
   const [parlays, setParlays] = useState<Parlay[]>([]);
   const [loading, setLoading] = useState(true);
@@ -672,18 +744,13 @@ const [cfbError, setCfbError] =
       ? saferCandidates[0]
       : null;
 
-  const saferTwoLeg =
-    saferCandidates.slice(0, 2);
-
-  const balancedThreeLeg =
-    balancedCandidates.slice(0, 3);
-
-  const higherRiskFourLeg =
-    higherRiskCandidates.slice(0, 4);
-
-  const fiveLeg = higherRiskCandidates.slice(0, 5);
-  const sixLeg = higherRiskCandidates.slice(0, 6);
-  const eightLeg = higherRiskCandidates.slice(0, 8);
+  // Build different cards instead of making every larger parlay a copy of the smaller one.
+  const saferTwoLeg = diversifiedSelection(saferCandidates, 2, 0, 1);
+  const balancedThreeLeg = diversifiedSelection(balancedCandidates, 3, 1, 2);
+  const higherRiskFourLeg = diversifiedSelection(higherRiskCandidates, 4, 2, 3);
+  const fiveLeg = diversifiedSelection(higherRiskCandidates, 5, 0, 2);
+  const sixLeg = diversifiedSelection(higherRiskCandidates, 6, 1, 3);
+  const eightLeg = diversifiedSelection(higherRiskCandidates, 8, 3, 5);
 
   return (
     <main className="min-h-screen bg-[#020806] text-white">
@@ -1451,11 +1518,10 @@ function BuilderCard({
                       </p>
                     )}
 
-                    <p className="mt-1 text-lg font-bold">
-                      {
-                        candidate.display_bet
-                      }
-                    </p>
+                    <div className="mt-1 flex items-center gap-3">
+                      <TeamLogo sport="NFL" team={candidate.team} />
+                      <p className="text-lg font-bold">{candidate.display_bet}</p>
+                    </div>
 
                     <p className="mt-1 text-xs text-slate-500">
                       {
@@ -1578,10 +1644,13 @@ function NFLGameCard({
             {market.market_signal}
           </p>
 
-          <h3 className="mt-2 text-xl font-bold">
-            {game.away_team} @{" "}
-            {game.home_team}
-          </h3>
+          <div className="mt-2 flex items-center gap-2">
+            <TeamLogo sport="NFL" team={game.away_team} />
+            <span className="text-xl font-bold">{game.away_team}</span>
+            <span className="text-slate-500">@</span>
+            <TeamLogo sport="NFL" team={game.home_team} />
+            <span className="text-xl font-bold">{game.home_team}</span>
+          </div>
 
           <p className="mt-1 text-xs text-slate-500">
             {gameTime} • Hard Rock Bet
@@ -1744,10 +1813,12 @@ function NFLBoardRow({
   return (
     <div className="grid gap-3 rounded-lg border border-white/10 bg-white/[0.03] p-4 md:grid-cols-5 md:items-center">
       <div>
-        <p className="font-bold">
-          {game.away_team} @{" "}
-          {game.home_team}
-        </p>
+        <div className="flex items-center gap-2 font-bold">
+          <TeamLogo sport="NFL" team={game.away_team} />
+          <span>{game.away_team}</span><span className="text-slate-500">@</span>
+          <TeamLogo sport="NFL" team={game.home_team} />
+          <span>{game.home_team}</span>
+        </div>
 
         <p className="mt-1 text-xs text-slate-500">
           {market.market_signal}
@@ -1826,12 +1897,12 @@ function CFBBuilderSection({ cfb }: { cfb: CFBAnalysis }) {
   const broader = candidates.filter((x) => x.signal !== "Pass");
   const cards = [
     ["BEST STRAIGHT", "Stricter CFB Filter", stricter.slice(0, 1), 1],
-    ["STRONGER 2-LEG", "Priority + Strong Reviews", stricter.slice(0, 2), 2],
-    ["BALANCED 3-LEG", "Review Signals", broader.slice(0, 3), 3],
-    ["WIDER 4-LEG", "Includes Watch Reviews", broader.slice(0, 4), 4],
-    ["5-LEG", "Extended Review Card", broader.slice(0, 5), 5],
-    ["6-LEG", "Extended Review Card", broader.slice(0, 6), 6],
-    ["8-LEG", "Long-Shot Review Card", broader.slice(0, 8), 8],
+    ["STRONGER 2-LEG", "Priority + Strong Reviews", diversifiedSelection(stricter, 2, 0, 1), 2],
+    ["BALANCED 3-LEG", "Diversified Review Mix", diversifiedSelection(broader, 3, 1, 2), 3],
+    ["WIDER 4-LEG", "Diversified Review Mix", diversifiedSelection(broader, 4, 2, 3), 4],
+    ["5-LEG", "Diversified Review Card", diversifiedSelection(broader, 5, 0, 2), 5],
+    ["6-LEG", "Diversified Review Card", diversifiedSelection(broader, 6, 1, 3), 6],
+    ["8-LEG", "Diversified Long-Shot Card", diversifiedSelection(broader, 8, 3, 5), 8],
   ] as const;
 
   return (
@@ -1885,7 +1956,7 @@ function NHLSection({ nhl, loading, error }: { nhl: NHLAnalysis | null; loading:
   const stricter = candidates.filter((x) => x.signal === "Priority Review" || x.signal === "Strong Review");
   const broader = candidates.filter((x) => x.signal === "Priority Review" || x.signal === "Strong Review" || x.signal === "Watch");
   const cards = [
-    ["BEST STRAIGHT", "Stricter NHL Filter", stricter.slice(0,1), 1], ["STRONGER 2-LEG", "Priority + Strong Reviews", stricter.slice(0,2), 2], ["BALANCED 3-LEG", "Review Signals", broader.slice(0,3), 3], ["WIDER 4-LEG", "Includes Watch Reviews", broader.slice(0,4), 4], ["5-LEG", "Extended Review Card", broader.slice(0,5), 5], ["6-LEG", "Extended Review Card", broader.slice(0,6), 6], ["8-LEG", "Long-Shot Review Card", broader.slice(0,8), 8]
+    ["BEST STRAIGHT", "Stricter NHL Filter", stricter.slice(0,1), 1], ["STRONGER 2-LEG", "Priority + Strong Reviews", diversifiedSelection(stricter,2,0,1), 2], ["BALANCED 3-LEG", "Diversified Review Mix", diversifiedSelection(broader,3,1,2), 3], ["WIDER 4-LEG", "Diversified Review Mix", diversifiedSelection(broader,4,2,3), 4], ["5-LEG", "Diversified Review Card", diversifiedSelection(broader,5,0,2), 5], ["6-LEG", "Diversified Review Card", diversifiedSelection(broader,6,1,3), 6], ["8-LEG", "Diversified Long-Shot Card", diversifiedSelection(broader,8,3,5), 8]
   ] as const;
   return <div>
     <p className="text-xs font-bold uppercase tracking-[0.25em] text-green-400">RDG NHL MODEL • v1.0</p>
@@ -1897,7 +1968,7 @@ function NHLSection({ nhl, loading, error }: { nhl: NHLAnalysis | null; loading:
     {error && <div className="mt-8 rounded-xl border border-red-500/30 bg-red-500/10 p-6 text-red-400">NHL model error: {error}</div>}
     {!loading && !error && nhl && <>
       <div className="mt-12 border-t border-white/10 pt-10"><p className="text-xs font-bold uppercase tracking-[0.25em] text-slate-500">FULL NHL BOARD</p><h2 className="mt-3 text-2xl font-bold">All Games</h2></div>
-      <section className="mt-6 space-y-3">{games.map((g) => <div key={g.event_id} className="grid gap-3 rounded-lg border border-white/10 bg-white/[0.03] p-4 md:grid-cols-5 md:items-center"><div><p className="font-bold">{g.matchup}</p><p className="mt-1 text-xs text-slate-500">{g.game_type_label} • {g.signal}</p></div><BoardValue title="RDG WINNER" value={g.rdg_projected_winner}/><BoardValue title="MODEL PROB." value={`${g.projected_winner_probability.toFixed(1)}%`}/><BoardValue title="HARD ROCK" value={g.odds_available ? "Available" : "No line"}/><BoardValue title="STATUS" value={g.game_state}/></div>)}</section>
+      <section className="mt-6 space-y-3">{games.map((g) => <div key={g.event_id} className="grid gap-3 rounded-lg border border-white/10 bg-white/[0.03] p-4 md:grid-cols-5 md:items-center"><div><div className="flex items-center gap-2 font-bold"><TeamLogo sport="NHL" team={g.away_team} /><span>{g.away_team}</span><span className="text-slate-500">@</span><TeamLogo sport="NHL" team={g.home_team} /><span>{g.home_team}</span></div><p className="mt-1 text-xs text-slate-500">{g.game_type_label} • {g.signal}</p></div><BoardValue title="RDG WINNER" value={g.rdg_projected_winner}/><BoardValue title="MODEL PROB." value={`${g.projected_winner_probability.toFixed(1)}%`}/><BoardValue title="HARD ROCK" value={g.odds_available ? "Available" : "No line"}/><BoardValue title="STATUS" value={g.game_state}/></div>)}</section>
       <div className="mt-14 border-t border-white/10 pt-10"><p className="text-xs font-bold uppercase tracking-[0.25em] text-green-400">RDG NHL BET BUILDER</p><h2 className="mt-3 text-3xl font-bold">Today&apos;s NHL Model Selections</h2><p className="mt-2 max-w-3xl text-sm text-slate-400">Only regular-season games with qualifying model/market signals can enter the builder. Preseason games are excluded.</p></div>
       <section className="mt-8 grid gap-5 lg:grid-cols-2">{cards.map(([title, subtitle, picks, required]) => <NHLBuilderCard key={title} title={title} subtitle={subtitle} candidates={[...picks]} required={required}/>)}</section>
     </>}
@@ -1906,7 +1977,7 @@ function NHLSection({ nhl, loading, error }: { nhl: NHLAnalysis | null; loading:
 
 function NHLBuilderCard({ title, subtitle, candidates, required }: { title: string; subtitle: string; candidates: NHLBetCandidate[]; required: number }) {
   const qualified = candidates.length >= required;
-  return <article className="rounded-xl border border-green-500/20 bg-white/[0.04] p-6"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-widest text-green-400">{subtitle}</p><h3 className="mt-2 text-xl font-bold">{title}</h3></div><span className={qualified ? "rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-bold text-green-400" : "rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-400"}>{qualified ? "QUALIFIED" : "NOT ENOUGH LEGS"}</span></div>{candidates.length === 0 ? <div className="mt-6 rounded-lg border border-white/10 bg-black/20 p-4"><p className="font-bold">No qualifying selection</p><p className="mt-2 text-xs text-slate-500">RDG will not force preseason or weaker games into this card.</p></div> : <div className="mt-6 space-y-3">{candidates.map((c,i)=><div key={c.event_id} className="rounded-lg border border-white/10 bg-black/20 p-4"><p className="text-[10px] font-bold uppercase text-slate-500">{required > 1 ? `LEG ${i+1}` : c.signal}</p><div className="mt-1 flex justify-between gap-4"><div><p className="text-lg font-bold">{c.display_bet}</p><p className="text-xs text-slate-500">{c.matchup}</p></div><div className="text-right"><p className="font-bold text-green-400">{c.edge.toFixed(1)}%</p><p className="text-[10px] uppercase text-slate-500">Model vs Market</p></div></div><p className="mt-3 text-xs text-slate-500">Model {c.model_probability.toFixed(1)}% • Hard Rock {c.odds || "—"}</p></div>)}</div>}</article>;
+  return <article className="rounded-xl border border-green-500/20 bg-white/[0.04] p-6"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-widest text-green-400">{subtitle}</p><h3 className="mt-2 text-xl font-bold">{title}</h3></div><span className={qualified ? "rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-bold text-green-400" : "rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-400"}>{qualified ? "QUALIFIED" : "NOT ENOUGH LEGS"}</span></div>{candidates.length === 0 ? <div className="mt-6 rounded-lg border border-white/10 bg-black/20 p-4"><p className="font-bold">No qualifying selection</p><p className="mt-2 text-xs text-slate-500">RDG will not force preseason or weaker games into this card.</p></div> : <div className="mt-6 space-y-3">{candidates.map((c,i)=><div key={c.event_id} className="rounded-lg border border-white/10 bg-black/20 p-4"><p className="text-[10px] font-bold uppercase text-slate-500">{required > 1 ? `LEG ${i+1}` : c.signal}</p><div className="mt-1 flex justify-between gap-4"><div><div className="flex items-center gap-3"><TeamLogo sport="NHL" team={c.team} /><p className="text-lg font-bold">{c.display_bet}</p></div><p className="text-xs text-slate-500">{c.matchup}</p></div><div className="text-right"><p className="font-bold text-green-400">{c.edge.toFixed(1)}%</p><p className="text-[10px] uppercase text-slate-500">Model vs Market</p></div></div><p className="mt-3 text-xs text-slate-500">Model {c.model_probability.toFixed(1)}% • Hard Rock {c.odds || "—"}</p></div>)}</div>}</article>;
 }
 
 function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading: boolean; error: string }) {
@@ -1987,12 +2058,12 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
   );
 
   const bestStraight = stricter[0] ?? broader[0] ?? null;
-  const twoLeg = stricter.slice(0, 2);
-  const threeLeg = broader.slice(0, 3);
-  const fourLeg = broader.slice(0, 4);
-  const fiveLeg = broader.slice(0, 5);
-  const sixLeg = broader.slice(0, 6);
-  const eightLeg = broader.slice(0, 8);
+  const twoLeg = diversifiedSelection(stricter, 2, 0, 1);
+  const threeLeg = diversifiedSelection(broader, 3, 1, 2);
+  const fourLeg = diversifiedSelection(broader, 4, 2, 3);
+  const fiveLeg = diversifiedSelection(broader, 5, 0, 2);
+  const sixLeg = diversifiedSelection(broader, 6, 1, 3);
+  const eightLeg = diversifiedSelection(broader, 8, 3, 5);
 
   return (
     <div>
@@ -2183,9 +2254,12 @@ function MLBBuilderCard({
                       LEG {index + 1}
                     </p>
                   )}
-                  <p className="mt-1 text-lg font-bold">
-                    {candidate.display_bet} {candidate.odds || ""}
-                  </p>
+                  <div className="mt-1 flex items-center gap-3">
+                    <TeamLogo sport="MLB" team={candidate.team} />
+                    <p className="text-lg font-bold">
+                      {candidate.display_bet} {candidate.odds || ""}
+                    </p>
+                  </div>
                   <p className="mt-1 text-xs text-slate-500">
                     {candidate.matchup} • Starter: {candidate.starter}
                   </p>
@@ -2259,9 +2333,13 @@ function MLBGameCard({ game }: { game: MLBGame }) {
           <p className="text-xs font-bold uppercase tracking-widest text-green-400">
             {rdg?.signal || "Pass"}
           </p>
-          <h3 className="mt-2 text-xl font-bold">
-            {game.away_team} @ {game.home_team}
-          </h3>
+          <div className="mt-2 flex items-center gap-2">
+            <TeamLogo sport="MLB" team={game.away_team} />
+            <span className="text-xl font-bold">{game.away_team}</span>
+            <span className="text-slate-500">@</span>
+            <TeamLogo sport="MLB" team={game.home_team} />
+            <span className="text-xl font-bold">{game.home_team}</span>
+          </div>
           <p className="mt-1 text-xs text-slate-500">
             {time} • {game.venue || "MLB"}
           </p>
@@ -2300,9 +2378,12 @@ function MLBBoardRow({ game }: { game: MLBGame }) {
   return (
     <div className="grid gap-3 rounded-lg border border-white/10 bg-white/[0.03] p-4 md:grid-cols-5 md:items-center">
       <div>
-        <p className="font-bold">
-          {game.away_team} @ {game.home_team}
-        </p>
+        <div className="flex items-center gap-2 font-bold">
+          <TeamLogo sport="MLB" team={game.away_team} />
+          <span>{game.away_team}</span><span className="text-slate-500">@</span>
+          <TeamLogo sport="MLB" team={game.home_team} />
+          <span>{game.home_team}</span>
+        </div>
         <p className="mt-1 text-xs text-slate-500">{rdg?.signal || "Pass"}</p>
       </div>
 
