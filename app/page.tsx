@@ -172,6 +172,19 @@ type MLBAnalysis = {
   games_found: number; priority_reviews: number; strong_reviews: number; watch_reviews: number; updated_at: string; games: MLBGame[];
 };
 
+type MLBBetCandidate = {
+  event_id: string;
+  matchup: string;
+  team: string;
+  odds: string | null;
+  display_bet: string;
+  model_probability: number;
+  market_probability: number | null;
+  edge: number;
+  signal: string;
+  starter: string;
+};
+
 type BetCandidate = {
   event_id: string;
   matchup: string;
@@ -1687,6 +1700,71 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
 
   const reviews = ranked.filter((game) => game.rdg?.signal !== "Pass");
 
+  const candidates: MLBBetCandidate[] = ranked
+    .map((game) => {
+      const lean = game.rdg?.moneyline_lean || game.rdg?.projected_winner;
+      if (!lean || game.rdg?.signal === "Pass") return null;
+
+      const isHome = lean === game.home_team;
+      const isAway = lean === game.away_team;
+      if (!isHome && !isAway) return null;
+
+      const modelProbability = isHome
+        ? game.rdg.model_home_probability
+        : game.rdg.model_away_probability;
+
+      const marketProbability = isHome
+        ? game.hard_rock?.moneyline?.no_vig_home_probability
+        : game.hard_rock?.moneyline?.no_vig_away_probability;
+
+      const odds = isHome
+        ? game.hard_rock?.moneyline?.home_odds
+        : game.hard_rock?.moneyline?.away_odds;
+
+      const starter = isHome
+        ? game.starting_pitchers?.home?.name
+        : game.starting_pitchers?.away?.name;
+
+      return {
+        event_id: game.event_id,
+        matchup: `${game.away_team} @ ${game.home_team}`,
+        team: lean,
+        odds: odds ?? null,
+        display_bet: `${lean} ML`,
+        model_probability: Number(modelProbability ?? 0),
+        market_probability:
+          typeof marketProbability === "number" ? marketProbability : null,
+        edge: Number(game.rdg?.model_market_edge ?? 0),
+        signal: game.rdg?.signal || "Pass",
+        starter: starter || "TBD",
+      } as MLBBetCandidate;
+    })
+    .filter((candidate): candidate is MLBBetCandidate => candidate !== null)
+    .sort((a, b) => {
+      const signalDiff = (priority[b.signal] || 0) - (priority[a.signal] || 0);
+      if (signalDiff !== 0) return signalDiff;
+      return b.edge - a.edge;
+    });
+
+  // These are review tiers, not guaranteed or historically validated betting probabilities.
+  const stricter = candidates.filter(
+    (candidate) =>
+      candidate.signal === "Priority Review" ||
+      candidate.signal === "Strong Review"
+  );
+
+  const broader = candidates.filter(
+    (candidate) =>
+      candidate.signal === "Priority Review" ||
+      candidate.signal === "Strong Review" ||
+      candidate.signal === "Watch"
+  );
+
+  const bestStraight = stricter[0] ?? broader[0] ?? null;
+  const twoLeg = stricter.slice(0, 2);
+  const threeLeg = broader.slice(0, 3);
+  const fourLeg = broader.slice(0, 4);
+
   return (
     <div>
       <p className="text-xs font-bold uppercase tracking-[0.25em] text-green-400">
@@ -1739,6 +1817,49 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
             </div>
           )}
 
+          <div className="mt-14 border-t border-white/10 pt-10">
+            <p className="text-xs font-bold uppercase tracking-[0.25em] text-green-400">
+              RDG MLB BET BUILDER
+            </p>
+            <h2 className="mt-3 text-3xl font-bold">
+              Today&apos;s MLB Model Selections
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm text-slate-400">
+              Built from current Hard Rock moneylines and RDG model/market review signals. RDG will not add Pass-rated games just to fill a card.
+            </p>
+          </div>
+
+          <section className="mt-8 grid gap-5 lg:grid-cols-2">
+            <MLBBuilderCard
+              title="BEST STRAIGHT"
+              subtitle="Stricter MLB Filter"
+              candidates={bestStraight ? [bestStraight] : []}
+              required={1}
+            />
+            <MLBBuilderCard
+              title="STRONGER 2-LEG"
+              subtitle="Priority + Strong Reviews"
+              candidates={twoLeg}
+              required={2}
+            />
+            <MLBBuilderCard
+              title="BALANCED 3-LEG"
+              subtitle="Review Signals"
+              candidates={threeLeg}
+              required={3}
+            />
+            <MLBBuilderCard
+              title="WIDER 4-LEG"
+              subtitle="Includes Watch Reviews"
+              candidates={fourLeg}
+              required={4}
+            />
+          </section>
+
+          <div className="mt-5 rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 text-xs text-slate-400">
+            MLB builder selections are model review signals, not guaranteed outcomes. The calibrated team model was evaluated on 2025 data, while the live starting-pitcher adjustment remains experimental.
+          </div>
+
           <div className="mt-12 border-t border-white/10 pt-10">
             <p className="text-xs font-bold uppercase tracking-[0.25em] text-slate-500">
               FULL MLB BOARD
@@ -1757,6 +1878,111 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
         </>
       )}
     </div>
+  );
+}
+
+function MLBBuilderCard({
+  title,
+  subtitle,
+  candidates,
+  required,
+}: {
+  title: string;
+  subtitle: string;
+  candidates: MLBBetCandidate[];
+  required: number;
+}) {
+  const qualified = candidates.length >= required;
+
+  return (
+    <article className="rounded-xl border border-green-500/20 bg-white/[0.04] p-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-widest text-green-400">
+            {subtitle}
+          </p>
+          <h3 className="mt-2 text-xl font-bold">{title}</h3>
+        </div>
+
+        <span
+          className={
+            qualified
+              ? "rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-bold text-green-400"
+              : "rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-400"
+          }
+        >
+          {qualified ? "QUALIFIED" : "NOT ENOUGH LEGS"}
+        </span>
+      </div>
+
+      {candidates.length === 0 ? (
+        <div className="mt-6 rounded-lg border border-white/10 bg-black/20 p-4">
+          <p className="font-bold">No qualifying selection</p>
+          <p className="mt-2 text-xs text-slate-500">
+            RDG will not force a Pass-rated MLB game into this tier.
+          </p>
+        </div>
+      ) : (
+        <div className="mt-6 space-y-3">
+          {candidates.map((candidate, index) => (
+            <div
+              key={`${candidate.event_id}-${candidate.team}-${index}`}
+              className="rounded-lg border border-white/10 bg-black/20 p-4"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  {required > 1 && (
+                    <p className="text-[10px] font-bold uppercase text-slate-500">
+                      LEG {index + 1}
+                    </p>
+                  )}
+                  <p className="mt-1 text-lg font-bold">
+                    {candidate.display_bet} {candidate.odds || ""}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {candidate.matchup} • Starter: {candidate.starter}
+                  </p>
+                </div>
+
+                <div className="text-right">
+                  <p className="font-bold text-green-400">
+                    {candidate.edge.toFixed(1)}%
+                  </p>
+                  <p className="mt-1 text-[10px] uppercase text-slate-500">
+                    Model vs Market
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <MiniStat
+                  title="RDG MODEL"
+                  value={`${candidate.model_probability.toFixed(1)}%`}
+                />
+                <MiniStat
+                  title="NO-VIG MARKET"
+                  value={
+                    candidate.market_probability !== null
+                      ? `${candidate.market_probability.toFixed(1)}%`
+                      : "—"
+                  }
+                />
+              </div>
+
+              <p className="mt-3 text-xs text-slate-500">
+                {candidate.signal}. Live pitcher adjustment is experimental.
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!qualified && candidates.length > 0 && (
+        <p className="mt-4 text-xs text-amber-400">
+          Only {candidates.length} of {required} required legs currently qualify. RDG did not fill the remaining spots with Pass-rated games.
+        </p>
+      )}
+    </article>
   );
 }
 
