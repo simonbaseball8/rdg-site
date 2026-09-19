@@ -140,6 +140,38 @@ type CFBAnalysis = {
   updated_at: string;
   games: CFBGame[];
 };
+type MLBGame = {
+  event_id: string;
+  game_pk: number | null;
+  start_date: string;
+  away_team: string;
+  home_team: string;
+  venue: string | null;
+  hard_rock: {
+    moneyline: { away_odds: string | null; home_odds: string | null; no_vig_away_probability: number; no_vig_home_probability: number; };
+    run_line: { away_line: number | null; away_odds: string | null; home_line: number | null; home_odds: string | null; };
+    total: { over: number | null; over_odds: string | null; under: number | null; under_odds: string | null; };
+  };
+  starting_pitchers: {
+    away: { name: string; stats: { era: number | null; whip: number | null; innings: number | null } | null; pitcher_score: number | null } | null;
+    home: { name: string; stats: { era: number | null; whip: number | null; innings: number | null } | null; pitcher_score: number | null } | null;
+  };
+  rdg: {
+    calibrated_team_home_probability: number;
+    model_home_probability: number;
+    model_away_probability: number;
+    projected_winner: string;
+    moneyline_lean: string;
+    model_market_edge: number;
+    signal: string;
+  };
+};
+
+type MLBAnalysis = {
+  sportsbook: string; sport: string; season: number; model: string; version: string; model_status: string;
+  games_found: number; priority_reviews: number; strong_reviews: number; watch_reviews: number; updated_at: string; games: MLBGame[];
+};
+
 type BetCandidate = {
   event_id: string;
   matchup: string;
@@ -171,7 +203,7 @@ export default function Home() {
   const [nflError, setNflError] =
     useState("");
 const [activeSport, setActiveSport] =
-  useState<"NFL" | "CFB">("NFL");
+  useState<"NFL" | "CFB" | "MLB">("NFL");
 
 const [cfb, setCfb] =
   useState<CFBAnalysis | null>(null);
@@ -181,6 +213,10 @@ const [cfbLoading, setCfbLoading] =
 
 const [cfbError, setCfbError] =
   useState("");
+
+  const [mlb, setMlb] = useState<MLBAnalysis | null>(null);
+  const [mlbLoading, setMlbLoading] = useState(true);
+  const [mlbError, setMlbError] = useState("");
   useEffect(() => {
     async function loadParlays() {
       const { data, error } = await supabase
@@ -269,9 +305,23 @@ const [cfbError, setCfbError] =
       }
     }
 
+    async function loadMLB() {
+      try {
+        const response = await fetch("/api/mlb-picks", { cache: "no-store" });
+        if (!response.ok) throw new Error(`MLB analysis failed: ${response.status}`);
+        setMlb(await response.json());
+      } catch (err) {
+        console.error(err);
+        setMlbError(err instanceof Error ? err.message : "MLB analysis failed");
+      } finally {
+        setMlbLoading(false);
+      }
+    }
+
     loadParlays();
     loadNFL();
     loadCFB();
+    loadMLB();
   }, []);
 
   const activeParlays =
@@ -578,7 +628,17 @@ const [cfbError, setCfbError] =
   >
     COLLEGE FOOTBALL
   </button>
+
+  <button
+    onClick={() => setActiveSport("MLB")}
+    className={activeSport === "MLB" ? "rounded-lg bg-green-500 px-5 py-3 text-sm font-bold text-black" : "rounded-lg border border-white/10 bg-white/[0.03] px-5 py-3 text-sm font-bold text-slate-400"}
+  >
+    MLB
+  </button>
 </div>
+        {activeSport === "MLB" && (
+          <MLBSection mlb={mlb} loading={mlbLoading} error={mlbError} />
+        )}
         {activeSport === "CFB" && (
   <div>
     <p className="text-xs font-bold uppercase tracking-[0.25em] text-green-400">
@@ -1610,6 +1670,51 @@ function NFLBoardRow({
   );
 }
 
+function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading: boolean; error: string }) {
+  const ranked = [...(mlb?.games || [])].sort((a, b) => {
+    const priority: Record<string, number> = { "Priority Review": 4, "Strong Review": 3, Watch: 2, Pass: 1 };
+    return (priority[b.rdg.signal] || 0) - (priority[a.rdg.signal] || 0) || b.rdg.model_market_edge - a.rdg.model_market_edge;
+  });
+  const reviews = ranked.filter((g) => g.rdg.signal !== "Pass");
+  return (
+    <div>
+      <p className="text-xs font-bold uppercase tracking-[0.25em] text-green-400">RDG MLB MODEL • v1.1 CALIBRATED</p>
+      <h2 className="mt-3 text-3xl font-bold">Live MLB Analysis</h2>
+      <p className="mt-2 text-sm text-slate-400">Calibrated RDG team probabilities with a conservative experimental starting-pitcher adjustment, compared with current Hard Rock Bet moneylines.</p>
+      <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-300">The calibrated team model was evaluated on 2025 data. The live pitcher adjustment is still experimental. Model probabilities are not guarantees or evidence of profitability.</div>
+      <section className="mt-8 grid gap-4 md:grid-cols-4">
+        <Stat title="MLB GAMES" value={mlb ? String(mlb.games_found) : "—"} />
+        <Stat title="PRIORITY REVIEWS" value={mlb ? String(mlb.priority_reviews) : "—"} />
+        <Stat title="STRONG REVIEWS" value={mlb ? String(mlb.strong_reviews) : "—"} />
+        <Stat title="WATCH REVIEWS" value={mlb ? String(mlb.watch_reviews) : "—"} />
+      </section>
+      {loading && <div className="mt-8 rounded-xl border border-white/10 bg-white/[0.03] p-6">Running RDG MLB model...</div>}
+      {error && <div className="mt-8 rounded-xl border border-red-500/30 bg-red-500/10 p-6 text-red-400">MLB model error: {error}</div>}
+      {!loading && !error && mlb && (<>
+        <section className="mt-8 grid gap-5 lg:grid-cols-2">{reviews.map((game) => <MLBGameCard key={`${game.event_id}-${game.game_pk ?? "x"}`} game={game} />)}</section>
+        <div className="mt-12 border-t border-white/10 pt-10"><p className="text-xs font-bold uppercase tracking-[0.25em] text-slate-500">FULL MLB BOARD</p><h2 className="mt-3 text-2xl font-bold">All Games</h2></div>
+        <section className="mt-6 space-y-3">{ranked.map((game) => <MLBBoardRow key={`${game.event_id}-${game.game_pk ?? "x"}`} game={game} />)}</section>
+      </>)}
+    </div>
+  );
+}
+
+function MLBGameCard({ game }: { game: MLBGame }) {
+  const leanHome = game.rdg.moneyline_lean === game.home_team;
+  const odds = leanHome ? game.hard_rock.moneyline.home_odds : game.hard_rock.moneyline.away_odds;
+  const probability = leanHome ? game.rdg.model_home_probability : game.rdg.model_away_probability;
+  const time = new Date(game.start_date).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  return <article className="rounded-xl border border-green-500/20 bg-white/[0.04] p-6">
+    <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-widest text-green-400">{game.rdg.signal}</p><h3 className="mt-2 text-xl font-bold">{game.away_team} @ {game.home_team}</h3><p className="mt-1 text-xs text-slate-500">{time} • {game.venue || "MLB"}</p></div><span className="rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-bold text-green-400">{game.rdg.model_market_edge.toFixed(1)}% EDGE</span></div>
+    <div className="mt-6 grid grid-cols-2 gap-3"><MiniStat title="RDG LEAN" value={`${game.rdg.moneyline_lean} ${odds || ""}`} /><MiniStat title="RDG MODEL" value={`${probability.toFixed(1)}%`} /><MiniStat title="AWAY STARTER" value={game.starting_pitchers.away?.name || "TBD"} /><MiniStat title="HOME STARTER" value={game.starting_pitchers.home?.name || "TBD"} /></div>
+    <div className="mt-4 grid grid-cols-2 gap-3"><MiniStat title={`${game.away_team} HARD ROCK`} value={game.hard_rock.moneyline.away_odds || "—"} /><MiniStat title={`${game.home_team} HARD ROCK`} value={game.hard_rock.moneyline.home_odds || "—"} /></div>
+  </article>;
+}
+
+function MLBBoardRow({ game }: { game: MLBGame }) {
+  return <div className="grid gap-3 rounded-lg border border-white/10 bg-white/[0.03] p-4 md:grid-cols-5 md:items-center"><div><p className="font-bold">{game.away_team} @ {game.home_team}</p><p className="mt-1 text-xs text-slate-500">{game.rdg.signal}</p></div><BoardValue title="RDG WINNER" value={game.rdg.projected_winner} /><BoardValue title="MONEYLINE LEAN" value={game.rdg.moneyline_lean} /><BoardValue title="MODEL PROBABILITY" value={`${(game.rdg.moneyline_lean === game.home_team ? game.rdg.model_home_probability : game.rdg.model_away_probability).toFixed(1)}%`} /><BoardValue title="MODEL VS MARKET" value={`${game.rdg.model_market_edge.toFixed(1)}%`} /></div>;
+}
+
 function Stat({
   title,
   value,
@@ -1707,13 +1812,13 @@ function formatSpread(
 
   const graded = picks.filter(
     (pick) =>
-      pick.status === "win" ||
-      pick.status === "loss" ||
+      pick.status === "won" ||
+      pick.status === "lost" ||
       pick.status === "push"
   );
 
-  const wins = graded.filter((pick) => pick.status === "win").length;
-  const losses = graded.filter((pick) => pick.status === "loss").length;
+  const wins = graded.filter((pick) => pick.status === "won").length;
+  const losses = graded.filter((pick) => pick.status === "lost").length;
   const pushes = graded.filter((pick) => pick.status === "push").length;
 
   const decisions = wins + losses;
@@ -1722,8 +1827,8 @@ function formatSpread(
 
   const tierRecord = (tier: string) => {
     const rows = graded.filter((pick) => pick.tier === tier);
-    const w = rows.filter((pick) => pick.status === "win").length;
-    const l = rows.filter((pick) => pick.status === "loss").length;
+    const w = rows.filter((pick) => pick.status === "won").length;
+    const l = rows.filter((pick) => pick.status === "lost").length;
     const p = rows.filter((pick) => pick.status === "push").length;
 
     return `${w}-${l}-${p}`;
