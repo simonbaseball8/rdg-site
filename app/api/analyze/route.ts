@@ -2,58 +2,79 @@ import { NextResponse } from "next/server";
 
 function normalizeTeam(team: string) {
   const teamMap: Record<string, string> = {
-    ARI: "ARI",
-    ATL: "ATL",
-    BAL: "BAL",
-    BUF: "BUF",
-    CAR: "CAR",
-    CHI: "CHI",
-    CIN: "CIN",
+ const teamMap: Record<string, string> = {
+  ARI: "ARI",
+  CRD: "ARI",
 
-    CLV: "CLE",
-    CLE: "CLE",
+  ATL: "ATL",
 
-    DAL: "DAL",
-    DEN: "DEN",
+  BAL: "BAL",
+  RAV: "BAL",
 
-    DET: "DET",
+  BUF: "BUF",
+  CAR: "CAR",
+  CHI: "CHI",
+  CIN: "CIN",
 
-    GB: "GB",
+  CLE: "CLE",
+  CLV: "CLE",
 
-    HTX: "HOU",
-    HOU: "HOU",
+  DAL: "DAL",
+  DEN: "DEN",
+  DET: "DET",
 
-    CLT: "IND",
-    IND: "IND",
+  GB: "GB",
+  GNB: "GB",
 
-    JAX: "JAX",
+  HOU: "HOU",
+  HTX: "HOU",
 
-    KAN: "KC",
-    KC: "KC",
+  IND: "IND",
+  CLT: "IND",
 
-    LAC: "LAC",
-    LAR: "LA",
-    LA: "LA",
+  JAX: "JAX",
 
-    LV: "LV",
-    MIA: "MIA",
-    MIN: "MIN",
-    NE: "NE",
-    NO: "NO",
+  KC: "KC",
+  KAN: "KC",
 
-    NYG: "NYG",
-    NYJ: "NYJ",
+  LAC: "LAC",
+  SDG: "LAC",
 
-    PHI: "PHI",
-    PIT: "PIT",
+  LA: "LA",
+  LAR: "LA",
+  RAM: "LA",
 
-    SEA: "SEA",
-    SF: "SF",
-    TB: "TB",
-    TEN: "TEN",
+  LV: "LV",
+  RAI: "LV",
 
-    WAS: "WAS",
-  };
+  MIA: "MIA",
+  MIN: "MIN",
+
+  NE: "NE",
+  NWE: "NE",
+
+  NO: "NO",
+  NOR: "NO",
+
+  NYG: "NYG",
+  NYJ: "NYJ",
+
+  PHI: "PHI",
+  PIT: "PIT",
+
+  SEA: "SEA",
+
+  SF: "SF",
+  SFO: "SF",
+
+  TB: "TB",
+  TAM: "TB",
+
+  TEN: "TEN",
+  OTI: "TEN",
+
+  WAS: "WAS",
+};
 
   return teamMap[team] ?? team;
 }
