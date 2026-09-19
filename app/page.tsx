@@ -94,14 +94,36 @@ type NFLAnalysis = {
   games: NFLGame[];
 };
 
+type BetCandidate = {
+  event_id: string;
+  matchup: string;
+  team: string;
+  line: number;
+  odds: string | null;
+  display_bet: string;
+  projected_winner: string;
+  projected_margin: number;
+  difference: number;
+  historical_accuracy: number;
+  historical_sample: number;
+  historical_correct: number;
+  historical_bucket: string;
+  score: number;
+};
+
 export default function Home() {
   const [parlays, setParlays] = useState<Parlay[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const [nfl, setNfl] = useState<NFLAnalysis | null>(null);
-  const [nflLoading, setNflLoading] = useState(true);
-  const [nflError, setNflError] = useState("");
+  const [nfl, setNfl] =
+    useState<NFLAnalysis | null>(null);
+
+  const [nflLoading, setNflLoading] =
+    useState(true);
+
+  const [nflError, setNflError] =
+    useState("");
 
   useEffect(() => {
     async function loadParlays() {
@@ -111,13 +133,17 @@ export default function Home() {
           *,
           parlay_legs (*)
         `)
-        .order("created_at", { ascending: false });
+        .order("created_at", {
+          ascending: false,
+        });
 
       if (error) {
         console.error(error);
         setError(error.message);
       } else {
-        setParlays((data as Parlay[]) || []);
+        setParlays(
+          (data as Parlay[]) || []
+        );
       }
 
       setLoading(false);
@@ -125,9 +151,12 @@ export default function Home() {
 
     async function loadNFL() {
       try {
-        const response = await fetch("/api/analyze", {
-          cache: "no-store",
-        });
+        const response = await fetch(
+          "/api/analyze",
+          {
+            cache: "no-store",
+          }
+        );
 
         if (!response.ok) {
           throw new Error(
@@ -135,7 +164,9 @@ export default function Home() {
           );
         }
 
-        const data = await response.json();
+        const data =
+          await response.json();
+
         setNfl(data);
       } catch (err) {
         console.error(err);
@@ -154,12 +185,17 @@ export default function Home() {
     loadNFL();
   }, []);
 
-  const activeParlays = parlays.filter(
-    (parlay) => parlay.status === "pending"
-  );
+  const activeParlays =
+    parlays.filter(
+      (parlay) =>
+        parlay.status === "pending"
+    );
 
-  const rankedGames = [...(nfl?.games || [])].sort((a, b) => {
-    const priority: Record<string, number> = {
+  const rankedGames = [
+    ...(nfl?.games || []),
+  ].sort((a, b) => {
+    const priority:
+      Record<string, number> = {
       "Priority Review": 4,
       "Strong Review": 3,
       Watch: 2,
@@ -167,10 +203,16 @@ export default function Home() {
     };
 
     const aSignal =
-      priority[a.rdg.market_analysis.market_signal] || 0;
+      priority[
+        a.rdg.market_analysis
+          .market_signal
+      ] || 0;
 
     const bSignal =
-      priority[b.rdg.market_analysis.market_signal] || 0;
+      priority[
+        b.rdg.market_analysis
+          .market_signal
+      ] || 0;
 
     if (aSignal !== bSignal) {
       return bSignal - aSignal;
@@ -178,18 +220,223 @@ export default function Home() {
 
     return (
       Math.abs(
-        b.rdg.market_analysis.model_vs_market_difference || 0
+        b.rdg.market_analysis
+          .model_vs_market_difference ||
+          0
       ) -
       Math.abs(
-        a.rdg.market_analysis.model_vs_market_difference || 0
+        a.rdg.market_analysis
+          .model_vs_market_difference ||
+          0
       )
     );
   });
 
-  const reviewGames = rankedGames.filter(
-    (game) =>
-      game.rdg.market_analysis.market_signal !== "Pass"
-  );
+  const reviewGames =
+    rankedGames.filter(
+      (game) =>
+        game.rdg.market_analysis
+          .market_signal !== "Pass"
+    );
+
+  /*
+    RDG BET BUILDER
+
+    This uses the NFL analysis already
+    loaded by the page.
+
+    It does NOT make another Oddize
+    request.
+  */
+
+  const candidates: BetCandidate[] =
+    rankedGames
+      .map((game) => {
+        if (!game.stats_connected) {
+          return null;
+        }
+
+        const market =
+          game.rdg.market_analysis;
+
+        const historical =
+          game.rdg.historical_signal;
+
+        const difference =
+          market.model_vs_market_difference;
+
+        if (difference === null) {
+          return null;
+        }
+
+        const edge =
+          Math.abs(difference);
+
+        if (edge < 2) {
+          return null;
+        }
+
+        const team =
+          market.spread_lean;
+
+        const isHome =
+          team === game.home_team;
+
+        const isAway =
+          team === game.away_team;
+
+        if (!isHome && !isAway) {
+          return null;
+        }
+
+        const line = isHome
+          ? market.hard_rock_spread
+              .home_line
+          : market.hard_rock_spread
+              .away_line;
+
+        const odds = isHome
+          ? market.hard_rock_spread
+              .home_odds
+          : market.hard_rock_spread
+              .away_odds;
+
+        if (line === null) {
+          return null;
+        }
+
+        let score = edge * 10;
+
+        if (
+          historical
+            .historical_winner_accuracy >=
+          70
+        ) {
+          score += 10;
+        } else if (
+          historical
+            .historical_winner_accuracy >=
+          60
+        ) {
+          score += 6;
+        } else if (
+          historical
+            .historical_winner_accuracy >=
+          55
+        ) {
+          score += 3;
+        }
+
+        if (
+          historical.sample >= 30
+        ) {
+          score += 3;
+        }
+
+        if (
+          game.rdg.projected_winner ===
+          team
+        ) {
+          score += 4;
+        }
+
+        return {
+          event_id: game.event_id,
+
+          matchup:
+            `${game.away_team} @ ${game.home_team}`,
+
+          team,
+
+          line,
+
+          odds,
+
+          display_bet:
+            `${team} ${formatSpread(
+              line
+            )}`,
+
+          projected_winner:
+            game.rdg
+              .projected_winner,
+
+          projected_margin:
+            game.rdg
+              .projected_margin,
+
+          difference:
+            Number(
+              edge.toFixed(2)
+            ),
+
+          historical_accuracy:
+            historical
+              .historical_winner_accuracy,
+
+          historical_sample:
+            historical.sample,
+
+          historical_correct:
+            historical.correct,
+
+          historical_bucket:
+            historical.bucket,
+
+          score:
+            Number(
+              score.toFixed(2)
+            ),
+        } as BetCandidate;
+      })
+      .filter(
+        (
+          candidate
+        ): candidate is BetCandidate =>
+          candidate !== null
+      )
+      .sort(
+        (a, b) =>
+          b.score - a.score
+      );
+
+  const saferCandidates =
+    candidates.filter(
+      (candidate) =>
+        candidate.difference >= 3.5 &&
+        candidate.historical_accuracy >=
+          55 &&
+        candidate.historical_sample >=
+          30
+    );
+
+  const balancedCandidates =
+    candidates.filter(
+      (candidate) =>
+        candidate.difference >= 3 &&
+        candidate.historical_sample >=
+          30
+    );
+
+  const higherRiskCandidates =
+    candidates.filter(
+      (candidate) =>
+        candidate.difference >= 2
+    );
+
+  const bestStraight =
+    saferCandidates.length > 0
+      ? saferCandidates[0]
+      : null;
+
+  const saferTwoLeg =
+    saferCandidates.slice(0, 2);
+
+  const balancedThreeLeg =
+    balancedCandidates.slice(0, 3);
+
+  const higherRiskFourLeg =
+    higherRiskCandidates.slice(0, 4);
 
   return (
     <main className="min-h-screen bg-[#020806] text-white">
@@ -202,11 +449,13 @@ export default function Home() {
 
             <div>
               <h1 className="font-bold uppercase tracking-wide">
-                Responsible Degenerate Gambling
+                Responsible Degenerate
+                Gambling
               </h1>
 
               <p className="text-xs uppercase text-slate-500">
-                Data-Driven Betting Dashboard
+                Data-Driven Betting
+                Dashboard
               </p>
             </div>
           </div>
@@ -227,23 +476,43 @@ export default function Home() {
         </h2>
 
         <p className="mt-2 text-sm text-slate-400">
-          RDG projections compared against current Hard Rock Bet lines.
+          RDG projections compared
+          against current Hard Rock Bet
+          lines.
         </p>
 
         <section className="mt-8 grid gap-4 md:grid-cols-4">
           <Stat
             title="NFL GAMES"
-            value={nfl ? String(nfl.games_found) : "—"}
+            value={
+              nfl
+                ? String(
+                    nfl.games_found
+                  )
+                : "—"
+            }
           />
 
           <Stat
             title="PRIORITY"
-            value={nfl ? String(nfl.priority_reviews) : "—"}
+            value={
+              nfl
+                ? String(
+                    nfl.priority_reviews
+                  )
+                : "—"
+            }
           />
 
           <Stat
             title="STRONG REVIEWS"
-            value={nfl ? String(nfl.strong_reviews) : "—"}
+            value={
+              nfl
+                ? String(
+                    nfl.strong_reviews
+                  )
+                : "—"
+            }
           />
 
           <Stat
@@ -264,32 +533,124 @@ export default function Home() {
 
         {nflError && (
           <div className="mt-8 rounded-xl border border-red-500/30 bg-red-500/10 p-6 text-red-400">
-            NFL model error: {nflError}
+            NFL model error:{" "}
+            {nflError}
           </div>
         )}
 
         {!nflLoading &&
           !nflError &&
-          reviewGames.length === 0 && (
+          reviewGames.length ===
+            0 && (
             <div className="mt-8 rounded-xl border border-white/10 bg-white/[0.03] p-6">
               <p className="font-bold">
-                No notable model/market differences right now.
+                No notable model/market
+                differences right now.
               </p>
 
               <p className="mt-2 text-sm text-slate-500">
-                Hard Rock lines may change throughout the day.
+                Hard Rock lines may
+                change throughout the
+                day.
               </p>
             </div>
           )}
 
         <section className="mt-8 grid gap-5 lg:grid-cols-2">
-          {reviewGames.map((game) => (
-            <NFLGameCard
-              key={game.event_id}
-              game={game}
-            />
-          ))}
+          {reviewGames.map(
+            (game) => (
+              <NFLGameCard
+                key={game.event_id}
+                game={game}
+              />
+            )
+          )}
         </section>
+
+        {/* BET BUILDER */}
+
+        {!nflLoading &&
+          !nflError &&
+          nfl && (
+            <>
+              <div className="mt-14 border-t border-white/10 pt-10">
+                <p className="text-xs font-bold uppercase tracking-[0.25em] text-green-400">
+                  RDG AUTOMATIC BET
+                  BUILDER
+                </p>
+
+                <h2 className="mt-3 text-3xl font-bold">
+                  Today&apos;s Model
+                  Selections
+                </h2>
+
+                <p className="mt-2 max-w-3xl text-sm text-slate-400">
+                  Automatically built
+                  from RDG projections
+                  and current Hard Rock
+                  Bet spreads. RDG will
+                  not force weaker bets
+                  into a parlay.
+                </p>
+              </div>
+
+              <section className="mt-8 grid gap-5 lg:grid-cols-2">
+                <BuilderCard
+                  title="BEST STRAIGHT"
+                  subtitle="Stricter RDG Filter"
+                  candidates={
+                    bestStraight
+                      ? [bestStraight]
+                      : []
+                  }
+                  required={1}
+                />
+
+                <BuilderCard
+                  title="SAFER 2-LEG"
+                  subtitle="Stricter Filter"
+                  candidates={
+                    saferTwoLeg
+                  }
+                  required={2}
+                />
+
+                <BuilderCard
+                  title="BALANCED 3-LEG"
+                  subtitle="Balanced Filter"
+                  candidates={
+                    balancedThreeLeg
+                  }
+                  required={3}
+                />
+
+                <BuilderCard
+                  title="HIGHER-RISK 4-LEG"
+                  subtitle="Wider RDG Filter"
+                  candidates={
+                    higherRiskFourLeg
+                  }
+                  required={4}
+                />
+              </section>
+
+              <div className="mt-5 rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 text-xs text-slate-400">
+                Historical percentages
+                shown by RDG describe
+                straight-up model
+                performance within
+                historical
+                projected-margin
+                buckets. They are not
+                the probability or
+                expected profitability
+                of an individual spread
+                wager.
+              </div>
+            </>
+          )}
+
+        {/* FULL NFL BOARD */}
 
         {rankedGames.length > 0 && (
           <>
@@ -304,15 +665,21 @@ export default function Home() {
             </div>
 
             <section className="mt-6 space-y-3">
-              {rankedGames.map((game) => (
-                <NFLBoardRow
-                  key={game.event_id}
-                  game={game}
-                />
-              ))}
+              {rankedGames.map(
+                (game) => (
+                  <NFLBoardRow
+                    key={
+                      game.event_id
+                    }
+                    game={game}
+                  />
+                )
+              )}
             </section>
           </>
         )}
+
+        {/* TRACKED SLIPS */}
 
         <div className="mt-14 border-t border-white/10 pt-10">
           <p className="text-xs font-bold uppercase tracking-[0.25em] text-green-400">
@@ -324,14 +691,17 @@ export default function Home() {
           </h2>
 
           <p className="mt-2 text-sm text-slate-400">
-            Saved parlays and betting research from Supabase.
+            Saved parlays and betting
+            research from Supabase.
           </p>
         </div>
 
         <section className="mt-8 grid gap-4 md:grid-cols-4">
           <Stat
             title="ACTIVE SLIPS"
-            value={String(activeParlays.length)}
+            value={String(
+              activeParlays.length
+            )}
           />
 
           <Stat
@@ -344,7 +714,8 @@ export default function Home() {
             value={
               parlays.length > 0 &&
               parlays[0].total_odds
-                ? parlays[0].total_odds
+                ? parlays[0]
+                    .total_odds
                 : "—"
             }
           />
@@ -376,146 +747,347 @@ export default function Home() {
               </p>
 
               <p className="mt-2 text-sm text-slate-500">
-                Parlays added to Supabase will appear here.
+                Parlays added to
+                Supabase will appear
+                here.
               </p>
             </div>
           )}
 
         <section className="mt-8 grid gap-5 lg:grid-cols-2">
-          {parlays.map((parlay) => {
-            const legs = [
-              ...(parlay.parlay_legs || []),
-            ].sort(
-              (a, b) =>
-                a.leg_number - b.leg_number
-            );
+          {parlays.map(
+            (parlay) => {
+              const legs = [
+                ...(parlay.parlay_legs ||
+                  []),
+              ].sort(
+                (a, b) =>
+                  a.leg_number -
+                  b.leg_number
+              );
 
-            return (
-              <article
-                key={parlay.id}
-                className="rounded-xl border border-white/10 bg-white/[0.03] p-6"
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-xs font-bold uppercase tracking-widest text-green-400">
-                      {parlay.category || "PARLAY"}
-                    </p>
+              return (
+                <article
+                  key={parlay.id}
+                  className="rounded-xl border border-white/10 bg-white/[0.03] p-6"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-widest text-green-400">
+                        {parlay.category ||
+                          "PARLAY"}
+                      </p>
 
-                    <h3 className="mt-2 text-xl font-bold">
-                      {parlay.name}
-                    </h3>
+                      <h3 className="mt-2 text-xl font-bold">
+                        {parlay.name}
+                      </h3>
 
-                    <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-400">
-                      {parlay.risk_level && (
-                        <span>
-                          {parlay.risk_level} Risk
-                        </span>
-                      )}
-
-                      {parlay.sportsbook && (
-                        <span>
-                          • {parlay.sportsbook}
-                        </span>
-                      )}
-
-                      {parlay.total_odds && (
-                        <span>
-                          • {parlay.total_odds}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {parlay.confidence !== null && (
-                    <span className="rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-bold text-green-400">
-                      {parlay.confidence}%
-                    </span>
-                  )}
-                </div>
-
-                <div className="mt-6 space-y-3">
-                  {legs.length === 0 ? (
-                    <p className="text-sm text-slate-500">
-                      No legs added yet.
-                    </p>
-                  ) : (
-                    legs.map((leg) => (
-                      <div
-                        key={leg.id}
-                        className="rounded-lg border border-white/10 bg-black/20 p-4"
-                      >
-                        <div className="flex items-start justify-between gap-4">
-                          <div>
-                            <p className="text-xs font-bold uppercase text-green-400">
-                              Leg {leg.leg_number} •{" "}
-                              {leg.sport}
-                            </p>
-
-                            <p className="mt-1 font-bold">
-                              {leg.player
-                                ? `${leg.player} — ${leg.bet_type}`
-                                : `${leg.team || ""} ${leg.bet_type}`}
-                            </p>
-
-                            {leg.opponent && (
-                              <p className="mt-1 text-xs text-slate-500">
-                                vs {leg.opponent}
-                              </p>
-                            )}
-                          </div>
-
-                          <div className="text-right">
-                            {leg.odds && (
-                              <p className="font-bold">
-                                {leg.odds}
-                              </p>
-                            )}
-
-                            {leg.confidence !== null && (
-                              <p className="mt-1 text-xs text-green-400">
-                                {leg.confidence}% confidence
-                              </p>
-                            )}
-                          </div>
-                        </div>
-
-                        {leg.reasoning && (
-                          <div className="mt-4 border-t border-white/10 pt-3">
-                            <p className="text-xs font-bold text-slate-400">
-                              WHY THIS BET
-                            </p>
-
-                            <p className="mt-1 text-sm text-slate-300">
-                              {leg.reasoning}
-                            </p>
-                          </div>
+                      <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-400">
+                        {parlay.risk_level && (
+                          <span>
+                            {
+                              parlay.risk_level
+                            }{" "}
+                            Risk
+                          </span>
                         )}
 
-                        {leg.key_risk && (
-                          <p className="mt-3 text-xs text-amber-400">
-                            Risk: {leg.key_risk}
-                          </p>
+                        {parlay.sportsbook && (
+                          <span>
+                            •{" "}
+                            {
+                              parlay.sportsbook
+                            }
+                          </span>
+                        )}
+
+                        {parlay.total_odds && (
+                          <span>
+                            •{" "}
+                            {
+                              parlay.total_odds
+                            }
+                          </span>
                         )}
                       </div>
-                    ))
-                  )}
-                </div>
+                    </div>
 
-                {parlay.notes && (
-                  <p className="mt-4 text-sm text-slate-400">
-                    {parlay.notes}
-                  </p>
-                )}
-              </article>
-            );
-          })}
+                    {parlay.confidence !==
+                      null && (
+                      <span className="rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-bold text-green-400">
+                        {
+                          parlay.confidence
+                        }
+                        %
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="mt-6 space-y-3">
+                    {legs.length === 0 ? (
+                      <p className="text-sm text-slate-500">
+                        No legs added
+                        yet.
+                      </p>
+                    ) : (
+                      legs.map(
+                        (leg) => (
+                          <div
+                            key={
+                              leg.id
+                            }
+                            className="rounded-lg border border-white/10 bg-black/20 p-4"
+                          >
+                            <div className="flex items-start justify-between gap-4">
+                              <div>
+                                <p className="text-xs font-bold uppercase text-green-400">
+                                  Leg{" "}
+                                  {
+                                    leg.leg_number
+                                  }{" "}
+                                  •{" "}
+                                  {
+                                    leg.sport
+                                  }
+                                </p>
+
+                                <p className="mt-1 font-bold">
+                                  {leg.player
+                                    ? `${leg.player} — ${leg.bet_type}`
+                                    : `${leg.team || ""} ${leg.bet_type}`}
+                                </p>
+
+                                {leg.opponent && (
+                                  <p className="mt-1 text-xs text-slate-500">
+                                    vs{" "}
+                                    {
+                                      leg.opponent
+                                    }
+                                  </p>
+                                )}
+                              </div>
+
+                              <div className="text-right">
+                                {leg.odds && (
+                                  <p className="font-bold">
+                                    {
+                                      leg.odds
+                                    }
+                                  </p>
+                                )}
+
+                                {leg.confidence !==
+                                  null && (
+                                  <p className="mt-1 text-xs text-green-400">
+                                    {
+                                      leg.confidence
+                                    }
+                                    %
+                                    confidence
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+
+                            {leg.reasoning && (
+                              <div className="mt-4 border-t border-white/10 pt-3">
+                                <p className="text-xs font-bold text-slate-400">
+                                  WHY THIS
+                                  BET
+                                </p>
+
+                                <p className="mt-1 text-sm text-slate-300">
+                                  {
+                                    leg.reasoning
+                                  }
+                                </p>
+                              </div>
+                            )}
+
+                            {leg.key_risk && (
+                              <p className="mt-3 text-xs text-amber-400">
+                                Risk:{" "}
+                                {
+                                  leg.key_risk
+                                }
+                              </p>
+                            )}
+                          </div>
+                        )
+                      )
+                    )}
+                  </div>
+
+                  {parlay.notes && (
+                    <p className="mt-4 text-sm text-slate-400">
+                      {parlay.notes}
+                    </p>
+                  )}
+                </article>
+              );
+            }
+          )}
         </section>
 
         <footer className="mt-12 border-t border-white/10 py-6 text-xs text-slate-600">
-          Responsible Degenerate Gambling • Bet responsibly
+          Responsible Degenerate
+          Gambling • Bet responsibly
         </footer>
       </div>
     </main>
+  );
+}
+
+function BuilderCard({
+  title,
+  subtitle,
+  candidates,
+  required,
+}: {
+  title: string;
+  subtitle: string;
+  candidates: BetCandidate[];
+  required: number;
+}) {
+  const qualified =
+    candidates.length >= required;
+
+  return (
+    <article className="rounded-xl border border-green-500/20 bg-white/[0.04] p-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-widest text-green-400">
+            {subtitle}
+          </p>
+
+          <h3 className="mt-2 text-xl font-bold">
+            {title}
+          </h3>
+        </div>
+
+        <span
+          className={
+            qualified
+              ? "rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-bold text-green-400"
+              : "rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-400"
+          }
+        >
+          {qualified
+            ? "QUALIFIED"
+            : "NOT ENOUGH LEGS"}
+        </span>
+      </div>
+
+      {candidates.length === 0 ? (
+        <div className="mt-6 rounded-lg border border-white/10 bg-black/20 p-4">
+          <p className="font-bold">
+            No qualifying selection
+          </p>
+
+          <p className="mt-2 text-xs text-slate-500">
+            RDG will not force a weaker
+            bet into this tier.
+          </p>
+        </div>
+      ) : (
+        <div className="mt-6 space-y-3">
+          {candidates.map(
+            (candidate, index) => (
+              <div
+                key={
+                  candidate.event_id
+                }
+                className="rounded-lg border border-white/10 bg-black/20 p-4"
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    {required > 1 && (
+                      <p className="text-[10px] font-bold uppercase text-slate-500">
+                        LEG {index + 1}
+                      </p>
+                    )}
+
+                    <p className="mt-1 text-lg font-bold">
+                      {
+                        candidate.display_bet
+                      }
+                    </p>
+
+                    <p className="mt-1 text-xs text-slate-500">
+                      {
+                        candidate.matchup
+                      }
+                    </p>
+                  </div>
+
+                  <div className="text-right">
+                    <p className="font-bold text-green-400">
+                      {candidate.difference.toFixed(
+                        1
+                      )}{" "}
+                      pts
+                    </p>
+
+                    <p className="mt-1 text-[10px] uppercase text-slate-500">
+                      Model vs Market
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  <MiniStat
+                    title="RDG PROJECTION"
+                    value={`${candidate.projected_winner} by ${candidate.projected_margin.toFixed(
+                      1
+                    )}`}
+                  />
+
+                  <MiniStat
+                    title="HARD ROCK ODDS"
+                    value={
+                      candidate.odds ||
+                      "—"
+                    }
+                  />
+                </div>
+
+                <p className="mt-3 text-xs text-slate-500">
+                  Historical{" "}
+                  {
+                    candidate.historical_bucket
+                  }{" "}
+                  bucket:{" "}
+                  {
+                    candidate.historical_correct
+                  }
+                  /
+                  {
+                    candidate.historical_sample
+                  }{" "}
+                  (
+                  {
+                    candidate.historical_accuracy
+                  }
+                  %) straight-up.
+                </p>
+              </div>
+            )
+          )}
+        </div>
+      )}
+
+      {!qualified &&
+        candidates.length > 0 && (
+          <p className="mt-4 text-xs text-amber-400">
+            Only {candidates.length} of{" "}
+            {required} required legs
+            currently qualify. RDG did
+            not fill the remaining
+            spots with weaker
+            selections.
+          </p>
+        )}
+    </article>
   );
 }
 
@@ -524,18 +1096,24 @@ function NFLGameCard({
 }: {
   game: NFLGame;
 }) {
-  const market = game.rdg.market_analysis;
-  const historical = game.rdg.historical_signal;
+  const market =
+    game.rdg.market_analysis;
+
+  const historical =
+    game.rdg.historical_signal;
 
   const difference =
     market.model_vs_market_difference;
 
-  const spreadTeam = market.spread_lean;
+  const spreadTeam =
+    market.spread_lean;
 
   const spreadLine =
     spreadTeam === game.home_team
-      ? market.hard_rock_spread.home_line
-      : market.hard_rock_spread.away_line;
+      ? market.hard_rock_spread
+          .home_line
+      : market.hard_rock_spread
+          .away_line;
 
   const gameTime = new Date(
     game.start_date
@@ -552,11 +1130,13 @@ function NFLGameCard({
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-xs font-bold uppercase tracking-widest text-green-400">
-            MARKET EDGE • {market.market_signal}
+            MARKET EDGE •{" "}
+            {market.market_signal}
           </p>
 
           <h3 className="mt-2 text-xl font-bold">
-            {game.away_team} @ {game.home_team}
+            {game.away_team} @{" "}
+            {game.home_team}
           </h3>
 
           <p className="mt-1 text-xs text-slate-500">
@@ -566,7 +1146,9 @@ function NFLGameCard({
 
         <span className="rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-bold text-green-400">
           {difference !== null
-            ? `${Math.abs(difference).toFixed(1)} PT EDGE`
+            ? `${Math.abs(
+                difference
+              ).toFixed(1)} PT EDGE`
             : "NO LINE"}
         </span>
       </div>
@@ -582,9 +1164,12 @@ function NFLGameCard({
         <MiniStat
           title="HARD ROCK SPREAD"
           value={
-            market.hard_rock_spread.home_line !== null
+            market.hard_rock_spread
+              .home_line !== null
               ? `${game.home_team} ${formatSpread(
-                  market.hard_rock_spread.home_line
+                  market
+                    .hard_rock_spread
+                    .home_line
                 )}`
               : "—"
           }
@@ -605,7 +1190,9 @@ function NFLGameCard({
           title="MODEL VS MARKET"
           value={
             difference !== null
-              ? `${Math.abs(difference).toFixed(1)} pts`
+              ? `${Math.abs(
+                  difference
+                ).toFixed(1)} pts`
               : "—"
           }
         />
@@ -623,8 +1210,14 @@ function NFLGameCard({
             </p>
 
             <p className="mt-1 font-bold">
-              {game.rdg.projected_winner}{" "}
-              -{game.rdg.projected_margin.toFixed(1)}
+              {
+                game.rdg
+                  .projected_winner
+              }{" "}
+              -
+              {game.rdg.projected_margin.toFixed(
+                1
+              )}
             </p>
           </div>
 
@@ -635,12 +1228,17 @@ function NFLGameCard({
 
             <p className="mt-1 font-bold">
               {market.market_favorite}{" "}
-              {market.market_favorite === game.home_team
+              {market.market_favorite ===
+              game.home_team
                 ? formatSpread(
-                    market.hard_rock_spread.home_line
+                    market
+                      .hard_rock_spread
+                      .home_line
                   )
                 : formatSpread(
-                    market.hard_rock_spread.away_line
+                    market
+                      .hard_rock_spread
+                      .away_line
                   )}
             </p>
           </div>
@@ -655,7 +1253,10 @@ function NFLGameCard({
             </p>
 
             <p className="mt-2 text-lg font-bold">
-              {historical.historical_winner_accuracy}%
+              {
+                historical.historical_winner_accuracy
+              }
+              %
             </p>
           </div>
 
@@ -665,15 +1266,20 @@ function NFLGameCard({
             </p>
 
             <p className="mt-2 font-bold">
-              {historical.correct}/{historical.sample}
+              {historical.correct}/
+              {historical.sample}
             </p>
           </div>
         </div>
 
         <p className="mt-3 text-xs text-slate-500">
-          Historical performance for RDG&apos;s{" "}
-          {historical.bucket} projected-margin bucket.
-          This is not the probability that this individual wager wins.
+          Historical performance for
+          RDG&apos;s{" "}
+          {historical.bucket}{" "}
+          projected-margin bucket.
+          This is not the probability
+          that this individual wager
+          wins.
         </p>
       </div>
     </article>
@@ -685,7 +1291,8 @@ function NFLBoardRow({
 }: {
   game: NFLGame;
 }) {
-  const market = game.rdg.market_analysis;
+  const market =
+    game.rdg.market_analysis;
 
   const difference =
     market.model_vs_market_difference;
@@ -694,7 +1301,8 @@ function NFLBoardRow({
     <div className="grid gap-3 rounded-lg border border-white/10 bg-white/[0.03] p-4 md:grid-cols-5 md:items-center">
       <div>
         <p className="font-bold">
-          {game.away_team} @ {game.home_team}
+          {game.away_team} @{" "}
+          {game.home_team}
         </p>
 
         <p className="mt-1 text-xs text-slate-500">
@@ -712,9 +1320,12 @@ function NFLBoardRow({
       <BoardValue
         title="HARD ROCK"
         value={
-          market.hard_rock_spread.home_line !== null
+          market.hard_rock_spread
+            .home_line !== null
             ? `${game.home_team} ${formatSpread(
-                market.hard_rock_spread.home_line
+                market
+                  .hard_rock_spread
+                  .home_line
               )}`
             : "—"
         }
@@ -729,7 +1340,9 @@ function NFLBoardRow({
         title="DIFFERENCE"
         value={
           difference !== null
-            ? `${Math.abs(difference).toFixed(1)} pts`
+            ? `${Math.abs(
+                difference
+              ).toFixed(1)} pts`
             : "—"
         }
       />
