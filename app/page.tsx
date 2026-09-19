@@ -1420,4 +1420,116 @@ function formatSpread(
   }
 
   return String(value);
+}function PerformanceDashboard() {
+  const [picks, setPicks] = useState<
+    {
+      status: string | null;
+      tier: string | null;
+    }[]
+  >([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadPerformance() {
+      const { data, error } = await supabase
+        .from("rdg_picks")
+        .select("status, tier");
+
+      if (!error && data) {
+        setPicks(data);
+      }
+
+      setLoading(false);
+    }
+
+    loadPerformance();
+  }, []);
+
+  const graded = picks.filter(
+    (pick) =>
+      pick.status === "win" ||
+      pick.status === "loss" ||
+      pick.status === "push"
+  );
+
+  const wins = graded.filter((pick) => pick.status === "win").length;
+  const losses = graded.filter((pick) => pick.status === "loss").length;
+  const pushes = graded.filter((pick) => pick.status === "push").length;
+
+  const decisions = wins + losses;
+  const winRate =
+    decisions > 0 ? ((wins / decisions) * 100).toFixed(1) : "—";
+
+  const tierRecord = (tier: string) => {
+    const rows = graded.filter((pick) => pick.tier === tier);
+    const w = rows.filter((pick) => pick.status === "win").length;
+    const l = rows.filter((pick) => pick.status === "loss").length;
+    const p = rows.filter((pick) => pick.status === "push").length;
+
+    return `${w}-${l}-${p}`;
+  };
+
+  return (
+    <section className="mt-14 border-t border-white/10 pt-10">
+      <p className="text-xs font-bold uppercase tracking-[0.25em] text-green-400">
+        RDG PERFORMANCE
+      </p>
+
+      <h2 className="mt-3 text-3xl font-bold">
+        Historical Results
+      </h2>
+
+      <p className="mt-2 text-sm text-slate-400">
+        Actual graded RDG picks. Results update automatically after games are graded.
+      </p>
+
+      <div className="mt-8 grid gap-4 md:grid-cols-4">
+        <Stat
+          title="OVERALL RECORD"
+          value={
+            loading
+              ? "..."
+              : `${wins}-${losses}-${pushes}`
+          }
+        />
+
+        <Stat
+          title="WIN RATE"
+          value={loading ? "..." : `${winRate}%`}
+        />
+
+        <Stat
+          title="GRADED PICKS"
+          value={loading ? "..." : String(graded.length)}
+        />
+
+        <Stat
+          title="PENDING"
+          value={loading ? "..." : String(picks.length - graded.length)}
+        />
+      </div>
+
+      <div className="mt-6 grid gap-4 md:grid-cols-4">
+        <BoardValue
+          title="BEST STRAIGHT"
+          value={loading ? "..." : tierRecord("Best Straight")}
+        />
+
+        <BoardValue
+          title="SAFER 2-LEG"
+          value={loading ? "..." : tierRecord("Safer 2-Leg")}
+        />
+
+        <BoardValue
+          title="BALANCED 3-LEG"
+          value={loading ? "..." : tierRecord("Balanced 3-Leg")}
+        />
+
+        <BoardValue
+          title="HIGHER-RISK 4-LEG"
+          value={loading ? "..." : tierRecord("Higher-Risk 4-Leg")}
+        />
+      </div>
+    </section>
+  );
 }
