@@ -579,6 +579,148 @@ const [cfbError, setCfbError] =
     COLLEGE FOOTBALL
   </button>
 </div>
+        {activeSport === "CFB" && (
+  <div>
+    <p className="text-xs font-bold uppercase tracking-[0.25em] text-green-400">
+      RDG CFB MODEL • BETA
+    </p>
+
+    <h2 className="mt-3 text-3xl font-bold">
+      Live College Football Analysis
+    </h2>
+
+    <p className="mt-2 text-sm text-slate-400">
+      RDG CORE projections compared against current Hard Rock Bet lines.
+    </p>
+
+    <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-300">
+      CFB model is currently uncalibrated beta. Model/market differences
+      are not win probabilities.
+    </div>
+
+    <section className="mt-8 grid gap-4 md:grid-cols-4">
+      <Stat
+        title="CFB GAMES"
+        value={cfb ? String(cfb.games_found) : "—"}
+      />
+
+      <Stat
+        title="CORE CONNECTED"
+        value={
+          cfb
+            ? `${cfb.games_with_core}/${cfb.games_found}`
+            : "—"
+        }
+      />
+
+      <Stat
+        title="PRIORITY REVIEWS"
+        value={
+          cfb
+            ? String(cfb.priority_reviews)
+            : "—"
+        }
+      />
+
+      <Stat
+        title="STRONG REVIEWS"
+        value={
+          cfb
+            ? String(cfb.strong_reviews)
+            : "—"
+        }
+      />
+    </section>
+
+    {cfbLoading && (
+      <div className="mt-8 rounded-xl border border-white/10 bg-white/[0.03] p-6">
+        Running RDG College Football model...
+      </div>
+    )}
+
+    {cfbError && (
+      <div className="mt-8 rounded-xl border border-red-500/30 bg-red-500/10 p-6 text-red-400">
+        CFB model error: {cfbError}
+      </div>
+    )}
+
+    {!cfbLoading && !cfbError && cfb && (
+      <>
+        <div className="mt-12 border-t border-white/10 pt-10">
+          <p className="text-xs font-bold uppercase tracking-[0.25em] text-slate-500">
+            FULL COLLEGE FOOTBALL BOARD
+          </p>
+
+          <h2 className="mt-3 text-2xl font-bold">
+            All Games
+          </h2>
+        </div>
+
+        <section className="mt-6 space-y-3">
+          {cfb.games.map((game) => (
+            <div
+              key={game.event_id}
+              className="grid gap-3 rounded-lg border border-white/10 bg-white/[0.03] p-4 md:grid-cols-5 md:items-center"
+            >
+              <div>
+                <p className="font-bold">
+                  {game.away_team} @ {game.home_team}
+                </p>
+
+                <p className="mt-1 text-xs text-slate-500">
+                  {game.rdg
+                    ? game.rdg.signal
+                    : "NO CORE DATA"}
+                </p>
+              </div>
+
+              <BoardValue
+                title="RDG"
+                value={
+                  game.rdg
+                    ? `${game.rdg.projected_winner} by ${game.rdg.projected_margin.toFixed(1)}`
+                    : "—"
+                }
+              />
+
+              <BoardValue
+                title="HARD ROCK"
+                value={
+                  game.hard_rock.spread.home_line !== null
+                    ? `${game.home_team} ${formatSpread(
+                        game.hard_rock.spread.home_line
+                      )}`
+                    : "—"
+                }
+              />
+
+              <BoardValue
+                title="SPREAD LEAN"
+                value={
+                  game.rdg?.spread_lean || "—"
+                }
+              />
+
+              <BoardValue
+                title="MODEL VS MARKET"
+                value={
+                  game.rdg?.model_vs_market_difference !==
+                  null &&
+                  game.rdg?.model_vs_market_difference !==
+                  undefined
+                    ? `${Math.abs(
+                        game.rdg.model_vs_market_difference
+                      ).toFixed(1)} pts`
+                    : "—"
+                }
+              />
+            </div>
+          ))}
+        </section>
+      </>
+    )}
+  </div>
+)}
         <p className="text-xs font-bold uppercase tracking-[0.25em] text-green-400">
           RDG NFL MODEL
         </p>
