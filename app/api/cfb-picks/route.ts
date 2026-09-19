@@ -5,27 +5,47 @@ export const dynamic = "force-dynamic";
 const SEASON = 2026;
 
 /*
-  RDG CFB CORE calibration
+  RDG CFB CORE MODEL — v1.2
 
-  Training:
-  2022-2024 FBS games
+  Historical calibration:
+  Training seasons: 2022, 2023, 2024
+  Evaluation season: 2025
 
-  Evaluation:
-  2025 FBS games
+  Base calibrated formula:
 
-  Fitted formula:
-  projected home margin =
-  3.0229 + (0.8165 × CORE difference)
+  Projected home margin =
+  3.0229 +
+  (0.8165 × CORE difference)
+
+  SAMPLE-SIZE PROTECTION
+
+  150+ minimum CORE plays:
+  100% CORE influence
+
+  75-149 minimum CORE plays:
+  75% CORE influence
+
+  Under 75 minimum CORE plays:
+  45% CORE influence
+
+  Small Sample games are also prevented
+  from receiving Priority Review status.
 
   IMPORTANT:
-  Historical CORE ratings used for this
-  calibration are retrospective ratings,
-  so this is not an ATS profitability
-  backtest or a win probability model.
+  Historical CORE ratings used during
+  calibration were retrospective ratings.
+
+  Therefore this model is NOT yet a true
+  historical pregame ATS backtest and the
+  review labels are NOT win probabilities.
 */
 
 const CALIBRATED_INTERCEPT = 3.0229;
 const CORE_TO_POINTS = 0.8165;
+
+const ESTABLISHED_WEIGHT = 1.0;
+const DEVELOPING_WEIGHT = 0.75;
+const SMALL_SAMPLE_WEIGHT = 0.45;
 
 const ODDIZE_URL =
   "https://oddize.com/api/v1/odds/latest?sport=ncaaf&books=hrb";
@@ -47,7 +67,9 @@ type CoreRating = {
   modelVersion: string;
 };
 
-function normalizeTeam(value: string): string {
+function normalizeTeam(
+  value: string
+): string {
   return value
     .toUpperCase()
     .replace(/&/g, "AND")
@@ -63,25 +85,36 @@ function findCoreRating(
   const target =
     normalizeTeam(oddizeTeam);
 
-  const exact = ratings.find(
-    (rating) =>
-      normalizeTeam(rating.team) ===
-      target
-  );
+  const exact =
+    ratings.find(
+      (rating) =>
+        normalizeTeam(
+          rating.team
+        ) === target
+    );
 
-  if (exact) return exact;
+  if (exact) {
+    return exact;
+  }
 
-  const partial = ratings.find(
-    (rating) => {
-      const candidate =
-        normalizeTeam(rating.team);
+  const partial =
+    ratings.find(
+      (rating) => {
+        const candidate =
+          normalizeTeam(
+            rating.team
+          );
 
-      return (
-        candidate.includes(target) ||
-        target.includes(candidate)
-      );
-    }
-  );
+        return (
+          candidate.includes(
+            target
+          ) ||
+          target.includes(
+            candidate
+          )
+        );
+      }
+    );
 
   return partial ?? null;
 }
@@ -89,9 +122,12 @@ function findCoreRating(
 function numberValue(
   value: unknown
 ): number | null {
-  const parsed = Number(value);
+  const parsed =
+    Number(value);
 
-  return Number.isFinite(parsed)
+  return Number.isFinite(
+    parsed
+  )
     ? parsed
     : null;
 }
@@ -102,7 +138,8 @@ function getSpread(
 ) {
   return odds.find(
     (item: any) =>
-      item.market === "spread" &&
+      item.market ===
+        "spread" &&
       item.team === team
   );
 }
@@ -113,7 +150,8 @@ function getMoneyline(
 ) {
   return odds.find(
     (item: any) =>
-      item.market === "moneyline" &&
+      item.market ===
+        "moneyline" &&
       item.team === team
   );
 }
@@ -124,7 +162,8 @@ function getTotal(
 ) {
   return odds.find(
     (item: any) =>
-      item.market === "total" &&
+      item.market ===
+        "total" &&
       String(
         item.team
       ).toLowerCase() ===
@@ -133,18 +172,29 @@ function getTotal(
 }
 
 function impliedProbability(
-  odds: string | number | null
+  odds:
+    | string
+    | number
+    | null
 ): number | null {
   if (odds === null) {
     return null;
   }
 
-  const value = Number(
-    String(odds).replace("+", "")
-  );
+  const value =
+    Number(
+      String(
+        odds
+      ).replace(
+        "+",
+        ""
+      )
+    );
 
   if (
-    !Number.isFinite(value) ||
+    !Number.isFinite(
+      value
+    ) ||
     value === 0
   ) {
     return null;
@@ -153,7 +203,9 @@ function impliedProbability(
   if (value > 0) {
     return Number(
       (
-        (100 / (value + 100)) *
+        (100 /
+          (value +
+            100)) *
         100
       ).toFixed(2)
     );
@@ -161,42 +213,142 @@ function impliedProbability(
 
   return Number(
     (
-      (Math.abs(value) /
-        (Math.abs(value) + 100)) *
+      (Math.abs(
+        value
+      ) /
+        (Math.abs(
+          value
+        ) +
+          100)) *
       100
     ).toFixed(2)
   );
 }
 
-function calculateProjection(
+function getMinimumSample(
   away: CoreRating,
   home: CoreRating
 ) {
-  const ratingDifference =
-    home.overall - away.overall;
+  return Math.min(
+    away.offensePlays,
+    away.defensePlays,
+    home.offensePlays,
+    home.defensePlays
+  );
+}
 
-  const coreMarginComponent =
+function getSampleInfo(
+  minimumSample: number
+) {
+  if (
+    minimumSample >= 150
+  ) {
+    return {
+      status:
+        "Established",
+      weight:
+        ESTABLISHED_WEIGHT,
+    };
+  }
+
+  if (
+    minimumSample >= 75
+  ) {
+    return {
+      status:
+        "Developing",
+      weight:
+        DEVELOPING_WEIGHT,
+    };
+  }
+
+  return {
+    status:
+      "Small Sample",
+    weight:
+      SMALL_SAMPLE_WEIGHT,
+  };
+}
+
+function calculateProjection(
+  away: CoreRating,
+  home: CoreRating,
+  sampleWeight: number
+) {
+  const ratingDifference =
+    home.overall -
+    away.overall;
+
+  /*
+    First calculate the CORE
+    scoring-margin component using
+    the historical calibration.
+  */
+
+  const rawCoreComponent =
     ratingDifference *
     CORE_TO_POINTS;
 
+  /*
+    Then reduce CORE's influence
+    when the current-season sample
+    is still developing.
+
+    We do NOT change the calibrated
+    intercept.
+
+    This shrinks uncertain early
+    CORE differences toward the
+    learned average home-margin
+    component.
+  */
+
+  const weightedCoreComponent =
+    rawCoreComponent *
+    sampleWeight;
+
+  const rawProjectedHomeMargin =
+    CALIBRATED_INTERCEPT +
+    rawCoreComponent;
+
   const projectedHomeMargin =
     CALIBRATED_INTERCEPT +
-    coreMarginComponent;
+    weightedCoreComponent;
 
   return {
     ratingDifference:
       Number(
-        ratingDifference.toFixed(2)
+        ratingDifference.toFixed(
+          2
+        )
       ),
 
-    coreMarginComponent:
+    rawCoreComponent:
       Number(
-        coreMarginComponent.toFixed(2)
+        rawCoreComponent.toFixed(
+          2
+        )
+      ),
+
+    weightedCoreComponent:
+      Number(
+        weightedCoreComponent.toFixed(
+          2
+        )
+      ),
+
+    rawProjectedHomeMargin:
+      Number(
+        rawProjectedHomeMargin.toFixed(
+          2
+        )
       ),
 
     projectedHomeMargin:
       Number(
-        projectedHomeMargin.toFixed(2)
+        projectedHomeMargin.toFixed(
+          2
+        )
       ),
   };
 }
@@ -204,10 +356,12 @@ function calculateProjection(
 export async function GET() {
   try {
     const oddizeKey =
-      process.env.ODDIZE_API_KEY;
+      process.env
+        .ODDIZE_API_KEY;
 
     const cfbdKey =
-      process.env.CFBD_API_KEY;
+      process.env
+        .CFBD_API_KEY;
 
     if (!oddizeKey) {
       throw new Error(
@@ -224,24 +378,36 @@ export async function GET() {
     const [
       oddsResponse,
       coreResponse,
-    ] = await Promise.all([
-      fetch(ODDIZE_URL, {
-        headers: {
-          "X-API-Key": oddizeKey,
-        },
-        cache: "no-store",
-      }),
+    ] =
+      await Promise.all([
+        fetch(
+          ODDIZE_URL,
+          {
+            headers: {
+              "X-API-Key":
+                oddizeKey,
+            },
+            cache:
+              "no-store",
+          }
+        ),
 
-      fetch(CFBD_CORE_URL, {
-        headers: {
-          Authorization:
-            `Bearer ${cfbdKey}`,
-        },
-        cache: "no-store",
-      }),
-    ]);
+        fetch(
+          CFBD_CORE_URL,
+          {
+            headers: {
+              Authorization:
+                `Bearer ${cfbdKey}`,
+            },
+            cache:
+              "no-store",
+          }
+        ),
+      ]);
 
-    if (!oddsResponse.ok) {
+    if (
+      !oddsResponse.ok
+    ) {
       const text =
         await oddsResponse.text();
 
@@ -250,7 +416,9 @@ export async function GET() {
       );
     }
 
-    if (!coreResponse.ok) {
+    if (
+      !coreResponse.ok
+    ) {
       const text =
         await coreResponse.text();
 
@@ -279,7 +447,8 @@ export async function GET() {
             event.team2;
 
           const odds =
-            event.odds ?? [];
+            event.odds ??
+            [];
 
           const awayCore =
             findCoreRating(
@@ -349,7 +518,8 @@ export async function GET() {
 
                 away_line:
                   numberValue(
-                    awaySpread?.line
+                    awaySpread
+                      ?.line
                   ),
 
                 away_odds:
@@ -362,7 +532,8 @@ export async function GET() {
 
                 home_line:
                   numberValue(
-                    homeSpread?.line
+                    homeSpread
+                      ?.line
                   ),
 
                 home_odds:
@@ -384,7 +555,7 @@ export async function GET() {
                   impliedProbability(
                     awayMoneyline
                       ?.american_odds ??
-                    null
+                      null
                   ),
 
                 home_team:
@@ -399,7 +570,7 @@ export async function GET() {
                   impliedProbability(
                     homeMoneyline
                       ?.american_odds ??
-                    null
+                      null
                   ),
               },
 
@@ -449,17 +620,37 @@ export async function GET() {
             };
           }
 
-          const projection =
-            calculateProjection(
+          /*
+            Determine reliability
+            BEFORE calculating the
+            final projection.
+          */
+
+          const minimumSample =
+            getMinimumSample(
               awayCore,
               homeCore
             );
 
+          const sampleInfo =
+            getSampleInfo(
+              minimumSample
+            );
+
+          const projection =
+            calculateProjection(
+              awayCore,
+              homeCore,
+              sampleInfo.weight
+            );
+
           let marketHomeMargin:
-            number | null = null;
+            number | null =
+            null;
 
           if (
-            homeSpread?.line !==
+            homeSpread
+              ?.line !==
             undefined
           ) {
             marketHomeMargin =
@@ -467,7 +658,8 @@ export async function GET() {
                 homeSpread.line
               );
           } else if (
-            awaySpread?.line !==
+            awaySpread
+              ?.line !==
             undefined
           ) {
             marketHomeMargin =
@@ -485,7 +677,9 @@ export async function GET() {
                     projection
                       .projectedHomeMargin -
                     marketHomeMargin
-                  ).toFixed(2)
+                  ).toFixed(
+                    2
+                  )
                 );
 
           const projectedWinner =
@@ -502,10 +696,13 @@ export async function GET() {
             );
 
           let spreadLean:
-            string | null = null;
+            | string
+            | null =
+            null;
 
           if (
-            marketHomeMargin !== null
+            marketHomeMargin !==
+            null
           ) {
             spreadLean =
               projection
@@ -516,20 +713,27 @@ export async function GET() {
           }
 
           const edge =
-            difference === null
+            difference ===
+            null
               ? 0
               : Math.abs(
                   difference
                 );
 
           /*
-            Review labels remain
-            descriptive model-vs-market
-            differences.
+            REVIEW SIGNALS
 
-            They are NOT probabilities
-            and are NOT claims of
-            profitability.
+            Established:
+            normal thresholds.
+
+            Developing:
+            projection already has
+            reduced CORE influence.
+
+            Small Sample:
+            projection has heavy
+            shrinkage and cannot
+            receive Priority Review.
           */
 
           let signal =
@@ -550,20 +754,23 @@ export async function GET() {
               "Priority Review";
           }
 
-          const minimumSample =
-            Math.min(
-              awayCore.offensePlays,
-              awayCore.defensePlays,
-              homeCore.offensePlays,
-              homeCore.defensePlays
-            );
+          /*
+            HARD SAFETY RULE:
 
-          const sampleStatus =
-            minimumSample >= 150
-              ? "Established"
-              : minimumSample >= 75
-              ? "Developing"
-              : "Small Sample";
+            Under 75 minimum CORE
+            plays cannot be labeled
+            Priority Review.
+          */
+
+          if (
+            sampleInfo.status ===
+              "Small Sample" &&
+            signal ===
+              "Priority Review"
+          ) {
+            signal =
+              "Strong Review";
+          }
 
           return {
             ...baseGame,
@@ -586,6 +793,10 @@ export async function GET() {
                 projection
                   .projectedHomeMargin,
 
+              raw_projected_home_margin:
+                projection
+                  .rawProjectedHomeMargin,
+
               calibration_intercept:
                 CALIBRATED_INTERCEPT,
 
@@ -596,9 +807,16 @@ export async function GET() {
                 projection
                   .ratingDifference,
 
-              core_margin_component:
+              raw_core_margin_component:
                 projection
-                  .coreMarginComponent,
+                  .rawCoreComponent,
+
+              weighted_core_margin_component:
+                projection
+                  .weightedCoreComponent,
+
+              sample_weight:
+                sampleInfo.weight,
 
               market_implied_home_margin:
                 marketHomeMargin,
@@ -612,7 +830,7 @@ export async function GET() {
               signal,
 
               sample_status:
-                sampleStatus,
+                sampleInfo.status,
 
               minimum_core_plays:
                 minimumSample,
@@ -621,34 +839,43 @@ export async function GET() {
             core: {
               through_week:
                 Math.min(
-                  awayCore.throughWeek,
-                  homeCore.throughWeek
+                  awayCore
+                    .throughWeek,
+                  homeCore
+                    .throughWeek
                 ),
 
               model_version:
-                homeCore.modelVersion,
+                homeCore
+                  .modelVersion,
 
               away: {
                 team:
                   awayCore.team,
 
                 conference:
-                  awayCore.conference,
+                  awayCore
+                    .conference,
 
                 overall:
-                  awayCore.overall,
+                  awayCore
+                    .overall,
 
                 offense:
-                  awayCore.offense,
+                  awayCore
+                    .offense,
 
                 defense:
-                  awayCore.defense,
+                  awayCore
+                    .defense,
 
                 offense_plays:
-                  awayCore.offensePlays,
+                  awayCore
+                    .offensePlays,
 
                 defense_plays:
-                  awayCore.defensePlays,
+                  awayCore
+                    .defensePlays,
               },
 
               home: {
@@ -656,22 +883,28 @@ export async function GET() {
                   homeCore.team,
 
                 conference:
-                  homeCore.conference,
+                  homeCore
+                    .conference,
 
                 overall:
-                  homeCore.overall,
+                  homeCore
+                    .overall,
 
                 offense:
-                  homeCore.offense,
+                  homeCore
+                    .offense,
 
                 defense:
-                  homeCore.defense,
+                  homeCore
+                    .defense,
 
                 offense_plays:
-                  homeCore.offensePlays,
+                  homeCore
+                    .offensePlays,
 
                 defense_plays:
-                  homeCore.defensePlays,
+                  homeCore
+                    .defensePlays,
               },
             },
           };
@@ -687,22 +920,49 @@ export async function GET() {
     const priority =
       connected.filter(
         (game: any) =>
-          game.rdg?.signal ===
+          game.rdg
+            ?.signal ===
           "Priority Review"
       );
 
     const strong =
       connected.filter(
         (game: any) =>
-          game.rdg?.signal ===
+          game.rdg
+            ?.signal ===
           "Strong Review"
       );
 
     const watch =
       connected.filter(
         (game: any) =>
-          game.rdg?.signal ===
+          game.rdg
+            ?.signal ===
           "Watch"
+      );
+
+    const established =
+      connected.filter(
+        (game: any) =>
+          game.rdg
+            ?.sample_status ===
+          "Established"
+      );
+
+    const developing =
+      connected.filter(
+        (game: any) =>
+          game.rdg
+            ?.sample_status ===
+          "Developing"
+      );
+
+    const smallSample =
+      connected.filter(
+        (game: any) =>
+          game.rdg
+            ?.sample_status ===
+          "Small Sample"
       );
 
     return NextResponse.json({
@@ -719,10 +979,10 @@ export async function GET() {
         "RDG CFB CORE",
 
       version:
-        "1.1-calibrated",
+        "1.2-sample-adjusted",
 
       model_status:
-        "CORE Calibrated",
+        "CORE Calibrated + Sample Adjusted",
 
       games_found:
         analyzedGames.length,
@@ -742,6 +1002,17 @@ export async function GET() {
 
       watch_reviews:
         watch.length,
+
+      sample_breakdown: {
+        established:
+          established.length,
+
+        developing:
+          developing.length,
+
+        small_sample:
+          smallSample.length,
+      },
 
       updated_at:
         new Date().toISOString(),
@@ -775,15 +1046,50 @@ export async function GET() {
           10.9,
       },
 
+      sample_adjustment: {
+        established: {
+          minimum_plays:
+            150,
+
+          core_weight:
+            ESTABLISHED_WEIGHT,
+        },
+
+        developing: {
+          minimum_plays:
+            75,
+
+          maximum_plays:
+            149,
+
+          core_weight:
+            DEVELOPING_WEIGHT,
+        },
+
+        small_sample: {
+          maximum_plays:
+            74,
+
+          core_weight:
+            SMALL_SAMPLE_WEIGHT,
+
+          priority_review_allowed:
+            false,
+        },
+      },
+
       methodology: {
         source:
           "CFBD CORE",
 
         description:
-          "Live 2026 CFBD CORE ratings converted to projected scoring margin using RDG's historical CORE calibration, then compared with current Hard Rock Bet lines.",
+          "Live 2026 CFBD CORE ratings converted to projected scoring margin using RDG historical CORE calibration. CORE influence is reduced when the current-season play sample is limited, then the projection is compared with current Hard Rock Bet lines.",
 
-        formula:
+        base_formula:
           "Projected home margin = 3.0229 + (0.8165 × (home CORE - away CORE))",
+
+        sample_adjusted_formula:
+          "Projected home margin = 3.0229 + ((0.8165 × CORE difference) × sample weight)",
 
         calibration_intercept:
           CALIBRATED_INTERCEPT,
@@ -791,8 +1097,19 @@ export async function GET() {
         core_to_points_factor:
           CORE_TO_POINTS,
 
+        sample_weights: {
+          established:
+            ESTABLISHED_WEIGHT,
+
+          developing:
+            DEVELOPING_WEIGHT,
+
+          small_sample:
+            SMALL_SAMPLE_WEIGHT,
+        },
+
         warning:
-          "Historical CORE ratings used for calibration are retrospective season ratings rather than point-in-time pregame snapshots. Historical winner accuracy is not a wager win probability, ATS win rate, or evidence of profitability.",
+          "Historical CORE ratings used for calibration are retrospective season ratings rather than point-in-time pregame snapshots. The 78.22% historical straight-up evaluation result is not a wager win probability, ATS win rate, or evidence of profitability.",
       },
 
       games:
