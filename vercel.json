@@ -7,6 +7,14 @@
     {
       "path": "/api/grade-picks",
       "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/api/save-mlb-picks",
+      "schedule": "0 14 * * *"
+    },
+    {
+      "path": "/api/grade-mlb-picks",
+      "schedule": "0 10 * * *"
     }
   ]
 }
