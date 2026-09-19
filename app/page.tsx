@@ -1115,17 +1115,18 @@ const [cfbError, setCfbError] =
                 />
 
                 <BuilderCard
-                  title="SAFER 2-LEG"
-                  subtitle="Stricter Filter"
+                  title="TOP RDG PARLAY"
+                  subtitle="Strongest Stricter-Filter Combination"
                   candidates={
                     saferTwoLeg
                   }
                   required={2}
+                  featured
                 />
 
                 <BuilderCard
                   title="BALANCED 3-LEG"
-                  subtitle="Balanced Filter"
+                  subtitle="Balanced Model Filter"
                   candidates={
                     balancedThreeLeg
                   }
@@ -1134,16 +1135,16 @@ const [cfbError, setCfbError] =
 
                 <BuilderCard
                   title="HIGHER-RISK 4-LEG"
-                  subtitle="Wider RDG Filter"
+                  subtitle="Wider Model Filter"
                   candidates={
                     higherRiskFourLeg
                   }
                   required={4}
                 />
 
-                <BuilderCard title="5-LEG" subtitle="Extended RDG Filter" candidates={fiveLeg} required={5} />
-                <BuilderCard title="6-LEG" subtitle="Extended RDG Filter" candidates={sixLeg} required={6} />
-                <BuilderCard title="8-LEG" subtitle="Long-Shot RDG Filter" candidates={eightLeg} required={8} />
+                <BuilderCard title="5-LEG • HIGH RISK" subtitle="Extended Model Filter" candidates={fiveLeg} required={5} />
+                <BuilderCard title="6-LEG • HIGH RISK" subtitle="Extended Model Filter" candidates={sixLeg} required={6} />
+                <BuilderCard title="8-LEG • LONG SHOT" subtitle="Long-Shot Model Filter" candidates={eightLeg} required={8} />
               </section>
 
               <div className="mt-5 rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 text-xs text-slate-400">
@@ -1459,17 +1460,40 @@ function BuilderCard({
   subtitle,
   candidates,
   required,
+  featured = false,
 }: {
   title: string;
   subtitle: string;
   candidates: BetCandidate[];
   required: number;
+  featured?: boolean;
 }) {
   const qualified =
     candidates.length >= required;
 
   return (
-    <article className="rounded-xl border border-green-500/20 bg-white/[0.04] p-6">
+    <article
+      className={
+        featured
+          ? "relative overflow-hidden rounded-xl border-2 border-emerald-400/70 bg-emerald-500/[0.10] p-6 shadow-[0_0_35px_rgba(16,185,129,0.16)] lg:col-span-2"
+          : "rounded-xl border border-green-500/20 bg-white/[0.04] p-6"
+      }
+    >
+      {featured && (
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-4 py-3">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-emerald-300">
+              RDG FEATURED
+            </p>
+            <p className="mt-1 text-sm font-semibold text-white">
+              Strongest current combination under the stricter RDG filters
+            </p>
+          </div>
+          <span className="rounded-full bg-emerald-400 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-black">
+            TOP MODEL FILTER
+          </span>
+        </div>
+      )}
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-xs font-bold uppercase tracking-widest text-green-400">
