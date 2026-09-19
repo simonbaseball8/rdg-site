@@ -761,20 +761,19 @@ const [cfbError, setCfbError] =
     <main className="min-h-screen bg-[#020806] text-white">
       <header className="border-b border-white/10">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-500 font-black text-black">
-              RDG
-            </div>
+          <div className="flex items-center gap-4">
+            <img
+              src="/rdg-logo.png"
+              alt="Responsible Degenerate Gambling"
+              className="h-16 w-auto max-w-[230px] object-contain sm:h-20 sm:max-w-[320px]"
+            />
 
-            <div>
-              <h1 className="font-bold uppercase tracking-wide">
-                Responsible Degenerate
-                Gambling
-              </h1>
-
-              <p className="text-xs uppercase text-slate-500">
-                Data-Driven Betting
-                Dashboard
+            <div className="hidden border-l border-white/10 pl-4 md:block">
+              <p className="text-xs font-bold uppercase tracking-[0.22em] text-green-400">
+                RDG SPORTS
+              </p>
+              <p className="mt-1 text-xs uppercase tracking-wider text-slate-500">
+                Data-Driven Betting Dashboard
               </p>
             </div>
           </div>
