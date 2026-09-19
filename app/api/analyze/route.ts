@@ -76,6 +76,19 @@ function parseCsv(csv: string) {
   });
 }
 
+/*
+  v0.5.1:
+  Only regular-season games are used.
+  This prevents playoff teams from receiving extra games
+  in the historical baseline.
+*/
+function regularSeasonOnly(rows: Row[]) {
+  return rows.filter(
+    (row) =>
+      (row.season_type ?? "").trim().toUpperCase() === "REG"
+  );
+}
+
 function getTeamRows(stats: Row[], team: string) {
   return stats.filter(
     (row) =>
@@ -370,14 +383,6 @@ function getLean(
   };
 }
 
-/*
-  v0.5:
-  Compare the direction of RDG's matchup advantage
-  against the sportsbook spread.
-
-  This does NOT claim the RDG score equals projected
-  NFL points. Calibration comes later.
-*/
 function analyzeMarket(
   awayTeam: string,
   homeTeam: string,
@@ -426,8 +431,7 @@ function analyzeMarket(
   }
 
   const modelMarketAgreement =
-    modelLean === "EVEN" ||
-    marketFavorite === "EVEN"
+    modelLean === "EVEN" || marketFavorite === "EVEN"
       ? "neutral"
       : modelLean === marketFavorite
       ? "agree"
@@ -450,14 +454,12 @@ function analyzeMarket(
   return {
     model_difference: modelDifference,
     model_lean: modelLean,
-
     market_favorite: marketFavorite,
 
     hard_rock_spread: {
       away_team: awayTeam,
       away_line: awaySpread?.line ?? null,
       away_odds: awaySpread?.odds ?? null,
-
       home_team: homeTeam,
       home_line: homeSpread?.line ?? null,
       home_odds: homeSpread?.odds ?? null,
@@ -466,17 +468,15 @@ function analyzeMarket(
     hard_rock_moneyline: {
       away_team: awayTeam,
       away_odds: awayMoneyline?.odds ?? null,
-
       home_team: homeTeam,
       home_odds: homeMoneyline?.odds ?? null,
     },
 
     model_market_agreement: modelMarketAgreement,
-
     review_priority: reviewPriority,
 
     calibration_note:
-      "RDG matchup score is not yet calibrated to projected point margin, so this is a market comparison signal rather than a quantified betting edge.",
+      "RDG matchup score is not yet calibrated to projected point margin.",
   };
 }
 
@@ -547,9 +547,21 @@ export async function GET() {
 
     const oddsData = await oddsResponse.json();
 
-    const stats24 = parseCsv(await response24.text());
-    const stats25 = parseCsv(await response25.text());
-    const stats26 = parseCsv(await response26.text());
+    /*
+      IMPORTANT:
+      Remove postseason games before building profiles.
+    */
+    const stats24 = regularSeasonOnly(
+      parseCsv(await response24.text())
+    );
+
+    const stats25 = regularSeasonOnly(
+      parseCsv(await response25.text())
+    );
+
+    const stats26 = regularSeasonOnly(
+      parseCsv(await response26.text())
+    );
 
     const games = (oddsData.events ?? [])
       .map((event: any) => {
@@ -635,7 +647,6 @@ export async function GET() {
         return {
           event_id: event.event_id,
           start_date: event.start_date,
-
           away_team: event.team1,
           home_team: event.team2,
 
@@ -644,7 +655,6 @@ export async function GET() {
           total,
 
           stats_connected: statsConnected,
-
           away_profile: awayProfile,
           home_profile: homeProfile,
 
@@ -652,11 +662,10 @@ export async function GET() {
             away_matchup_score: awayScore,
             home_matchup_score: homeScore,
             lean,
-
             market_analysis: marketAnalysis,
 
             data_note:
-              "2024 + 2025 + 2026 weighted offense, defense, and Hard Rock market comparison",
+              "Regular-season-only 2024 + 2025 + 2026 weighted offense/defense and Hard Rock market comparison",
           },
         };
       })
@@ -676,10 +685,10 @@ export async function GET() {
       sportsbook: "Hard Rock Bet",
       sport: "NFL",
 
-      model_version: "RDG NFL v0.5",
+      model_version: "RDG NFL v0.5.1",
 
       methodology:
-        "2024 + 2025 + 2026 weighted offense/defense model compared with current Hard Rock lines",
+        "Regular-season-only 2024 + 2025 + 2026 weighted offense/defense model compared with current Hard Rock lines",
 
       games_found: games.length,
 
