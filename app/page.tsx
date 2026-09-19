@@ -758,40 +758,49 @@ const [cfbError, setCfbError] =
   const eightLeg = diversifiedSelection(higherRiskCandidates, 8, 2, 7);
 
   return (
-    <main className="min-h-screen bg-[#020806] text-white">
-      <header className="border-b border-white/10">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5">
-          <div className="flex items-center gap-4">
+    <main className="min-h-screen bg-[radial-gradient(circle_at_50%_18%,rgba(16,185,129,0.07),transparent_28%),linear-gradient(180deg,#020a07_0%,#020806_42%,#010403_100%)] text-white">
+      <header className="border-b border-emerald-500/20 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.16),transparent_38%),linear-gradient(180deg,#03110c_0%,#020806_100%)]">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-6 px-6 py-5">
+          <div className="flex min-w-0 items-center gap-5">
             <img
               src="/rdg-logo.png"
               alt="Responsible Degenerate Gambling"
-              className="h-16 w-auto max-w-[230px] object-contain sm:h-20 sm:max-w-[320px]"
+              className="h-16 w-auto max-w-[220px] shrink-0 object-contain sm:h-20 sm:max-w-[300px]"
             />
-
-            <div className="hidden border-l border-white/10 pl-4 md:block">
-              <p className="text-xs font-bold uppercase tracking-[0.22em] text-green-400">
-                RDG SPORTS
+            <div className="hidden border-l border-white/10 pl-5 md:block">
+              <p className="text-2xl font-black italic uppercase tracking-tight text-white">
+                RDG <span className="text-emerald-400">SPORTS</span>
               </p>
-              <p className="mt-1 text-xs uppercase tracking-wider text-slate-500">
+              <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-400">
                 Data-Driven Betting Dashboard
               </p>
             </div>
           </div>
 
-          <div className="text-xs font-bold text-green-400">
-            ● LIVE
+          <div className="flex items-center gap-4">
+            <div className="hidden rounded-xl border border-white/10 bg-black/20 px-5 py-3 text-right lg:block">
+              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">
+                Responsible Betting
+              </p>
+              <p className="mt-1 text-xs font-bold text-white">
+                Data • Discipline • Tracking
+              </p>
+            </div>
+            <div className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[11px] font-black uppercase tracking-wider text-emerald-400">
+              ● LIVE
+            </div>
           </div>
         </div>
       </header>
 
-      <div className="mx-auto max-w-7xl px-6 py-8">
-        <div className="sticky top-0 z-30 -mx-6 mb-8 flex gap-2 overflow-x-auto border-b border-white/10 bg-[#020806]/95 px-6 py-3 backdrop-blur">
+      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
+        <div className="sticky top-0 z-30 -mx-4 mb-8 flex gap-2 overflow-x-auto border-y border-emerald-500/15 bg-[#020806]/95 px-4 py-4 shadow-[0_12px_30px_rgba(0,0,0,0.25)] backdrop-blur sm:-mx-6 sm:px-6">
   <button
     onClick={() => setActiveSport("NFL")}
     className={
       activeSport === "NFL"
-        ? "rounded-lg bg-green-500 px-5 py-3 text-sm font-bold text-black"
-        : "rounded-lg border border-white/10 bg-white/[0.03] px-5 py-3 text-sm font-bold text-slate-400"
+        ? "rounded-xl border border-emerald-300/50 bg-emerald-400 px-6 py-3 text-sm font-black text-black shadow-[0_0_22px_rgba(52,211,153,0.18)]"
+        : "rounded-xl border border-white/10 bg-white/[0.035] px-6 py-3 text-sm font-bold text-slate-300 transition hover:border-emerald-500/30 hover:bg-emerald-500/[0.06] hover:text-white"
     }
   >
     NFL
@@ -801,8 +810,8 @@ const [cfbError, setCfbError] =
     onClick={() => setActiveSport("CFB")}
     className={
       activeSport === "CFB"
-        ? "rounded-lg bg-green-500 px-5 py-3 text-sm font-bold text-black"
-        : "rounded-lg border border-white/10 bg-white/[0.03] px-5 py-3 text-sm font-bold text-slate-400"
+        ? "rounded-xl border border-emerald-300/50 bg-emerald-400 px-6 py-3 text-sm font-black text-black shadow-[0_0_22px_rgba(52,211,153,0.18)]"
+        : "rounded-xl border border-white/10 bg-white/[0.035] px-6 py-3 text-sm font-bold text-slate-300 transition hover:border-emerald-500/30 hover:bg-emerald-500/[0.06] hover:text-white"
     }
   >
     COLLEGE FOOTBALL
@@ -810,30 +819,30 @@ const [cfbError, setCfbError] =
 
   <button
     onClick={() => setActiveSport("MLB")}
-    className={activeSport === "MLB" ? "rounded-lg bg-green-500 px-5 py-3 text-sm font-bold text-black" : "rounded-lg border border-white/10 bg-white/[0.03] px-5 py-3 text-sm font-bold text-slate-400"}
+    className={activeSport === "MLB" ? "rounded-xl border border-emerald-300/50 bg-emerald-400 px-6 py-3 text-sm font-black text-black shadow-[0_0_22px_rgba(52,211,153,0.18)]" : "rounded-xl border border-white/10 bg-white/[0.035] px-6 py-3 text-sm font-bold text-slate-300 transition hover:border-emerald-500/30 hover:bg-emerald-500/[0.06] hover:text-white"}
   >
     MLB
   </button>
 
   <button
     onClick={() => setActiveSport("NHL")}
-    className={activeSport === "NHL" ? "rounded-lg bg-green-500 px-5 py-3 text-sm font-bold text-black" : "rounded-lg border border-white/10 bg-white/[0.03] px-5 py-3 text-sm font-bold text-slate-400"}
+    className={activeSport === "NHL" ? "rounded-xl border border-emerald-300/50 bg-emerald-400 px-6 py-3 text-sm font-black text-black shadow-[0_0_22px_rgba(52,211,153,0.18)]" : "rounded-xl border border-white/10 bg-white/[0.035] px-6 py-3 text-sm font-bold text-slate-300 transition hover:border-emerald-500/30 hover:bg-emerald-500/[0.06] hover:text-white"}
   >
     NHL
   </button>
 </div>
-        <div className="mb-8 grid gap-3 sm:grid-cols-3">
-          <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] p-4">
+        <div className="mb-10 grid gap-4 md:grid-cols-3">
+          <div className="rounded-2xl border border-emerald-400/60 bg-[linear-gradient(135deg,rgba(16,185,129,0.16),rgba(16,185,129,0.04))] p-5 shadow-[0_0_28px_rgba(16,185,129,0.08)]">
             <p className="text-[10px] font-black uppercase tracking-widest text-emerald-400">1 • START HERE</p>
             <p className="mt-1 text-sm font-bold">Top RDG Parlay</p>
             <p className="mt-1 text-xs text-slate-500">The strongest combination that passes the sport&apos;s stricter model filters.</p>
           </div>
-          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+          <div className="rounded-2xl border border-white/10 bg-[linear-gradient(145deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] p-5 transition hover:border-emerald-500/25">
             <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">2 • COMPARE</p>
             <p className="mt-1 text-sm font-bold">Model vs Market</p>
             <p className="mt-1 text-xs text-slate-500">See where RDG differs from the current Hard Rock market.</p>
           </div>
-          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+          <div className="rounded-2xl border border-white/10 bg-[linear-gradient(145deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] p-5 transition hover:border-emerald-500/25">
             <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">3 • CHECK HISTORY</p>
             <p className="mt-1 text-sm font-bold">Performance Dashboard</p>
             <p className="mt-1 text-xs text-slate-500">Review tracked results separately from today&apos;s model signals.</p>
@@ -1460,9 +1469,9 @@ const [cfbError, setCfbError] =
           )}
         </section>
 
-        <footer className="mt-12 border-t border-white/10 py-6 text-xs text-slate-600">
-          Responsible Degenerate
-          Gambling • Bet responsibly
+        <footer className="mt-16 rounded-2xl border border-white/10 bg-white/[0.025] px-6 py-6 text-center">
+          <p className="text-xs font-black uppercase tracking-[0.22em] text-emerald-400">RESPONSIBLE DEGENERATE GAMBLING</p>
+          <p className="mt-2 text-xs text-slate-500">Data-driven analysis • Track results • Bet responsibly</p>
         </footer>
       </div>
     </main>
@@ -1670,7 +1679,7 @@ function NFLGameCard({
   });
 
   return (
-    <article className="rounded-xl border border-green-500/20 bg-white/[0.04] p-6">
+    <article className="rounded-2xl border border-emerald-500/25 bg-[linear-gradient(145deg,rgba(16,185,129,0.07),rgba(255,255,255,0.025))] p-6 shadow-[0_16px_40px_rgba(0,0,0,0.18)] transition hover:border-emerald-400/45">
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-xs font-bold uppercase tracking-widest text-green-400">
@@ -2012,7 +2021,7 @@ function NHLSection({ nhl, loading, error }: { nhl: NHLAnalysis | null; loading:
 
 function NHLBuilderCard({ title, subtitle, candidates, required }: { title: string; subtitle: string; candidates: NHLBetCandidate[]; required: number }) {
   const qualified = candidates.length >= required;
-  return <article className="rounded-xl border border-green-500/20 bg-white/[0.04] p-6"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-widest text-green-400">{subtitle}</p><h3 className="mt-2 text-xl font-bold">{title}</h3></div><span className={qualified ? "rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-bold text-green-400" : "rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-400"}>{qualified ? "QUALIFIED" : "NOT ENOUGH LEGS"}</span></div>{candidates.length === 0 ? <div className="mt-6 rounded-lg border border-white/10 bg-black/20 p-4"><p className="font-bold">No qualifying selection</p><p className="mt-2 text-xs text-slate-500">RDG will not force preseason or weaker games into this card.</p></div> : <div className="mt-6 space-y-3">{candidates.map((c,i)=><div key={c.event_id} className="rounded-lg border border-white/10 bg-black/20 p-4"><p className="text-[10px] font-bold uppercase text-slate-500">{required > 1 ? `LEG ${i+1}` : c.signal}</p><div className="mt-1 flex justify-between gap-4"><div><div className="flex items-center gap-3"><TeamLogo sport="NHL" team={c.team} /><p className="text-lg font-bold">{c.display_bet}</p></div><p className="text-xs text-slate-500">{c.matchup}</p></div><div className="text-right"><p className="font-bold text-green-400">{c.edge.toFixed(1)}%</p><p className="text-[10px] uppercase text-slate-500">Model vs Market</p></div></div><p className="mt-3 text-xs text-slate-500">Model {c.model_probability.toFixed(1)}% • Hard Rock {c.odds || "—"}</p></div>)}</div>}</article>;
+  return <article className="rounded-2xl border border-emerald-500/25 bg-[linear-gradient(145deg,rgba(16,185,129,0.07),rgba(255,255,255,0.025))] p-6 shadow-[0_16px_40px_rgba(0,0,0,0.18)] transition hover:border-emerald-400/45"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-widest text-green-400">{subtitle}</p><h3 className="mt-2 text-xl font-bold">{title}</h3></div><span className={qualified ? "rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-bold text-green-400" : "rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-400"}>{qualified ? "QUALIFIED" : "NOT ENOUGH LEGS"}</span></div>{candidates.length === 0 ? <div className="mt-6 rounded-lg border border-white/10 bg-black/20 p-4"><p className="font-bold">No qualifying selection</p><p className="mt-2 text-xs text-slate-500">RDG will not force preseason or weaker games into this card.</p></div> : <div className="mt-6 space-y-3">{candidates.map((c,i)=><div key={c.event_id} className="rounded-lg border border-white/10 bg-black/20 p-4"><p className="text-[10px] font-bold uppercase text-slate-500">{required > 1 ? `LEG ${i+1}` : c.signal}</p><div className="mt-1 flex justify-between gap-4"><div><div className="flex items-center gap-3"><TeamLogo sport="NHL" team={c.team} /><p className="text-lg font-bold">{c.display_bet}</p></div><p className="text-xs text-slate-500">{c.matchup}</p></div><div className="text-right"><p className="font-bold text-green-400">{c.edge.toFixed(1)}%</p><p className="text-[10px] uppercase text-slate-500">Model vs Market</p></div></div><p className="mt-3 text-xs text-slate-500">Model {c.model_probability.toFixed(1)}% • Hard Rock {c.odds || "—"}</p></div>)}</div>}</article>;
 }
 
 function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading: boolean; error: string }) {
@@ -2366,7 +2375,7 @@ function MLBGameCard({ game }: { game: MLBGame }) {
     : "Time TBD";
 
   return (
-    <article className="rounded-xl border border-green-500/20 bg-white/[0.04] p-6">
+    <article className="rounded-2xl border border-emerald-500/25 bg-[linear-gradient(145deg,rgba(16,185,129,0.07),rgba(255,255,255,0.025))] p-6 shadow-[0_16px_40px_rgba(0,0,0,0.18)] transition hover:border-emerald-400/45">
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-xs font-bold uppercase tracking-widest text-green-400">
