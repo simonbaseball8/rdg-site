@@ -170,7 +170,17 @@ export default function Home() {
 
   const [nflError, setNflError] =
     useState("");
+const [activeSport, setActiveSport] =
+  useState<"NFL" | "CFB">("NFL");
 
+const [cfb, setCfb] =
+  useState<CFBAnalysis | null>(null);
+
+const [cfbLoading, setCfbLoading] =
+  useState(true);
+
+const [cfbError, setCfbError] =
+  useState("");
   useEffect(() => {
     async function loadParlays() {
       const { data, error } = await supabase
