@@ -721,6 +721,8 @@ const [cfbError, setCfbError] =
     )}
   </div>
 )}
+        {activeSport === "NFL" && (
+  <>
         <p className="text-xs font-bold uppercase tracking-[0.25em] text-green-400">
           RDG NFL MODEL
         </p>
