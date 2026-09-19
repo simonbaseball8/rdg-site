@@ -2388,22 +2388,27 @@ function formatSpread(
 
   return String(value);
 }function PerformanceDashboard() {
-  const [picks, setPicks] = useState<
-    {
-      status: string | null;
-      tier: string | null;
-    }[]
-  >([]);
+  type PerformancePick = {
+    sport: string | null;
+    status: string | null;
+    tier: string | null;
+  };
+
+  const [picks, setPicks] = useState<PerformancePick[]>([]);
   const [loading, setLoading] = useState(true);
+  const [performanceError, setPerformanceError] = useState("");
 
   useEffect(() => {
     async function loadPerformance() {
       const { data, error } = await supabase
         .from("rdg_picks")
-        .select("status, tier");
+        .select("sport, status, tier");
 
-      if (!error && data) {
-        setPicks(data);
+      if (error) {
+        console.error(error);
+        setPerformanceError(error.message);
+      } else {
+        setPicks((data as PerformancePick[]) || []);
       }
 
       setLoading(false);
@@ -2412,28 +2417,62 @@ function formatSpread(
     loadPerformance();
   }, []);
 
-  const graded = picks.filter(
-    (pick) =>
-      pick.status === "won" ||
-      pick.status === "lost" ||
-      pick.status === "push"
-  );
+  const sports = ["NFL", "MLB", "NHL"];
 
-  const wins = graded.filter((pick) => pick.status === "won").length;
-  const losses = graded.filter((pick) => pick.status === "lost").length;
-  const pushes = graded.filter((pick) => pick.status === "push").length;
+  const getStats = (sport?: string) => {
+    const rows = sport
+      ? picks.filter((pick) => pick.sport === sport)
+      : picks;
 
-  const decisions = wins + losses;
-  const winRate =
-    decisions > 0 ? ((wins / decisions) * 100).toFixed(1) : "—";
+    const wins = rows.filter((pick) => pick.status === "won").length;
+    const losses = rows.filter((pick) => pick.status === "lost").length;
+    const pushes = rows.filter((pick) => pick.status === "push").length;
+    const pending = rows.filter((pick) => pick.status === "pending").length;
+    const graded = wins + losses + pushes;
+    const decisions = wins + losses;
+    const winRate = decisions > 0 ? ((wins / decisions) * 100).toFixed(1) : "—";
 
-  const tierRecord = (tier: string) => {
-    const rows = graded.filter((pick) => pick.tier === tier);
-    const w = rows.filter((pick) => pick.status === "won").length;
-    const l = rows.filter((pick) => pick.status === "lost").length;
-    const p = rows.filter((pick) => pick.status === "push").length;
+    return { rows, wins, losses, pushes, pending, graded, winRate };
+  };
 
-    return `${w}-${l}-${p}`;
+  const overall = getStats();
+
+  const tierRows = (sport: string) => {
+    const rows = picks.filter(
+      (pick) =>
+        pick.sport === sport &&
+        (pick.status === "won" ||
+          pick.status === "lost" ||
+          pick.status === "push")
+    );
+
+    const tiers = Array.from(
+      new Set(rows.map((pick) => pick.tier).filter((tier): tier is string => Boolean(tier)))
+    );
+
+    const priority: Record<string, number> = {
+      "Priority Review": 4,
+      "Strong Review": 3,
+      Watch: 2,
+      "Small Sample Watch": 1,
+    };
+
+    return tiers
+      .map((tier) => {
+        const tierPicks = rows.filter((pick) => pick.tier === tier);
+        const wins = tierPicks.filter((pick) => pick.status === "won").length;
+        const losses = tierPicks.filter((pick) => pick.status === "lost").length;
+        const pushes = tierPicks.filter((pick) => pick.status === "push").length;
+        const decisions = wins + losses;
+        const winRate = decisions > 0 ? ((wins / decisions) * 100).toFixed(1) : "—";
+
+        return { tier, wins, losses, pushes, winRate };
+      })
+      .sort(
+        (a, b) =>
+          (priority[b.tier] || 0) - (priority[a.tier] || 0) ||
+          a.tier.localeCompare(b.tier)
+      );
   };
 
   return (
@@ -2442,13 +2481,18 @@ function formatSpread(
         RDG PERFORMANCE
       </p>
 
-      <h2 className="mt-3 text-3xl font-bold">
-        Historical Results
-      </h2>
+      <h2 className="mt-3 text-3xl font-bold">Tracked Model Results</h2>
 
-      <p className="mt-2 text-sm text-slate-400">
-        Actual graded RDG picks. Results update automatically after games are graded.
+      <p className="mt-2 max-w-3xl text-sm text-slate-400">
+        Actual saved RDG selections graded after games finish. NFL, MLB, and NHL are
+        tracked separately so one sport does not hide another sport&apos;s performance.
       </p>
+
+      {performanceError && (
+        <div className="mt-6 rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-400">
+          Performance dashboard error: {performanceError}
+        </div>
+      )}
 
       <div className="mt-8 grid gap-4 md:grid-cols-4">
         <Stat
@@ -2456,46 +2500,87 @@ function formatSpread(
           value={
             loading
               ? "..."
-              : `${wins}-${losses}-${pushes}`
+              : `${overall.wins}-${overall.losses}-${overall.pushes}`
           }
         />
-
-        <Stat
-          title="WIN RATE"
-          value={loading ? "..." : `${winRate}%`}
-        />
-
-        <Stat
-          title="GRADED PICKS"
-          value={loading ? "..." : String(graded.length)}
-        />
-
-        <Stat
-          title="PENDING"
-          value={loading ? "..." : String(picks.length - graded.length)}
-        />
+        <Stat title="OVERALL WIN RATE" value={loading ? "..." : overall.winRate === "—" ? "—" : `${overall.winRate}%`} />
+        <Stat title="GRADED PICKS" value={loading ? "..." : String(overall.graded)} />
+        <Stat title="PENDING PICKS" value={loading ? "..." : String(overall.pending)} />
       </div>
 
-      <div className="mt-6 grid gap-4 md:grid-cols-4">
-        <BoardValue
-          title="BEST STRAIGHT"
-          value={loading ? "..." : tierRecord("Best Straight")}
-        />
+      <div className="mt-8 grid gap-5 lg:grid-cols-3">
+        {sports.map((sport) => {
+          const stats = getStats(sport);
+          const tiers = tierRows(sport);
 
-        <BoardValue
-          title="SAFER 2-LEG"
-          value={loading ? "..." : tierRecord("Safer 2-Leg")}
-        />
+          return (
+            <article
+              key={sport}
+              className="rounded-xl border border-white/10 bg-white/[0.03] p-6"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-widest text-green-400">
+                    {sport} TRACKING
+                  </p>
+                  <h3 className="mt-2 text-2xl font-bold">
+                    {loading ? "..." : `${stats.wins}-${stats.losses}-${stats.pushes}`}
+                  </h3>
+                  <p className="mt-1 text-xs text-slate-500">W-L-P record</p>
+                </div>
 
-        <BoardValue
-          title="BALANCED 3-LEG"
-          value={loading ? "..." : tierRecord("Balanced 3-Leg")}
-        />
+                <span className="rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-bold text-green-400">
+                  {loading
+                    ? "..."
+                    : stats.winRate === "—"
+                      ? "NO RESULTS"
+                      : `${stats.winRate}%`}
+                </span>
+              </div>
 
-        <BoardValue
-          title="HIGHER-RISK 4-LEG"
-          value={loading ? "..." : tierRecord("Higher-Risk 4-Leg")}
-        />
+              <div className="mt-5 grid grid-cols-2 gap-3">
+                <MiniStat title="GRADED" value={loading ? "..." : String(stats.graded)} />
+                <MiniStat title="PENDING" value={loading ? "..." : String(stats.pending)} />
+              </div>
+
+              <div className="mt-5 border-t border-white/10 pt-4">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                  REVIEW TIER PERFORMANCE
+                </p>
+
+                {loading ? (
+                  <p className="mt-3 text-sm text-slate-500">Loading...</p>
+                ) : tiers.length === 0 ? (
+                  <p className="mt-3 text-sm text-slate-500">No graded picks yet.</p>
+                ) : (
+                  <div className="mt-3 space-y-2">
+                    {tiers.map((tier) => (
+                      <div
+                        key={`${sport}-${tier.tier}`}
+                        className="flex items-center justify-between gap-4 rounded-lg border border-white/10 bg-black/20 px-3 py-2"
+                      >
+                        <div>
+                          <p className="text-xs font-semibold text-slate-300">{tier.tier}</p>
+                          <p className="mt-1 text-[10px] text-slate-600">
+                            {tier.wins}-{tier.losses}-{tier.pushes}
+                          </p>
+                        </div>
+                        <p className="text-xs font-bold text-green-400">
+                          {tier.winRate === "—" ? "—" : `${tier.winRate}%`}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </article>
+          );
+        })}
+      </div>
+
+      <div className="mt-5 rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 text-xs text-slate-400">
+        Win rate excludes pushes. Results describe tracked historical selections only and
+        do not guarantee future outcomes or profitability.
       </div>
     </section>
   );
