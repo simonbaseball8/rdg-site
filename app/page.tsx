@@ -744,13 +744,18 @@ const [cfbError, setCfbError] =
       ? saferCandidates[0]
       : null;
 
-  // Build different cards instead of making every larger parlay a copy of the smaller one.
+  // Build genuinely different NFL cards instead of simply extending the same core parlay.
+  // Every card uses a different starting point and traversal through the qualified pool.
   const saferTwoLeg = diversifiedSelection(saferCandidates, 2, 0, 1);
-  const balancedThreeLeg = diversifiedSelection(balancedCandidates, 3, 1, 2);
-  const higherRiskFourLeg = diversifiedSelection(higherRiskCandidates, 4, 2, 3);
-  const fiveLeg = diversifiedSelection(higherRiskCandidates, 5, 0, 2);
-  const sixLeg = diversifiedSelection(higherRiskCandidates, 6, 1, 3);
-  const eightLeg = diversifiedSelection(higherRiskCandidates, 8, 3, 5);
+
+  const balancedThreePool =
+    balancedCandidates.length >= 3 ? balancedCandidates : higherRiskCandidates;
+  const balancedThreeLeg = diversifiedSelection(balancedThreePool, 3, 2, 2);
+
+  const higherRiskFourLeg = diversifiedSelection(higherRiskCandidates, 4, 4, 3);
+  const fiveLeg = diversifiedSelection(higherRiskCandidates, 5, 1, 4);
+  const sixLeg = diversifiedSelection(higherRiskCandidates, 6, 5, 5);
+  const eightLeg = diversifiedSelection(higherRiskCandidates, 8, 2, 7);
 
   return (
     <main className="min-h-screen bg-[#020806] text-white">
