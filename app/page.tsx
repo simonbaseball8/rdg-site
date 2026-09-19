@@ -1671,48 +1671,177 @@ function NFLBoardRow({
 }
 
 function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading: boolean; error: string }) {
-  const ranked = [...(mlb?.games || [])].sort((a, b) => {
-    const priority: Record<string, number> = { "Priority Review": 4, "Strong Review": 3, Watch: 2, Pass: 1 };
-    return (priority[b.rdg.signal] || 0) - (priority[a.rdg.signal] || 0) || b.rdg.model_market_edge - a.rdg.model_market_edge;
+  const games = (mlb?.games || []).filter((game) => game && game.rdg);
+  const priority: Record<string, number> = {
+    "Priority Review": 4,
+    "Strong Review": 3,
+    Watch: 2,
+    Pass: 1,
+  };
+
+  const ranked = [...games].sort((a, b) => {
+    const signalDiff = (priority[b.rdg?.signal || "Pass"] || 0) - (priority[a.rdg?.signal || "Pass"] || 0);
+    if (signalDiff !== 0) return signalDiff;
+    return Number(b.rdg?.model_market_edge || 0) - Number(a.rdg?.model_market_edge || 0);
   });
-  const reviews = ranked.filter((g) => g.rdg.signal !== "Pass");
+
+  const reviews = ranked.filter((game) => game.rdg?.signal !== "Pass");
+
   return (
     <div>
-      <p className="text-xs font-bold uppercase tracking-[0.25em] text-green-400">RDG MLB MODEL • v1.1 CALIBRATED</p>
+      <p className="text-xs font-bold uppercase tracking-[0.25em] text-green-400">
+        RDG MLB MODEL • v1.1 CALIBRATED
+      </p>
+
       <h2 className="mt-3 text-3xl font-bold">Live MLB Analysis</h2>
-      <p className="mt-2 text-sm text-slate-400">Calibrated RDG team probabilities with a conservative experimental starting-pitcher adjustment, compared with current Hard Rock Bet moneylines.</p>
-      <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-300">The calibrated team model was evaluated on 2025 data. The live pitcher adjustment is still experimental. Model probabilities are not guarantees or evidence of profitability.</div>
+
+      <p className="mt-2 text-sm text-slate-400">
+        RDG calibrated team probabilities with a conservative experimental starting-pitcher adjustment compared with current Hard Rock Bet moneylines.
+      </p>
+
+      <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-300">
+        The 2025 held-out result applies to the calibrated team model. The live pitcher adjustment is still experimental. Model probabilities are not guarantees or evidence of profitability.
+      </div>
+
       <section className="mt-8 grid gap-4 md:grid-cols-4">
-        <Stat title="MLB GAMES" value={mlb ? String(mlb.games_found) : "—"} />
-        <Stat title="PRIORITY REVIEWS" value={mlb ? String(mlb.priority_reviews) : "—"} />
-        <Stat title="STRONG REVIEWS" value={mlb ? String(mlb.strong_reviews) : "—"} />
-        <Stat title="WATCH REVIEWS" value={mlb ? String(mlb.watch_reviews) : "—"} />
+        <Stat title="MLB GAMES" value={mlb ? String(mlb.games_found ?? games.length) : "—"} />
+        <Stat title="PRIORITY REVIEWS" value={mlb ? String(mlb.priority_reviews ?? 0) : "—"} />
+        <Stat title="STRONG REVIEWS" value={mlb ? String(mlb.strong_reviews ?? 0) : "—"} />
+        <Stat title="WATCH REVIEWS" value={mlb ? String(mlb.watch_reviews ?? 0) : "—"} />
       </section>
-      {loading && <div className="mt-8 rounded-xl border border-white/10 bg-white/[0.03] p-6">Running RDG MLB model...</div>}
-      {error && <div className="mt-8 rounded-xl border border-red-500/30 bg-red-500/10 p-6 text-red-400">MLB model error: {error}</div>}
-      {!loading && !error && mlb && (<>
-        <section className="mt-8 grid gap-5 lg:grid-cols-2">{reviews.map((game) => <MLBGameCard key={`${game.event_id}-${game.game_pk ?? "x"}`} game={game} />)}</section>
-        <div className="mt-12 border-t border-white/10 pt-10"><p className="text-xs font-bold uppercase tracking-[0.25em] text-slate-500">FULL MLB BOARD</p><h2 className="mt-3 text-2xl font-bold">All Games</h2></div>
-        <section className="mt-6 space-y-3">{ranked.map((game) => <MLBBoardRow key={`${game.event_id}-${game.game_pk ?? "x"}`} game={game} />)}</section>
-      </>)}
+
+      {loading && (
+        <div className="mt-8 rounded-xl border border-white/10 bg-white/[0.03] p-6">
+          Running RDG MLB model...
+        </div>
+      )}
+
+      {error && (
+        <div className="mt-8 rounded-xl border border-red-500/30 bg-red-500/10 p-6 text-red-400">
+          MLB model error: {error}
+        </div>
+      )}
+
+      {!loading && !error && mlb && (
+        <>
+          {reviews.length > 0 ? (
+            <section className="mt-8 grid gap-5 lg:grid-cols-2">
+              {reviews.map((game, index) => (
+                <MLBGameCard
+                  key={`${game.event_id || "mlb"}-${game.game_pk ?? "x"}-${index}`}
+                  game={game}
+                />
+              ))}
+            </section>
+          ) : (
+            <div className="mt-8 rounded-xl border border-white/10 bg-white/[0.03] p-6">
+              No MLB review signals right now.
+            </div>
+          )}
+
+          <div className="mt-12 border-t border-white/10 pt-10">
+            <p className="text-xs font-bold uppercase tracking-[0.25em] text-slate-500">
+              FULL MLB BOARD
+            </p>
+            <h2 className="mt-3 text-2xl font-bold">All Games</h2>
+          </div>
+
+          <section className="mt-6 space-y-3">
+            {ranked.map((game, index) => (
+              <MLBBoardRow
+                key={`${game.event_id || "mlb-board"}-${game.game_pk ?? "x"}-${index}`}
+                game={game}
+              />
+            ))}
+          </section>
+        </>
+      )}
     </div>
   );
 }
 
 function MLBGameCard({ game }: { game: MLBGame }) {
-  const leanHome = game.rdg.moneyline_lean === game.home_team;
-  const odds = leanHome ? game.hard_rock.moneyline.home_odds : game.hard_rock.moneyline.away_odds;
-  const probability = leanHome ? game.rdg.model_home_probability : game.rdg.model_away_probability;
-  const time = new Date(game.start_date).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-  return <article className="rounded-xl border border-green-500/20 bg-white/[0.04] p-6">
-    <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-widest text-green-400">{game.rdg.signal}</p><h3 className="mt-2 text-xl font-bold">{game.away_team} @ {game.home_team}</h3><p className="mt-1 text-xs text-slate-500">{time} • {game.venue || "MLB"}</p></div><span className="rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-bold text-green-400">{game.rdg.model_market_edge.toFixed(1)}% EDGE</span></div>
-    <div className="mt-6 grid grid-cols-2 gap-3"><MiniStat title="RDG LEAN" value={`${game.rdg.moneyline_lean} ${odds || ""}`} /><MiniStat title="RDG MODEL" value={`${probability.toFixed(1)}%`} /><MiniStat title="AWAY STARTER" value={game.starting_pitchers.away?.name || "TBD"} /><MiniStat title="HOME STARTER" value={game.starting_pitchers.home?.name || "TBD"} /></div>
-    <div className="mt-4 grid grid-cols-2 gap-3"><MiniStat title={`${game.away_team} HARD ROCK`} value={game.hard_rock.moneyline.away_odds || "—"} /><MiniStat title={`${game.home_team} HARD ROCK`} value={game.hard_rock.moneyline.home_odds || "—"} /></div>
-  </article>;
+  const rdg = game.rdg;
+  const moneyline = game.hard_rock?.moneyline;
+  const lean = rdg?.moneyline_lean || rdg?.projected_winner || "—";
+  const leanHome = lean === game.home_team;
+  const odds = leanHome ? moneyline?.home_odds : moneyline?.away_odds;
+  const probability = leanHome ? rdg?.model_home_probability : rdg?.model_away_probability;
+  const edge = Number(rdg?.model_market_edge ?? 0);
+
+  const time = game.start_date
+    ? new Date(game.start_date).toLocaleString("en-US", {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      })
+    : "Time TBD";
+
+  return (
+    <article className="rounded-xl border border-green-500/20 bg-white/[0.04] p-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-widest text-green-400">
+            {rdg?.signal || "Pass"}
+          </p>
+          <h3 className="mt-2 text-xl font-bold">
+            {game.away_team} @ {game.home_team}
+          </h3>
+          <p className="mt-1 text-xs text-slate-500">
+            {time} • {game.venue || "MLB"}
+          </p>
+        </div>
+
+        <span className="rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-bold text-green-400">
+          {edge.toFixed(1)}% EDGE
+        </span>
+      </div>
+
+      <div className="mt-6 grid grid-cols-2 gap-3">
+        <MiniStat title="RDG LEAN" value={`${lean}${odds ? ` ${odds}` : ""}`} />
+        <MiniStat
+          title="RDG MODEL"
+          value={typeof probability === "number" ? `${probability.toFixed(1)}%` : "—"}
+        />
+        <MiniStat title="AWAY STARTER" value={game.starting_pitchers?.away?.name || "TBD"} />
+        <MiniStat title="HOME STARTER" value={game.starting_pitchers?.home?.name || "TBD"} />
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-3">
+        <MiniStat title={`${game.away_team} HARD ROCK`} value={moneyline?.away_odds || "—"} />
+        <MiniStat title={`${game.home_team} HARD ROCK`} value={moneyline?.home_odds || "—"} />
+      </div>
+    </article>
+  );
 }
 
 function MLBBoardRow({ game }: { game: MLBGame }) {
-  return <div className="grid gap-3 rounded-lg border border-white/10 bg-white/[0.03] p-4 md:grid-cols-5 md:items-center"><div><p className="font-bold">{game.away_team} @ {game.home_team}</p><p className="mt-1 text-xs text-slate-500">{game.rdg.signal}</p></div><BoardValue title="RDG WINNER" value={game.rdg.projected_winner} /><BoardValue title="MONEYLINE LEAN" value={game.rdg.moneyline_lean} /><BoardValue title="MODEL PROBABILITY" value={`${(game.rdg.moneyline_lean === game.home_team ? game.rdg.model_home_probability : game.rdg.model_away_probability).toFixed(1)}%`} /><BoardValue title="MODEL VS MARKET" value={`${game.rdg.model_market_edge.toFixed(1)}%`} /></div>;
+  const rdg = game.rdg;
+  const lean = rdg?.moneyline_lean || rdg?.projected_winner || "—";
+  const probability =
+    lean === game.home_team ? rdg?.model_home_probability : rdg?.model_away_probability;
+  const edge = Number(rdg?.model_market_edge ?? 0);
+
+  return (
+    <div className="grid gap-3 rounded-lg border border-white/10 bg-white/[0.03] p-4 md:grid-cols-5 md:items-center">
+      <div>
+        <p className="font-bold">
+          {game.away_team} @ {game.home_team}
+        </p>
+        <p className="mt-1 text-xs text-slate-500">{rdg?.signal || "Pass"}</p>
+      </div>
+
+      <BoardValue title="RDG WINNER" value={rdg?.projected_winner || "—"} />
+      <BoardValue title="MONEYLINE LEAN" value={lean} />
+      <BoardValue
+        title="MODEL PROBABILITY"
+        value={typeof probability === "number" ? `${probability.toFixed(1)}%` : "—"}
+      />
+      <BoardValue title="MODEL VS MARKET" value={`${edge.toFixed(1)}%`} />
+    </div>
+  );
 }
 
 function Stat({
