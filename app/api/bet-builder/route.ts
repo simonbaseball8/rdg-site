@@ -56,7 +56,6 @@ type Candidate = {
   bet_type: "Spread";
   line: number;
   odds: string | null;
-
   display_bet: string;
 
   rdg_projected_winner: string;
@@ -90,11 +89,8 @@ function getCandidate(
     return null;
   }
 
-  const market =
-    game.rdg.market_analysis;
-
-  const history =
-    game.rdg.historical_signal;
+  const market = game.rdg.market_analysis;
+  const history = game.rdg.historical_signal;
 
   const difference =
     market.model_vs_market_difference;
@@ -103,19 +99,14 @@ function getCandidate(
     return null;
   }
 
-  const edge =
-    Math.abs(difference);
+  const edge = Math.abs(difference);
 
-  /*
-    Ignore tiny model/market differences.
-    These are not useful Bet Builder candidates.
-  */
+  // Ignore very small model/market differences.
   if (edge < 2) {
     return null;
   }
 
-  const team =
-    market.spread_lean;
+  const team = market.spread_lean;
 
   if (!team) {
     return null;
@@ -144,25 +135,15 @@ function getCandidate(
   }
 
   /*
-    Ranking score.
+    Ranking score
 
-    The market difference is the primary
-    ranking factor.
+    Model/market difference is the main factor.
 
-    Historical winner accuracy is only a
-    secondary model-history input because
-    it is NOT an ATS win probability.
+    Historical straight-up winner performance
+    is only a secondary ranking factor.
   */
 
-  let score =
-    edge * 10;
-
-  if (
-    history.historical_accuracy !== undefined
-  ) {
-    // Nothing here intentionally.
-    // Compatibility guard.
-  }
+  let score = edge * 10;
 
   if (
     history.historical_winner_accuracy >= 70
@@ -181,14 +162,6 @@ function getCandidate(
   if (history.sample >= 30) {
     score += 3;
   }
-
-  /*
-    If RDG predicts the selected spread team
-    to win outright, give a small ranking bonus.
-
-    A team can still be a valid spread lean
-    without being the projected outright winner.
-  */
 
   if (
     game.rdg.projected_winner === team
@@ -244,8 +217,7 @@ function getCandidate(
   }
 
   return {
-    event_id:
-      game.event_id,
+    event_id: game.event_id,
 
     matchup:
       `${game.away_team} @ ${game.home_team}`,
@@ -395,16 +367,6 @@ export async function GET(
   request: Request
 ) {
   try {
-    /*
-      IMPORTANT FIX:
-
-      Use the deployment's forwarded host/protocol
-      rather than url.origin.
-
-      This prevents Vercel's internal request from
-      accidentally resolving to an HTML redirect.
-    */
-
     const headers =
       new Headers(request.headers);
 
@@ -440,13 +402,6 @@ export async function GET(
             "application/json",
         },
 
-        /*
-          Give Vercel a short server-side cache.
-
-          This helps avoid repeatedly triggering
-          the analysis endpoint during the same
-          short period.
-        */
         next: {
           revalidate: 300,
         },
