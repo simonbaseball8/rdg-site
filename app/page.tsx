@@ -185,6 +185,80 @@ type MLBBetCandidate = {
   starter: string;
 };
 
+type CFBBetCandidate = {
+  event_id: string;
+  matchup: string;
+  team: string;
+  line: number;
+  odds: string | null;
+  display_bet: string;
+  edge: number;
+  signal: string;
+  sample_status: string;
+};
+
+type NHLGame = {
+  game_id: number;
+  event_id: string;
+  date: string;
+  start_time_utc: string;
+  game_type: number;
+  game_type_label: string;
+  game_state: string;
+  matchup: string;
+  away_team: string;
+  home_team: string;
+  model_available: boolean;
+  odds_available: boolean;
+  rdg_projected_winner: string;
+  rdg_home_probability: number;
+  rdg_away_probability: number;
+  projected_winner_probability: number;
+  signal: string;
+  note: string;
+  model_market_edge?: number | null;
+  moneyline_lean?: string | null;
+  hard_rock?: {
+    moneyline?: {
+      away_odds?: string | null;
+      home_odds?: string | null;
+      no_vig_away_probability?: number | null;
+      no_vig_home_probability?: number | null;
+    };
+  };
+};
+
+type NHLAnalysis = {
+  success: boolean;
+  sport: string;
+  version: string;
+  model_status: string;
+  market: string;
+  games_found: number;
+  preseason_games: number;
+  games_with_model: number;
+  games_with_hard_rock_moneylines: number;
+  review_summary: {
+    priority_reviews: number;
+    strong_reviews: number;
+    watches: number;
+    preseason_watches: number;
+  };
+  games: NHLGame[];
+};
+
+type NHLBetCandidate = {
+  event_id: string;
+  matchup: string;
+  team: string;
+  odds: string | null;
+  display_bet: string;
+  model_probability: number;
+  market_probability: number | null;
+  edge: number;
+  signal: string;
+};
+
 type BetCandidate = {
   event_id: string;
   matchup: string;
@@ -216,7 +290,7 @@ export default function Home() {
   const [nflError, setNflError] =
     useState("");
 const [activeSport, setActiveSport] =
-  useState<"NFL" | "CFB" | "MLB">("NFL");
+  useState<"NFL" | "CFB" | "MLB" | "NHL">("NFL");
 
 const [cfb, setCfb] =
   useState<CFBAnalysis | null>(null);
@@ -230,6 +304,9 @@ const [cfbError, setCfbError] =
   const [mlb, setMlb] = useState<MLBAnalysis | null>(null);
   const [mlbLoading, setMlbLoading] = useState(true);
   const [mlbError, setMlbError] = useState("");
+  const [nhl, setNhl] = useState<NHLAnalysis | null>(null);
+  const [nhlLoading, setNhlLoading] = useState(true);
+  const [nhlError, setNhlError] = useState("");
   useEffect(() => {
     async function loadParlays() {
       const { data, error } = await supabase
@@ -331,10 +408,24 @@ const [cfbError, setCfbError] =
       }
     }
 
+    async function loadNHL() {
+      try {
+        const response = await fetch("/api/nhl-picks", { cache: "no-store" });
+        if (!response.ok) throw new Error(`NHL analysis failed: ${response.status}`);
+        setNhl(await response.json());
+      } catch (err) {
+        console.error(err);
+        setNhlError(err instanceof Error ? err.message : "NHL analysis failed");
+      } finally {
+        setNhlLoading(false);
+      }
+    }
+
     loadParlays();
     loadNFL();
     loadCFB();
     loadMLB();
+    loadNHL();
   }, []);
 
   const activeParlays =
@@ -590,6 +681,10 @@ const [cfbError, setCfbError] =
   const higherRiskFourLeg =
     higherRiskCandidates.slice(0, 4);
 
+  const fiveLeg = higherRiskCandidates.slice(0, 5);
+  const sixLeg = higherRiskCandidates.slice(0, 6);
+  const eightLeg = higherRiskCandidates.slice(0, 8);
+
   return (
     <main className="min-h-screen bg-[#020806] text-white">
       <header className="border-b border-white/10">
@@ -648,9 +743,19 @@ const [cfbError, setCfbError] =
   >
     MLB
   </button>
+
+  <button
+    onClick={() => setActiveSport("NHL")}
+    className={activeSport === "NHL" ? "rounded-lg bg-green-500 px-5 py-3 text-sm font-bold text-black" : "rounded-lg border border-white/10 bg-white/[0.03] px-5 py-3 text-sm font-bold text-slate-400"}
+  >
+    NHL
+  </button>
 </div>
         {activeSport === "MLB" && (
           <MLBSection mlb={mlb} loading={mlbLoading} error={mlbError} />
+        )}
+        {activeSport === "NHL" && (
+          <NHLSection nhl={nhl} loading={nhlLoading} error={nhlError} />
         )}
         {activeSport === "CFB" && (
   <div>
@@ -719,6 +824,8 @@ const [cfbError, setCfbError] =
 
     {!cfbLoading && !cfbError && cfb && (
       <>
+        <CFBBuilderSection cfb={cfb} />
+
         <div className="mt-12 border-t border-white/10 pt-10">
           <p className="text-xs font-bold uppercase tracking-[0.25em] text-slate-500">
             FULL COLLEGE FOOTBALL BOARD
@@ -961,6 +1068,10 @@ const [cfbError, setCfbError] =
                   }
                   required={4}
                 />
+
+                <BuilderCard title="5-LEG" subtitle="Extended RDG Filter" candidates={fiveLeg} required={5} />
+                <BuilderCard title="6-LEG" subtitle="Extended RDG Filter" candidates={sixLeg} required={6} />
+                <BuilderCard title="8-LEG" subtitle="Long-Shot RDG Filter" candidates={eightLeg} required={8} />
               </section>
 
               <div className="mt-5 rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 text-xs text-slate-400">
@@ -1681,6 +1792,121 @@ function NFLBoardRow({
       />
     </div>
   );
+}
+
+function CFBBuilderSection({ cfb }: { cfb: CFBAnalysis }) {
+  const priority: Record<string, number> = { "Priority Review": 4, "Strong Review": 3, Watch: 2, Pass: 1 };
+  const candidates: CFBBetCandidate[] = (cfb.games || [])
+    .map((game) => {
+      if (!game.rdg || game.rdg.signal === "Pass") return null;
+      const team = game.rdg.spread_lean;
+      if (!team) return null;
+      const isHome = team === game.home_team;
+      const isAway = team === game.away_team;
+      if (!isHome && !isAway) return null;
+      const line = isHome ? game.hard_rock.spread.home_line : game.hard_rock.spread.away_line;
+      const odds = isHome ? game.hard_rock.spread.home_odds : game.hard_rock.spread.away_odds;
+      if (line === null) return null;
+      return {
+        event_id: game.event_id,
+        matchup: `${game.away_team} @ ${game.home_team}`,
+        team,
+        line,
+        odds,
+        display_bet: `${team} ${formatSpread(line)}`,
+        edge: Math.abs(Number(game.rdg.model_vs_market_difference ?? 0)),
+        signal: game.rdg.signal,
+        sample_status: game.rdg.sample_status,
+      };
+    })
+    .filter((x): x is CFBBetCandidate => x !== null)
+    .sort((a, b) => (priority[b.signal] || 0) - (priority[a.signal] || 0) || b.edge - a.edge);
+
+  const stricter = candidates.filter((x) => x.signal === "Priority Review" || x.signal === "Strong Review");
+  const broader = candidates.filter((x) => x.signal !== "Pass");
+  const cards = [
+    ["BEST STRAIGHT", "Stricter CFB Filter", stricter.slice(0, 1), 1],
+    ["STRONGER 2-LEG", "Priority + Strong Reviews", stricter.slice(0, 2), 2],
+    ["BALANCED 3-LEG", "Review Signals", broader.slice(0, 3), 3],
+    ["WIDER 4-LEG", "Includes Watch Reviews", broader.slice(0, 4), 4],
+    ["5-LEG", "Extended Review Card", broader.slice(0, 5), 5],
+    ["6-LEG", "Extended Review Card", broader.slice(0, 6), 6],
+    ["8-LEG", "Long-Shot Review Card", broader.slice(0, 8), 8],
+  ] as const;
+
+  return (
+    <>
+      <div className="mt-14 border-t border-white/10 pt-10">
+        <p className="text-xs font-bold uppercase tracking-[0.25em] text-green-400">RDG CFB BET BUILDER</p>
+        <h2 className="mt-3 text-3xl font-bold">Today&apos;s CFB Model Selections</h2>
+        <p className="mt-2 max-w-3xl text-sm text-slate-400">Built from current Hard Rock spreads and RDG review signals. RDG will not add Pass-rated games just to fill a card.</p>
+      </div>
+      <section className="mt-8 grid gap-5 lg:grid-cols-2">
+        {cards.map(([title, subtitle, picks, required]) => (
+          <CFBBuilderCard key={title} title={title} subtitle={subtitle} candidates={[...picks]} required={required} />
+        ))}
+      </section>
+      <div className="mt-5 rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 text-xs text-slate-400">
+        CFB review tiers are model/market signals, not validated betting probabilities or guarantees. Small-sample CORE inputs should be treated with extra caution.
+      </div>
+    </>
+  );
+}
+
+function CFBBuilderCard({ title, subtitle, candidates, required }: { title: string; subtitle: string; candidates: CFBBetCandidate[]; required: number }) {
+  const qualified = candidates.length >= required;
+  return (
+    <article className="rounded-xl border border-green-500/20 bg-white/[0.04] p-6">
+      <div className="flex items-start justify-between gap-4">
+        <div><p className="text-xs font-bold uppercase tracking-widest text-green-400">{subtitle}</p><h3 className="mt-2 text-xl font-bold">{title}</h3></div>
+        <span className={qualified ? "rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-bold text-green-400" : "rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-400"}>{qualified ? "QUALIFIED" : "NOT ENOUGH LEGS"}</span>
+      </div>
+      {candidates.length === 0 ? <div className="mt-6 rounded-lg border border-white/10 bg-black/20 p-4"><p className="font-bold">No qualifying selection</p></div> : (
+        <div className="mt-6 space-y-3">{candidates.map((c, i) => <div key={c.event_id} className="rounded-lg border border-white/10 bg-black/20 p-4"><p className="text-[10px] font-bold uppercase text-slate-500">{required > 1 ? `LEG ${i + 1}` : c.signal}</p><div className="mt-1 flex justify-between gap-4"><div><p className="text-lg font-bold">{c.display_bet}</p><p className="text-xs text-slate-500">{c.matchup}</p></div><div className="text-right"><p className="font-bold text-green-400">{c.edge.toFixed(1)} pts</p><p className="text-[10px] uppercase text-slate-500">Model vs Market</p></div></div><p className="mt-3 text-xs text-slate-500">{c.sample_status} • Hard Rock {c.odds || "—"}</p></div>)}</div>
+      )}
+    </article>
+  );
+}
+
+function NHLSection({ nhl, loading, error }: { nhl: NHLAnalysis | null; loading: boolean; error: string }) {
+  const games = nhl?.games || [];
+  const regular = games.filter((g) => g.game_type === 2);
+  const priority: Record<string, number> = { "Priority Review": 4, "Strong Review": 3, Watch: 2, Preseason: 0, Pass: 0 };
+  const candidates: NHLBetCandidate[] = regular.map((game) => {
+    if (!game.odds_available || game.signal === "Pass" || game.signal === "Preseason") return null;
+    const team = game.moneyline_lean || game.rdg_projected_winner;
+    const isHome = team === game.home_team;
+    const odds = isHome ? game.hard_rock?.moneyline?.home_odds : game.hard_rock?.moneyline?.away_odds;
+    const modelProbability = isHome ? game.rdg_home_probability : game.rdg_away_probability;
+    const marketProbability = isHome ? game.hard_rock?.moneyline?.no_vig_home_probability : game.hard_rock?.moneyline?.no_vig_away_probability;
+    const edge = typeof game.model_market_edge === "number" ? Math.abs(game.model_market_edge) : (typeof marketProbability === "number" ? Math.abs(modelProbability - marketProbability) : 0);
+    return { event_id: game.event_id, matchup: game.matchup, team, odds: odds ?? null, display_bet: `${team} ML`, model_probability: modelProbability, market_probability: typeof marketProbability === "number" ? marketProbability : null, edge, signal: game.signal };
+  }).filter((x): x is NHLBetCandidate => x !== null).sort((a,b) => (priority[b.signal] || 0) - (priority[a.signal] || 0) || b.edge - a.edge);
+  const stricter = candidates.filter((x) => x.signal === "Priority Review" || x.signal === "Strong Review");
+  const broader = candidates.filter((x) => x.signal === "Priority Review" || x.signal === "Strong Review" || x.signal === "Watch");
+  const cards = [
+    ["BEST STRAIGHT", "Stricter NHL Filter", stricter.slice(0,1), 1], ["STRONGER 2-LEG", "Priority + Strong Reviews", stricter.slice(0,2), 2], ["BALANCED 3-LEG", "Review Signals", broader.slice(0,3), 3], ["WIDER 4-LEG", "Includes Watch Reviews", broader.slice(0,4), 4], ["5-LEG", "Extended Review Card", broader.slice(0,5), 5], ["6-LEG", "Extended Review Card", broader.slice(0,6), 6], ["8-LEG", "Long-Shot Review Card", broader.slice(0,8), 8]
+  ] as const;
+  return <div>
+    <p className="text-xs font-bold uppercase tracking-[0.25em] text-green-400">RDG NHL MODEL • v1.0</p>
+    <h2 className="mt-3 text-3xl font-bold">Live NHL Analysis</h2>
+    <p className="mt-2 text-sm text-slate-400">Chronological team model compared with current Hard Rock moneylines when available.</p>
+    <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-300">Regular-season calibration is not applied as a normal betting signal to preseason games. Historical accuracy is winner prediction, not betting win rate or profitability.</div>
+    <section className="mt-8 grid gap-4 md:grid-cols-4"><Stat title="NHL GAMES" value={nhl ? String(nhl.games_found) : "—"}/><Stat title="MODEL CONNECTED" value={nhl ? `${nhl.games_with_model}/${nhl.games_found}` : "—"}/><Stat title="HARD ROCK LINES" value={nhl ? String(nhl.games_with_hard_rock_moneylines) : "—"}/><Stat title="PRESEASON" value={nhl ? String(nhl.preseason_games) : "—"}/></section>
+    {loading && <div className="mt-8 rounded-xl border border-white/10 bg-white/[0.03] p-6">Running RDG NHL model...</div>}
+    {error && <div className="mt-8 rounded-xl border border-red-500/30 bg-red-500/10 p-6 text-red-400">NHL model error: {error}</div>}
+    {!loading && !error && nhl && <>
+      <div className="mt-12 border-t border-white/10 pt-10"><p className="text-xs font-bold uppercase tracking-[0.25em] text-slate-500">FULL NHL BOARD</p><h2 className="mt-3 text-2xl font-bold">All Games</h2></div>
+      <section className="mt-6 space-y-3">{games.map((g) => <div key={g.event_id} className="grid gap-3 rounded-lg border border-white/10 bg-white/[0.03] p-4 md:grid-cols-5 md:items-center"><div><p className="font-bold">{g.matchup}</p><p className="mt-1 text-xs text-slate-500">{g.game_type_label} • {g.signal}</p></div><BoardValue title="RDG WINNER" value={g.rdg_projected_winner}/><BoardValue title="MODEL PROB." value={`${g.projected_winner_probability.toFixed(1)}%`}/><BoardValue title="HARD ROCK" value={g.odds_available ? "Available" : "No line"}/><BoardValue title="STATUS" value={g.game_state}/></div>)}</section>
+      <div className="mt-14 border-t border-white/10 pt-10"><p className="text-xs font-bold uppercase tracking-[0.25em] text-green-400">RDG NHL BET BUILDER</p><h2 className="mt-3 text-3xl font-bold">Today&apos;s NHL Model Selections</h2><p className="mt-2 max-w-3xl text-sm text-slate-400">Only regular-season games with qualifying model/market signals can enter the builder. Preseason games are excluded.</p></div>
+      <section className="mt-8 grid gap-5 lg:grid-cols-2">{cards.map(([title, subtitle, picks, required]) => <NHLBuilderCard key={title} title={title} subtitle={subtitle} candidates={[...picks]} required={required}/>)}</section>
+    </>}
+  </div>;
+}
+
+function NHLBuilderCard({ title, subtitle, candidates, required }: { title: string; subtitle: string; candidates: NHLBetCandidate[]; required: number }) {
+  const qualified = candidates.length >= required;
+  return <article className="rounded-xl border border-green-500/20 bg-white/[0.04] p-6"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-widest text-green-400">{subtitle}</p><h3 className="mt-2 text-xl font-bold">{title}</h3></div><span className={qualified ? "rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-bold text-green-400" : "rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-400"}>{qualified ? "QUALIFIED" : "NOT ENOUGH LEGS"}</span></div>{candidates.length === 0 ? <div className="mt-6 rounded-lg border border-white/10 bg-black/20 p-4"><p className="font-bold">No qualifying selection</p><p className="mt-2 text-xs text-slate-500">RDG will not force preseason or weaker games into this card.</p></div> : <div className="mt-6 space-y-3">{candidates.map((c,i)=><div key={c.event_id} className="rounded-lg border border-white/10 bg-black/20 p-4"><p className="text-[10px] font-bold uppercase text-slate-500">{required > 1 ? `LEG ${i+1}` : c.signal}</p><div className="mt-1 flex justify-between gap-4"><div><p className="text-lg font-bold">{c.display_bet}</p><p className="text-xs text-slate-500">{c.matchup}</p></div><div className="text-right"><p className="font-bold text-green-400">{c.edge.toFixed(1)}%</p><p className="text-[10px] uppercase text-slate-500">Model vs Market</p></div></div><p className="mt-3 text-xs text-slate-500">Model {c.model_probability.toFixed(1)}% • Hard Rock {c.odds || "—"}</p></div>)}</div>}</article>;
 }
 
 function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading: boolean; error: string }) {
