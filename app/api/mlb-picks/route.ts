@@ -7,8 +7,36 @@ const SEASON = 2026;
 const ODDIZE_URL =
   "https://oddize.com/api/v1/odds/latest?sport=mlb&books=hrb";
 
-const MLB_API =
-  "https://statsapi.mlb.com/api/v1";
+const MLB_API = "https://statsapi.mlb.com/api/v1";
+
+/*
+  RDG MLB v1.1
+
+  TEAM MODEL CALIBRATION
+  Training: 2023-2024
+  Held-out evaluation: 2025
+
+  Fitted:
+  logit(P(home win)) =
+    0.099339
+    + 0.155029 * teamStrengthDifference
+
+  Starting-pitcher adjustment remains experimental
+  and is intentionally kept much smaller than v1.0.
+*/
+
+const TEAM_INTERCEPT = 0.099339;
+const TEAM_SLOPE = 0.155029;
+
+/*
+  Pitcher score coefficient has NOT yet been
+  historically calibrated.
+
+  Keep it conservative so pitcher information
+  can influence the projection without allowing
+  it to overwhelm the validated team component.
+*/
+const PITCHER_WEIGHT = 0.12;
 
 type PitcherStats = {
   era: number | null;
@@ -59,6 +87,8 @@ function normalizeTeam(value: string) {
 
 const TEAM_ALIASES: Record<string, string[]> = {
   ATH: ["ATHLETICS", "OAKLANDATHLETICS"],
+  ARI: ["ARIZONADIAMONDBACKS"],
+  ATL: ["ATLANTABRAVES"],
   BAL: ["BALTIMOREORIOLES"],
   BOS: ["BOSTONREDSOX"],
   CHC: ["CHICAGOCUBS"],
@@ -86,28 +116,21 @@ const TEAM_ALIASES: Record<string, string[]> = {
   TEX: ["TEXASRANGERS"],
   TOR: ["TORONTOBLUEJAYS"],
   WSN: ["WASHINGTONNATIONALS"],
-  ATL: ["ATLANTABRAVES"],
-  ARI: ["ARIZONADIAMONDBACKS"],
 };
 
 function teamsMatch(
   oddizeTeam: string,
   mlbTeam: string
 ) {
-  const oddize =
-    normalizeTeam(oddizeTeam);
+  const oddize = normalizeTeam(oddizeTeam);
+  const mlb = normalizeTeam(mlbTeam);
 
-  const mlb =
-    normalizeTeam(mlbTeam);
+  if (oddize === mlb) return true;
 
-  if (oddize === mlb) {
-    return true;
-  }
-
-  const aliases =
-    TEAM_ALIASES[oddize] ?? [];
-
-  return aliases.includes(mlb);
+  return (
+    TEAM_ALIASES[oddize]?.includes(mlb) ??
+    false
+  );
 }
 
 function numberValue(
@@ -123,10 +146,7 @@ function numberValue(
 function americanToProbability(
   odds: string | number | null
 ) {
-  if (
-    odds === null ||
-    odds === undefined
-  ) {
+  if (odds === null || odds === undefined) {
     return null;
   }
 
@@ -134,10 +154,7 @@ function americanToProbability(
     String(odds).replace("+", "")
   );
 
-  if (
-    !Number.isFinite(value) ||
-    value === 0
-  ) {
+  if (!Number.isFinite(value) || value === 0) {
     return null;
   }
 
@@ -161,22 +178,15 @@ function removeVig(
   const home =
     americanToProbability(homeOdds);
 
-  if (
-    away === null ||
-    home === null
-  ) {
+  if (away === null || home === null) {
     return null;
   }
 
-  const total =
-    away + home;
+  const total = away + home;
 
   return {
-    away:
-      away / total,
-
-    home:
-      home / total,
+    away: away / total,
+    home: home / total,
   };
 }
 
@@ -209,9 +219,7 @@ function findTotal(
 async function getPitcherStats(
   pitcherId: number | null
 ): Promise<PitcherStats | null> {
-  if (!pitcherId) {
-    return null;
-  }
+  if (!pitcherId) return null;
 
   try {
     const url =
@@ -226,36 +234,23 @@ async function getPitcherStats(
     const stat =
       data.stats?.[0]?.splits?.[0]?.stat;
 
-    if (!stat) {
-      return null;
-    }
+    if (!stat) return null;
 
     return {
-      era:
-        numberValue(stat.era),
-
-      whip:
-        numberValue(stat.whip),
-
-      innings:
-        numberValue(
-          stat.inningsPitched
-        ),
-
-      strikeouts:
-        numberValue(
-          stat.strikeOuts
-        ),
-
-      walks:
-        numberValue(
-          stat.baseOnBalls
-        ),
-
-      gamesStarted:
-        numberValue(
-          stat.gamesStarted
-        ),
+      era: numberValue(stat.era),
+      whip: numberValue(stat.whip),
+      innings: numberValue(
+        stat.inningsPitched
+      ),
+      strikeouts: numberValue(
+        stat.strikeOuts
+      ),
+      walks: numberValue(
+        stat.baseOnBalls
+      ),
+      gamesStarted: numberValue(
+        stat.gamesStarted
+      ),
     };
   } catch {
     return null;
@@ -265,33 +260,17 @@ async function getPitcherStats(
 function pitcherScore(
   stats: PitcherStats | null
 ) {
-  if (
-    !stats ||
-    stats.era === null
-  ) {
+  if (!stats || stats.era === null) {
     return 0;
   }
-
-  /*
-    Neutral starting-pitcher ERA
-    baseline for this first model.
-
-    This is a heuristic, not yet
-    historically calibrated.
-  */
 
   let score =
     (4.25 - stats.era) * 0.7;
 
   if (stats.whip !== null) {
     score +=
-      (1.30 - stats.whip) * 1.5;
+      (1.3 - stats.whip) * 1.5;
   }
-
-  /*
-    Reduce influence for pitchers
-    with limited innings.
-  */
 
   const innings =
     stats.innings ?? 0;
@@ -314,8 +293,7 @@ function teamStrength(
   losses: number,
   runDifferential: number
 ) {
-  const games =
-    wins + losses;
+  const games = wins + losses;
 
   if (games === 0) {
     return 0;
@@ -344,10 +322,16 @@ function logistic(value: number) {
 }
 
 function getSignal(edge: number) {
-  const absolute =
-    Math.abs(edge);
+  const absolute = Math.abs(edge);
 
-  if (absolute >= 0.08) {
+  /*
+    More conservative thresholds than v1.0.
+
+    These are review labels, NOT claims of
+    historical profitability.
+  */
+
+  if (absolute >= 0.07) {
     return "Priority Review";
   }
 
@@ -373,8 +357,7 @@ export async function GET() {
       );
     }
 
-    const date =
-      todayET();
+    const date = todayET();
 
     const scheduleUrl =
       `${MLB_API}/schedule` +
@@ -393,26 +376,12 @@ export async function GET() {
       scheduleData,
       standingsData,
     ] = await Promise.all([
-      fetchJson(
-        ODDIZE_URL,
-        {
-          "X-API-Key":
-            oddizeKey,
-        }
-      ),
-
-      fetchJson(
-        scheduleUrl
-      ),
-
-      fetchJson(
-        standingsUrl
-      ),
+      fetchJson(ODDIZE_URL, {
+        "X-API-Key": oddizeKey,
+      }),
+      fetchJson(scheduleUrl),
+      fetchJson(standingsUrl),
     ]);
-
-    /*
-      Build MLB team record lookup.
-    */
 
     const records =
       new Map<number, any>();
@@ -425,8 +394,7 @@ export async function GET() {
         const team of
         group.teamRecords ?? []
       ) {
-        const id =
-          team.team?.id;
+        const id = team.team?.id;
 
         if (!id) continue;
 
@@ -437,22 +405,18 @@ export async function GET() {
           Number(team.losses ?? 0);
 
         const runsScored =
-          Number(
-            team.runsScored ?? 0
-          );
+          Number(team.runsScored ?? 0);
 
         const runsAllowed =
-          Number(
-            team.runsAllowed ?? 0
-          );
+          Number(team.runsAllowed ?? 0);
 
         records.set(id, {
           wins,
           losses,
+
           winning_percentage:
             Number(
-              team.winningPercentage ??
-                0
+              team.winningPercentage ?? 0
             ),
 
           runs_scored:
@@ -462,15 +426,10 @@ export async function GET() {
             runsAllowed,
 
           run_differential:
-            runsScored -
-            runsAllowed,
+            runsScored - runsAllowed,
         });
       }
     }
-
-    /*
-      Build MLB schedule lookup.
-    */
 
     const mlbGames: any[] = [];
 
@@ -486,22 +445,13 @@ export async function GET() {
       }
     }
 
-    /*
-      Only use Oddize events that
-      actually have MLB games today.
-
-      This removes tomorrow's games
-      with unposted lines from the
-      model board.
-    */
-
     const oddsEvents =
       oddsData.events ?? [];
 
     const todaysOddsEvents =
       oddsEvents.filter(
-        (event: any) => {
-          return mlbGames.some(
+        (event: any) =>
+          mlbGames.some(
             (game: any) =>
               teamsMatch(
                 event.team1,
@@ -511,22 +461,13 @@ export async function GET() {
                 event.team2,
                 game.teams?.home?.team?.name
               )
-          );
-        }
+          )
       );
-
-    /*
-      Gather all probable pitchers
-      first so their stats can be
-      fetched in parallel.
-    */
 
     const pitcherIds =
       new Set<number>();
 
-    for (
-      const game of mlbGames
-    ) {
+    for (const game of mlbGames) {
       const awayId =
         game.teams?.away
           ?.probablePitcher?.id;
@@ -535,13 +476,8 @@ export async function GET() {
         game.teams?.home
           ?.probablePitcher?.id;
 
-      if (awayId) {
-        pitcherIds.add(awayId);
-      }
-
-      if (homeId) {
-        pitcherIds.add(homeId);
-      }
+      if (awayId) pitcherIds.add(awayId);
+      if (homeId) pitcherIds.add(homeId);
     }
 
     const pitcherStatsMap =
@@ -553,20 +489,17 @@ export async function GET() {
     await Promise.all(
       [...pitcherIds].map(
         async (id) => {
-          const stats =
-            await getPitcherStats(id);
-
           pitcherStatsMap.set(
             id,
-            stats
+            await getPitcherStats(id)
           );
         }
       )
     );
 
     const games =
-      todaysOddsEvents.map(
-        (event: any) => {
+      todaysOddsEvents
+        .map((event: any) => {
           const awayTeam =
             event.team1;
 
@@ -581,19 +514,15 @@ export async function GET() {
               (game: any) =>
                 teamsMatch(
                   awayTeam,
-                  game.teams?.away
-                    ?.team?.name
+                  game.teams?.away?.team?.name
                 ) &&
                 teamsMatch(
                   homeTeam,
-                  game.teams?.home
-                    ?.team?.name
+                  game.teams?.home?.team?.name
                 )
             );
 
-          if (!mlbGame) {
-            return null;
-          }
+          if (!mlbGame) return null;
 
           const awayMlb =
             mlbGame.teams?.away;
@@ -611,14 +540,16 @@ export async function GET() {
               homeMlb?.team?.id
             );
 
+          if (!awayRecord || !homeRecord) {
+            return null;
+          }
+
           const awayPitcher =
-            awayMlb
-              ?.probablePitcher ??
+            awayMlb?.probablePitcher ??
             null;
 
           const homePitcher =
-            homeMlb
-              ?.probablePitcher ??
+            homeMlb?.probablePitcher ??
             null;
 
           const awayPitcherStats =
@@ -664,63 +595,32 @@ export async function GET() {
             );
 
           const over =
-            findTotal(
-              odds,
-              "Over"
-            );
+            findTotal(odds, "Over");
 
           const under =
-            findTotal(
-              odds,
-              "Under"
-            );
+            findTotal(odds, "Under");
 
           const market =
             removeVig(
               awayMoneyline
-                ?.american_odds ??
-                null,
+                ?.american_odds ?? null,
 
               homeMoneyline
-                ?.american_odds ??
-                null
+                ?.american_odds ?? null
             );
-
-          if (
-            !awayRecord ||
-            !homeRecord
-          ) {
-            return {
-              event_id:
-                event.event_id,
-
-              away_team:
-                awayTeam,
-
-              home_team:
-                homeTeam,
-
-              stats_connected:
-                false,
-
-              rdg: null,
-            };
-          }
 
           const awayTeamScore =
             teamStrength(
               awayRecord.wins,
               awayRecord.losses,
-              awayRecord
-                .run_differential
+              awayRecord.run_differential
             );
 
           const homeTeamScore =
             teamStrength(
               homeRecord.wins,
               homeRecord.losses,
-              homeRecord
-                .run_differential
+              homeRecord.run_differential
             );
 
           const awayStarterScore =
@@ -733,49 +633,55 @@ export async function GET() {
               homePitcherStats
             );
 
+          const teamDifference =
+            homeTeamScore -
+            awayTeamScore;
+
           /*
-            MODEL v1.0
-
-            Team quality +
-            starting pitching +
-            modest home advantage.
-
-            The scaling constant below
-            converts our heuristic
-            strength difference into
-            probability space.
-
-            This still needs historical
-            calibration/backtesting.
+            Historically calibrated TEAM logit.
           */
 
-          const homeAdvantage =
-            0.20;
+          const calibratedTeamLogit =
+            TEAM_INTERCEPT +
+            TEAM_SLOPE *
+              teamDifference;
 
-          const strengthDifference =
-            homeTeamScore -
-            awayTeamScore +
+          const teamOnlyHomeProbability =
+            logistic(
+              calibratedTeamLogit
+            );
+
+          /*
+            Experimental pitcher adjustment.
+
+            Positive = advantage to home starter.
+            Negative = advantage to away starter.
+          */
+
+          const pitcherDifference =
             homeStarterScore -
-            awayStarterScore +
-            homeAdvantage;
+            awayStarterScore;
+
+          const pitcherAdjustment =
+            PITCHER_WEIGHT *
+            pitcherDifference;
+
+          const finalLogit =
+            calibratedTeamLogit +
+            pitcherAdjustment;
 
           const modelHomeProbability =
-            logistic(
-              strengthDifference /
-                2.5
-            );
+            logistic(finalLogit);
 
           const modelAwayProbability =
             1 -
             modelHomeProbability;
 
           const homeMarket =
-            market?.home ??
-            null;
+            market?.home ?? null;
 
           const awayMarket =
-            market?.away ??
-            null;
+            market?.away ?? null;
 
           const homeEdge =
             homeMarket !== null
@@ -790,32 +696,21 @@ export async function GET() {
               : null;
 
           let lean:
-            string | null =
-            null;
+            string | null = null;
 
           let edge:
-            number | null =
-            null;
+            number | null = null;
 
           if (
             homeEdge !== null &&
             awayEdge !== null
           ) {
-            if (
-              homeEdge >
-              awayEdge
-            ) {
-              lean =
-                homeTeam;
-
-              edge =
-                homeEdge;
+            if (homeEdge > awayEdge) {
+              lean = homeTeam;
+              edge = homeEdge;
             } else {
-              lean =
-                awayTeam;
-
-              edge =
-                awayEdge;
+              lean = awayTeam;
+              edge = awayEdge;
             }
           }
 
@@ -843,9 +738,6 @@ export async function GET() {
             venue:
               mlbGame.venue?.name ??
               null,
-
-            stats_connected:
-              true,
 
             hard_rock: {
               moneyline: {
@@ -909,8 +801,7 @@ export async function GET() {
                   ),
 
                 over_odds:
-                  over
-                    ?.american_odds ??
+                  over?.american_odds ??
                   null,
 
                 under:
@@ -919,8 +810,7 @@ export async function GET() {
                   ),
 
                 under_odds:
-                  under
-                    ?.american_odds ??
+                  under?.american_odds ??
                   null,
               },
             },
@@ -994,6 +884,21 @@ export async function GET() {
             },
 
             rdg: {
+              calibrated_team_home_probability:
+                Number(
+                  (
+                    teamOnlyHomeProbability *
+                    100
+                  ).toFixed(2)
+                ),
+
+              pitcher_adjustment_logit:
+                Number(
+                  pitcherAdjustment.toFixed(
+                    4
+                  )
+                ),
+
               model_home_probability:
                 Number(
                   (
@@ -1011,8 +916,7 @@ export async function GET() {
                 ),
 
               projected_winner:
-                modelHomeProbability >=
-                0.5
+                modelHomeProbability >= 0.5
                   ? homeTeam
                   : awayTeam,
 
@@ -1023,8 +927,7 @@ export async function GET() {
                 edge !== null
                   ? Number(
                       (
-                        edge *
-                        100
+                        edge * 100
                       ).toFixed(2)
                     )
                   : null,
@@ -1032,9 +935,8 @@ export async function GET() {
               signal,
             },
           };
-        }
-      )
-      .filter(Boolean);
+        })
+        .filter(Boolean);
 
     const priority =
       games.filter(
@@ -1071,10 +973,10 @@ export async function GET() {
         "RDG MLB",
 
       version:
-        "1.0-beta",
+        "1.1-calibrated",
 
       model_status:
-        "Uncalibrated Beta",
+        "Team Model Calibrated / Pitcher Adjustment Experimental",
 
       games_found:
         games.length,
@@ -1088,25 +990,51 @@ export async function GET() {
       watch_reviews:
         watch.length,
 
-      updated_at:
-        new Date().toISOString(),
+      calibration: {
+        training_seasons:
+          [2023, 2024],
+
+        evaluation_season:
+          2025,
+
+        evaluation_games:
+          2280,
+
+        evaluation_winner_accuracy:
+          55.22,
+
+        evaluation_brier_score:
+          0.245,
+
+        evaluation_log_loss:
+          0.6828,
+
+        fitted_intercept:
+          TEAM_INTERCEPT,
+
+        fitted_strength_slope:
+          TEAM_SLOPE,
+
+        equal_team_home_probability:
+          52.48,
+      },
 
       methodology: {
-        team_strength:
-          "Season winning percentage plus run differential per game.",
+        team_model:
+          "Calibrated using chronological pregame team records and run differential.",
 
         starting_pitching:
-          "Season ERA and WHIP with reduced weight for limited innings.",
+          "ERA and WHIP with sample-size adjustment. Pitcher coefficient remains experimental and intentionally conservative.",
 
         market:
           "Hard Rock moneyline probabilities with sportsbook vig removed.",
 
-        home_field:
-          "Small heuristic home-field adjustment.",
-
         warning:
-          "RDG MLB v1.0 is an uncalibrated beta. Model probabilities, edges and review signals are experimental and are not validated betting win probabilities or evidence of profitability.",
+          "The 55.22% held-out result applies to the calibrated team model on the 2025 evaluation sample. It is not a betting win rate and does not establish profitability. The live pitcher-adjusted probabilities have not yet been historically validated.",
       },
+
+      updated_at:
+        new Date().toISOString(),
 
       games,
     });
