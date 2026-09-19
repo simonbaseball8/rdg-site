@@ -1089,16 +1089,7 @@ const [cfbError, setCfbError] =
             </div>
           )}
 
-        <section className="mt-8 grid gap-5 lg:grid-cols-2">
-          {reviewGames.map(
-            (game) => (
-              <NFLGameCard
-                key={game.event_id}
-                game={game}
-              />
-            )
-          )}
-        </section>
+        <NFLFeaturedReviews games={reviewGames} />
 
         {/* BET BUILDER */}
 
@@ -1641,6 +1632,141 @@ function BuilderCard({
           </p>
         )}
     </article>
+  );
+}
+
+function NFLFeaturedReviews({ games }: { games: NFLGame[] }) {
+  if (games.length === 0) return null;
+
+  const top = games[0];
+  const strong =
+    games.find(
+      (game, index) =>
+        index > 0 &&
+        game.rdg.market_analysis.market_signal === "Strong Review"
+    ) || games[1] || null;
+
+  const FeaturedCard = ({
+    game,
+    variant,
+  }: {
+    game: NFLGame;
+    variant: "top" | "strong";
+  }) => {
+    const market = game.rdg.market_analysis;
+    const difference = market.model_vs_market_difference;
+    const spreadTeam = market.spread_lean;
+    const spreadLine =
+      spreadTeam === game.home_team
+        ? market.hard_rock_spread.home_line
+        : market.hard_rock_spread.away_line;
+
+    const gameTime = new Date(game.start_date).toLocaleString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+
+    const isTop = variant === "top";
+
+    return (
+      <article
+        className={
+          isTop
+            ? "rounded-2xl border-2 border-emerald-400/80 bg-[radial-gradient(circle_at_top_right,rgba(34,197,94,0.22),transparent_42%),linear-gradient(145deg,rgba(0,110,55,0.28),rgba(1,15,10,0.96))] p-5 shadow-[0_0_35px_rgba(34,197,94,0.16)]"
+            : "rounded-2xl border-2 border-sky-500/70 bg-[radial-gradient(circle_at_top_right,rgba(14,165,233,0.20),transparent_42%),linear-gradient(145deg,rgba(3,72,110,0.24),rgba(2,12,20,0.96))] p-5 shadow-[0_0_35px_rgba(14,165,233,0.13)]"
+        }
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className={isTop
+              ? "text-sm font-black uppercase tracking-wider text-emerald-400"
+              : "text-sm font-black uppercase tracking-wider text-sky-400"
+            }>
+              {isTop ? "🏆 TOP RDG PICK" : "★ STRONG REVIEW"}
+            </p>
+
+            <div className="mt-3 flex items-center gap-2">
+              <TeamLogo sport="NFL" team={game.away_team} />
+              <span className="text-xl font-black">{game.away_team}</span>
+              <span className="text-slate-500">@</span>
+              <TeamLogo sport="NFL" team={game.home_team} />
+              <span className="text-xl font-black">{game.home_team}</span>
+            </div>
+
+            <p className="mt-2 text-xs text-slate-400">
+              {gameTime} • Hard Rock Bet
+            </p>
+          </div>
+
+          <span className={isTop
+            ? "rounded-full border border-emerald-400/50 bg-emerald-500/15 px-3 py-1 text-xs font-black text-emerald-300"
+            : "rounded-full border border-sky-400/50 bg-sky-500/15 px-3 py-1 text-xs font-black text-sky-300"
+          }>
+            {difference !== null
+              ? `${Math.abs(difference).toFixed(1)} PT EDGE`
+              : "NO LINE"}
+          </span>
+        </div>
+
+        <div className="mt-5 grid grid-cols-2 gap-3">
+          <MiniStat
+            title="RDG PROJECTION"
+            value={`${game.rdg.projected_winner} by ${game.rdg.projected_margin.toFixed(1)}`}
+          />
+          <MiniStat
+            title="HARD ROCK SPREAD"
+            value={
+              market.hard_rock_spread.home_line !== null
+                ? `${game.home_team} ${formatSpread(market.hard_rock_spread.home_line)}`
+                : "—"
+            }
+          />
+          <MiniStat
+            title="RDG SPREAD LEAN"
+            value={
+              spreadLine !== null
+                ? `${spreadTeam} ${formatSpread(spreadLine)}`
+                : "—"
+            }
+          />
+          <MiniStat
+            title="MODEL VS MARKET"
+            value={
+              difference !== null
+                ? `${Math.abs(difference).toFixed(1)} pts`
+                : "—"
+            }
+          />
+        </div>
+      </article>
+    );
+  };
+
+  return (
+    <>
+      <section className="mt-8 grid gap-5 lg:grid-cols-2">
+        <FeaturedCard game={top} variant="top" />
+        {strong && <FeaturedCard game={strong} variant="strong" />}
+      </section>
+
+      {games.length > 2 && (
+        <div className="mt-8">
+          <p className="text-[10px] font-black uppercase tracking-[0.24em] text-slate-500">
+            MORE NFL MODEL REVIEWS
+          </p>
+          <section className="mt-4 grid gap-5 lg:grid-cols-2">
+            {games
+              .filter((game) => game.event_id !== top.event_id && game.event_id !== strong?.event_id)
+              .map((game) => (
+                <NFLGameCard key={game.event_id} game={game} />
+              ))}
+          </section>
+        </div>
+      )}
+    </>
   );
 }
 
