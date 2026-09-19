@@ -83,13 +83,6 @@ function getTeamRows(stats: Row[], team: string) {
   );
 }
 
-/*
-  Defensive stats are derived from the offensive production
-  of the opponents that played against the selected team.
-
-  For every game played by "team", we locate the opponent's
-  row from the same game_id.
-*/
 function getOpponentRows(stats: Row[], team: string) {
   const teamCode = normalizeTeam(team);
 
@@ -117,65 +110,37 @@ function getOpponentRows(stats: Row[], team: string) {
 function buildOffense(rows: Row[]) {
   return {
     games: rows.length,
-
-    passing_yards: Number(
-      average(rows, "passing_yards").toFixed(2)
-    ),
-
-    rushing_yards: Number(
-      average(rows, "rushing_yards").toFixed(2)
-    ),
-
-    passing_tds: Number(
-      average(rows, "passing_tds").toFixed(2)
-    ),
-
-    rushing_tds: Number(
-      average(rows, "rushing_tds").toFixed(2)
-    ),
-
-    sacks_allowed: Number(
-      average(rows, "sacks_suffered").toFixed(2)
-    ),
-
-    passing_epa: Number(
-      average(rows, "passing_epa").toFixed(2)
-    ),
-
-    rushing_epa: Number(
-      average(rows, "rushing_epa").toFixed(2)
-    ),
+    passing_yards: Number(average(rows, "passing_yards").toFixed(2)),
+    rushing_yards: Number(average(rows, "rushing_yards").toFixed(2)),
+    passing_tds: Number(average(rows, "passing_tds").toFixed(2)),
+    rushing_tds: Number(average(rows, "rushing_tds").toFixed(2)),
+    sacks_allowed: Number(average(rows, "sacks_suffered").toFixed(2)),
+    passing_epa: Number(average(rows, "passing_epa").toFixed(2)),
+    rushing_epa: Number(average(rows, "rushing_epa").toFixed(2)),
   };
 }
 
 function buildDefense(rows: Row[]) {
   return {
     games: rows.length,
-
     passing_yards_allowed: Number(
       average(rows, "passing_yards").toFixed(2)
     ),
-
     rushing_yards_allowed: Number(
       average(rows, "rushing_yards").toFixed(2)
     ),
-
     passing_tds_allowed: Number(
       average(rows, "passing_tds").toFixed(2)
     ),
-
     rushing_tds_allowed: Number(
       average(rows, "rushing_tds").toFixed(2)
     ),
-
     sacks_generated: Number(
       average(rows, "sacks_suffered").toFixed(2)
     ),
-
     passing_epa_allowed: Number(
       average(rows, "passing_epa").toFixed(2)
     ),
-
     rushing_epa_allowed: Number(
       average(rows, "rushing_epa").toFixed(2)
     ),
@@ -258,42 +223,36 @@ function buildTeamProfile(
         offense26.passing_yards,
         weights
       ),
-
       rushing_yards: blend(
         offense24.rushing_yards,
         offense25.rushing_yards,
         offense26.rushing_yards,
         weights
       ),
-
       passing_tds: blend(
         offense24.passing_tds,
         offense25.passing_tds,
         offense26.passing_tds,
         weights
       ),
-
       rushing_tds: blend(
         offense24.rushing_tds,
         offense25.rushing_tds,
         offense26.rushing_tds,
         weights
       ),
-
       sacks_allowed: blend(
         offense24.sacks_allowed,
         offense25.sacks_allowed,
         offense26.sacks_allowed,
         weights
       ),
-
       passing_epa: blend(
         offense24.passing_epa,
         offense25.passing_epa,
         offense26.passing_epa,
         weights
       ),
-
       rushing_epa: blend(
         offense24.rushing_epa,
         offense25.rushing_epa,
@@ -309,42 +268,36 @@ function buildTeamProfile(
         defense26.passing_yards_allowed,
         weights
       ),
-
       rushing_yards_allowed: blend(
         defense24.rushing_yards_allowed,
         defense25.rushing_yards_allowed,
         defense26.rushing_yards_allowed,
         weights
       ),
-
       passing_tds_allowed: blend(
         defense24.passing_tds_allowed,
         defense25.passing_tds_allowed,
         defense26.passing_tds_allowed,
         weights
       ),
-
       rushing_tds_allowed: blend(
         defense24.rushing_tds_allowed,
         defense25.rushing_tds_allowed,
         defense26.rushing_tds_allowed,
         weights
       ),
-
       sacks_generated: blend(
         defense24.sacks_generated,
         defense25.sacks_generated,
         defense26.sacks_generated,
         weights
       ),
-
       passing_epa_allowed: blend(
         defense24.passing_epa_allowed,
         defense25.passing_epa_allowed,
         defense26.passing_epa_allowed,
         weights
       ),
-
       rushing_epa_allowed: blend(
         defense24.rushing_epa_allowed,
         defense25.rushing_epa_allowed,
@@ -414,6 +367,116 @@ function getLean(
     team: difference >= 0 ? homeTeam : awayTeam,
     strength,
     score_difference: Number(gap.toFixed(2)),
+  };
+}
+
+/*
+  v0.5:
+  Compare the direction of RDG's matchup advantage
+  against the sportsbook spread.
+
+  This does NOT claim the RDG score equals projected
+  NFL points. Calibration comes later.
+*/
+function analyzeMarket(
+  awayTeam: string,
+  homeTeam: string,
+  awayScore: number,
+  homeScore: number,
+  spread: any[],
+  moneyline: any[]
+) {
+  const modelDifference = Number(
+    (homeScore - awayScore).toFixed(2)
+  );
+
+  const modelLean =
+    modelDifference > 0
+      ? homeTeam
+      : modelDifference < 0
+      ? awayTeam
+      : "EVEN";
+
+  const homeSpread = spread.find(
+    (item: any) =>
+      normalizeTeam(item.team) === normalizeTeam(homeTeam)
+  );
+
+  const awaySpread = spread.find(
+    (item: any) =>
+      normalizeTeam(item.team) === normalizeTeam(awayTeam)
+  );
+
+  const homeMoneyline = moneyline.find(
+    (item: any) =>
+      normalizeTeam(item.team) === normalizeTeam(homeTeam)
+  );
+
+  const awayMoneyline = moneyline.find(
+    (item: any) =>
+      normalizeTeam(item.team) === normalizeTeam(awayTeam)
+  );
+
+  let marketFavorite = "EVEN";
+
+  if (homeSpread && Number(homeSpread.line) < 0) {
+    marketFavorite = homeTeam;
+  } else if (awaySpread && Number(awaySpread.line) < 0) {
+    marketFavorite = awayTeam;
+  }
+
+  const modelMarketAgreement =
+    modelLean === "EVEN" ||
+    marketFavorite === "EVEN"
+      ? "neutral"
+      : modelLean === marketFavorite
+      ? "agree"
+      : "disagree";
+
+  let reviewPriority = "Low";
+
+  const gap = Math.abs(modelDifference);
+
+  if (gap >= 3) reviewPriority = "Medium";
+  if (gap >= 6) reviewPriority = "High";
+
+  if (
+    modelMarketAgreement === "disagree" &&
+    gap >= 3
+  ) {
+    reviewPriority = "High";
+  }
+
+  return {
+    model_difference: modelDifference,
+    model_lean: modelLean,
+
+    market_favorite: marketFavorite,
+
+    hard_rock_spread: {
+      away_team: awayTeam,
+      away_line: awaySpread?.line ?? null,
+      away_odds: awaySpread?.odds ?? null,
+
+      home_team: homeTeam,
+      home_line: homeSpread?.line ?? null,
+      home_odds: homeSpread?.odds ?? null,
+    },
+
+    hard_rock_moneyline: {
+      away_team: awayTeam,
+      away_odds: awayMoneyline?.odds ?? null,
+
+      home_team: homeTeam,
+      home_odds: homeMoneyline?.odds ?? null,
+    },
+
+    model_market_agreement: modelMarketAgreement,
+
+    review_priority: reviewPriority,
+
+    calibration_note:
+      "RDG matchup score is not yet calibrated to projected point margin, so this is a market comparison signal rather than a quantified betting edge.",
   };
 }
 
@@ -546,6 +609,15 @@ export async function GET() {
             odds: o.american_odds,
           }));
 
+        const marketAnalysis = analyzeMarket(
+          event.team1,
+          event.team2,
+          awayScore,
+          homeScore,
+          spread,
+          moneyline
+        );
+
         const statsConnected =
           awayProfile.games.season_2024 > 0 &&
           awayProfile.games.season_2025 > 0 &&
@@ -581,8 +653,10 @@ export async function GET() {
             home_matchup_score: homeScore,
             lean,
 
+            market_analysis: marketAnalysis,
+
             data_note:
-              "2024 + 2025 + 2026 weighted offense and opponent defense derived by matching game_id",
+              "2024 + 2025 + 2026 weighted offense, defense, and Hard Rock market comparison",
           },
         };
       })
@@ -602,15 +676,21 @@ export async function GET() {
       sportsbook: "Hard Rock Bet",
       sport: "NFL",
 
-      model_version: "RDG NFL v0.4.1",
+      model_version: "RDG NFL v0.5",
 
       methodology:
-        "2024 + 2025 + 2026 weighted offense and game-matched defensive analysis",
+        "2024 + 2025 + 2026 weighted offense/defense model compared with current Hard Rock lines",
 
       games_found: games.length,
 
       games_with_stats: games.filter(
         (game: any) => game.stats_connected
+      ).length,
+
+      high_priority_reviews: games.filter(
+        (game: any) =>
+          game.rdg_analysis.market_analysis.review_priority ===
+          "High"
       ).length,
 
       games,
