@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 
+export const dynamic = "force-dynamic";
+
 type Game = {
   event_id: string;
   start_date: string;
   away_team: string;
   home_team: string;
+  stats_connected: boolean;
 
   rdg: {
     projected_winner: string;
@@ -31,15 +34,17 @@ type Game = {
         home_line: number | null;
         home_odds: string | null;
       };
-
-      hard_rock_moneyline: {
-        away_team: string;
-        away_odds: string | null;
-        home_team: string;
-        home_odds: string | null;
-      };
     };
   };
+};
+
+type Analysis = {
+  sportsbook: string;
+  model: string;
+  version: string;
+  games_found: number;
+  games_with_stats: number;
+  games: Game[];
 };
 
 type Candidate = {
@@ -48,9 +53,11 @@ type Candidate = {
   start_date: string;
 
   team: string;
-  bet_type: "spread";
+  bet_type: "Spread";
   line: number;
   odds: string | null;
+
+  display_bet: string;
 
   rdg_projected_winner: string;
   rdg_projected_margin: number;
@@ -63,22 +70,30 @@ type Candidate = {
   historical_accuracy: number;
 
   score: number;
+
   reasons: string[];
   risks: string[];
 };
 
-function formatSpread(line: number) {
-  if (line > 0) return `+${line}`;
-  return String(line);
+function formatSpread(value: number) {
+  if (value > 0) {
+    return `+${value}`;
+  }
+
+  return String(value);
 }
 
-function candidateFromGame(
+function getCandidate(
   game: Game
 ): Candidate | null {
+  if (!game.stats_connected) {
+    return null;
+  }
+
   const market =
     game.rdg.market_analysis;
 
-  const historical =
+  const history =
     game.rdg.historical_signal;
 
   const difference =
@@ -88,18 +103,33 @@ function candidateFromGame(
     return null;
   }
 
-  const team = market.spread_lean;
+  const edge =
+    Math.abs(difference);
 
-  if (
-    !team ||
-    team === "EVEN" ||
-    team === "NO SPREAD"
-  ) {
+  /*
+    Ignore tiny model/market differences.
+    These are not useful Bet Builder candidates.
+  */
+  if (edge < 2) {
+    return null;
+  }
+
+  const team =
+    market.spread_lean;
+
+  if (!team) {
     return null;
   }
 
   const isHome =
     team === game.home_team;
+
+  const isAway =
+    team === game.away_team;
+
+  if (!isHome && !isAway) {
+    return null;
+  }
 
   const line = isHome
     ? market.hard_rock_spread.home_line
@@ -113,56 +143,57 @@ function candidateFromGame(
     return null;
   }
 
-  const edge =
-    Math.abs(difference);
-
   /*
-    Candidate score:
+    Ranking score.
 
-    Market disagreement is the primary factor.
+    The market difference is the primary
+    ranking factor.
 
-    Historical bucket performance is secondary.
-
-    Sample size gets a small bonus so we do not
-    overvalue tiny historical samples.
+    Historical winner accuracy is only a
+    secondary model-history input because
+    it is NOT an ATS win probability.
   */
 
-  let score = edge * 10;
+  let score =
+    edge * 10;
 
   if (
-    historical.historical_winner_accuracy >= 70
+    history.historical_accuracy !== undefined
   ) {
-    score += 15;
-  } else if (
-    historical.historical_winner_accuracy >= 60
+    // Nothing here intentionally.
+    // Compatibility guard.
+  }
+
+  if (
+    history.historical_winner_accuracy >= 70
   ) {
     score += 10;
   } else if (
-    historical.historical_winner_accuracy >= 55
+    history.historical_winner_accuracy >= 60
   ) {
-    score += 5;
+    score += 6;
+  } else if (
+    history.historical_winner_accuracy >= 55
+  ) {
+    score += 3;
   }
 
-  if (historical.sample >= 30) {
-    score += 5;
+  if (history.sample >= 30) {
+    score += 3;
   }
 
   /*
-    Small penalty when RDG's outright projected
-    winner is different from the spread lean.
+    If RDG predicts the selected spread team
+    to win outright, give a small ranking bonus.
 
-    Example:
-    RDG thinks DEN wins, but JAX +6 is the
-    model's ATS lean.
-
-    That can still be a valid spread candidate,
-    but it carries additional risk.
+    A team can still be a valid spread lean
+    without being the projected outright winner.
   */
 
   if (
-    game.rdg.projected_winner !== team
+    game.rdg.projected_winner === team
   ) {
-    score -= 5;
+    score += 4;
   }
 
   const reasons: string[] = [];
@@ -181,39 +212,40 @@ function candidateFromGame(
   );
 
   reasons.push(
-    `Historical ${historical.bucket} projection bucket went ${historical.correct}/${historical.sample} (${historical.historical_winner_accuracy}%) in the current out-of-sample backtest.`
+    `The ${history.bucket} projected-margin bucket went ${history.correct}/${history.sample} (${history.historical_winner_accuracy}%) on straight-up winner predictions in the out-of-sample backtest.`
   );
 
   if (
     game.rdg.projected_winner !== team
   ) {
     risks.push(
-      `RDG's projected outright winner is ${game.rdg.projected_winner}, while the spread value is on ${team}.`
+      `RDG projects ${game.rdg.projected_winner} to win outright, while the spread value is on ${team}.`
     );
   }
 
   if (
-    historical.historical_winner_accuracy < 55
+    history.historical_winner_accuracy < 55
   ) {
     risks.push(
-      `This projection bucket performed below 55% in the historical test.`
+      `This projected-margin bucket was below 55% on straight-up winner predictions in the historical test.`
     );
   }
 
-  if (historical.sample < 20) {
+  if (history.sample < 30) {
     risks.push(
-      `Historical bucket has a small sample of ${historical.sample} games.`
+      `Historical bucket sample is only ${history.sample} games.`
     );
   }
 
   if (edge < 3.5) {
     risks.push(
-      `Model-to-market difference is below the 3.5-point Strong Review threshold.`
+      `Model/market difference is below RDG's 3.5-point Strong Review threshold.`
     );
   }
 
   return {
-    event_id: game.event_id,
+    event_id:
+      game.event_id,
 
     matchup:
       `${game.away_team} @ ${game.home_team}`,
@@ -223,11 +255,15 @@ function candidateFromGame(
 
     team,
 
-    bet_type: "spread",
+    bet_type:
+      "Spread",
 
     line,
 
     odds,
+
+    display_bet:
+      `${team} ${formatSpread(line)}`,
 
     rdg_projected_winner:
       game.rdg.projected_winner,
@@ -239,16 +275,16 @@ function candidateFromGame(
       Number(edge.toFixed(2)),
 
     historical_bucket:
-      historical.bucket,
+      history.bucket,
 
     historical_sample:
-      historical.sample,
+      history.sample,
 
     historical_correct:
-      historical.correct,
+      history.correct,
 
     historical_accuracy:
-      historical.historical_winner_accuracy,
+      history.historical_winner_accuracy,
 
     score:
       Number(score.toFixed(2)),
@@ -259,7 +295,15 @@ function candidateFromGame(
   };
 }
 
-function safeCandidates(
+function rank(
+  candidates: Candidate[]
+) {
+  return [...candidates].sort(
+    (a, b) => b.score - a.score
+  );
+}
+
+function safePool(
   candidates: Candidate[]
 ) {
   return candidates.filter(
@@ -270,7 +314,7 @@ function safeCandidates(
   );
 }
 
-function balancedCandidates(
+function balancedPool(
   candidates: Candidate[]
 ) {
   return candidates.filter(
@@ -280,7 +324,7 @@ function balancedCandidates(
   );
 }
 
-function aggressiveCandidates(
+function aggressivePool(
   candidates: Candidate[]
 ) {
   return candidates.filter(
@@ -289,86 +333,61 @@ function aggressiveCandidates(
   );
 }
 
-function uniqueGames(
-  candidates: Candidate[]
-) {
-  const seen = new Set<string>();
-
-  return candidates.filter(
-    (candidate) => {
-      if (
-        seen.has(candidate.event_id)
-      ) {
-        return false;
-      }
-
-      seen.add(candidate.event_id);
-      return true;
-    }
-  );
-}
-
-function sortCandidates(
-  candidates: Candidate[]
-) {
-  return [...candidates].sort(
-    (a, b) => b.score - a.score
-  );
-}
-
 function buildSlip(
   name: string,
-  category: string,
-  requestedLegs: number,
+  risk: string,
+  numberOfLegs: number,
   candidates: Candidate[]
 ) {
-  const sorted =
-    uniqueGames(
-      sortCandidates(candidates)
+  const selected =
+    rank(candidates).slice(
+      0,
+      numberOfLegs
     );
 
-  const legs =
-    sorted.slice(0, requestedLegs);
-
   if (
-    legs.length < requestedLegs
+    selected.length <
+    numberOfLegs
   ) {
     return {
       name,
-      category,
+      risk,
 
       status:
         "NOT ENOUGH QUALIFYING LEGS",
 
       requested_legs:
-        requestedLegs,
+        numberOfLegs,
 
       qualifying_legs:
-        legs.length,
+        selected.length,
 
-      legs,
+      legs:
+        selected,
 
       note:
-        "RDG will not force additional legs when the current board does not meet this slip's rules.",
+        "RDG did not force weaker selections into this parlay.",
     };
   }
 
   return {
     name,
-    category,
+    risk,
 
-    status: "QUALIFIED",
+    status:
+      "QUALIFIED",
 
     requested_legs:
-      requestedLegs,
+      numberOfLegs,
 
     qualifying_legs:
-      legs.length,
+      selected.length,
 
-    legs,
+    legs:
+      selected,
 
     note:
-      "Selections are generated from predefined RDG model rules. Historical results do not guarantee future outcomes.",
+      "All legs passed this parlay tier's predefined RDG filters.",
   };
 }
 
@@ -377,103 +396,157 @@ export async function GET(
 ) {
   try {
     /*
-      Pull directly from our existing live
-      analysis route.
+      IMPORTANT FIX:
 
-      This keeps /api/analyze as the single
-      source of truth for the NFL model.
+      Use the deployment's forwarded host/protocol
+      rather than url.origin.
+
+      This prevents Vercel's internal request from
+      accidentally resolving to an HTML redirect.
     */
 
-    const url =
-      new URL(request.url);
+    const headers =
+      new Headers(request.headers);
+
+    const forwardedHost =
+      headers.get("x-forwarded-host");
+
+    const host =
+      forwardedHost ||
+      headers.get("host");
+
+    const forwardedProto =
+      headers.get("x-forwarded-proto");
+
+    const protocol =
+      forwardedProto ||
+      "https";
+
+    if (!host) {
+      throw new Error(
+        "Unable to determine deployment host."
+      );
+    }
 
     const analyzeUrl =
-      `${url.origin}/api/analyze`;
+      `${protocol}://${host}/api/analyze`;
 
     const response =
       await fetch(analyzeUrl, {
-        cache: "no-store",
+        method: "GET",
+
+        headers: {
+          Accept:
+            "application/json",
+        },
+
+        /*
+          Give Vercel a short server-side cache.
+
+          This helps avoid repeatedly triggering
+          the analysis endpoint during the same
+          short period.
+        */
+        next: {
+          revalidate: 300,
+        },
       });
 
+    const contentType =
+      response.headers.get(
+        "content-type"
+      ) || "";
+
     if (!response.ok) {
-      return NextResponse.json(
-        {
-          error:
-            "Unable to load RDG NFL analysis",
-          status:
-            response.status,
-        },
-        {
-          status: 500,
-        }
+      const body =
+        await response.text();
+
+      throw new Error(
+        `Analyze API returned ${response.status}: ${body.slice(
+          0,
+          200
+        )}`
+      );
+    }
+
+    if (
+      !contentType.includes(
+        "application/json"
+      )
+    ) {
+      const body =
+        await response.text();
+
+      throw new Error(
+        `Analyze API returned non-JSON content: ${body.slice(
+          0,
+          120
+        )}`
       );
     }
 
     const analysis =
-      await response.json();
+      (await response.json()) as Analysis;
 
-    const games: Game[] =
-      analysis.games ?? [];
+    const games =
+      analysis.games || [];
 
     const candidates =
-      games
-        .map(candidateFromGame)
-        .filter(
-          (
-            candidate
-          ): candidate is Candidate =>
-            candidate !== null
-        );
+      rank(
+        games
+          .map(getCandidate)
+          .filter(
+            (
+              candidate
+            ): candidate is Candidate =>
+              candidate !== null
+          )
+      );
 
-    const ranked =
-      sortCandidates(candidates);
+    const safe =
+      rank(
+        safePool(candidates)
+      );
 
-    /*
-      STRAIGHT BET
+    const balanced =
+      rank(
+        balancedPool(candidates)
+      );
 
-      Highest-scoring candidate must meet
-      minimum quality rules.
-    */
-
-    const straightPool =
-      safeCandidates(ranked);
+    const aggressive =
+      rank(
+        aggressivePool(candidates)
+      );
 
     const bestStraight =
-      straightPool.length > 0
+      safe.length > 0
         ? {
-            status: "QUALIFIED",
+            status:
+              "QUALIFIED",
+
             selection:
-              straightPool[0],
+              safe[0],
 
             note:
-              "Highest-ranked spread candidate meeting RDG straight-bet requirements.",
+              "Highest-ranked spread candidate currently meeting RDG's stricter straight-bet filter.",
           }
         : {
             status:
               "NO QUALIFYING BET",
-            selection: null,
+
+            selection:
+              null,
 
             note:
-              "No current spread meets the minimum RDG straight-bet requirements.",
+              "No current game meets all of RDG's stricter straight-bet filters.",
           };
-
-    /*
-      PARLAY BUILDER
-
-      We intentionally do NOT force a parlay.
-
-      If the board does not contain enough
-      qualifying independent games, the
-      builder returns NOT ENOUGH QUALIFYING
-      LEGS instead.
-    */
 
     const saferTwoLeg =
       buildSlip(
         "RDG Safer 2-Leg",
         "Safer",
         2,
-        safeCandidates(ranked)
+        safe
       );
 
     const balancedThreeLeg =
@@ -481,66 +554,69 @@ export async function GET(
         "RDG Balanced 3-Leg",
         "Balanced",
         3,
-        balancedCandidates(ranked)
+        balanced
       );
 
-    const higherRisk =
+    const higherRiskFourLeg =
       buildSlip(
         "RDG Higher-Risk 4-Leg",
         "Higher Risk",
         4,
-        aggressiveCandidates(ranked)
+        aggressive
       );
 
     return NextResponse.json({
       builder:
         "RDG Automatic Bet Builder",
 
-      version: "1.0",
+      version:
+        "1.1",
 
       sportsbook:
-        analysis.sportsbook ??
+        analysis.sportsbook ||
         "Hard Rock Bet",
 
-      sport: "NFL",
+      source_model:
+        `${analysis.model} ${analysis.version}`,
 
       generated_at:
         new Date().toISOString(),
-
-      rules: {
-        straight_bet:
-          "At least 3.5-point model/market difference, historical bucket >=55%, sample >=30.",
-
-        safer_parlay:
-          "Each leg must satisfy the straight-bet rules.",
-
-        balanced_parlay:
-          "At least 3-point model/market difference and historical sample >=30.",
-
-        higher_risk_parlay:
-          "At least 2-point model/market difference.",
-
-        forced_bets: false,
-      },
 
       board: {
         games_analyzed:
           games.length,
 
+        games_with_stats:
+          analysis.games_with_stats,
+
         candidates_found:
           candidates.length,
 
-        safe_candidates:
-          safeCandidates(ranked)
-            .length,
+        safer_candidates:
+          safe.length,
 
         balanced_candidates:
-          balancedCandidates(ranked)
-            .length,
+          balanced.length,
 
-        aggressive_candidates:
-          aggressiveCandidates(ranked)
-            .length,
+        higher_risk_candidates:
+          aggressive.length,
+      },
+
+      filters: {
+        best_straight:
+          "Model/market difference >= 3.5 points, historical straight-up bucket accuracy >= 55%, historical sample >= 30.",
+
+        safer_2_leg:
+          "Each leg must meet the same stricter filter as the straight-bet pool.",
+
+        balanced_3_leg:
+          "Model/market difference >= 3 points and historical sample >= 30.",
+
+        higher_risk_4_leg:
+          "Model/market difference >= 2 points.",
+
+        force_selections:
+          false,
       },
 
       best_straight_bet:
@@ -554,20 +630,30 @@ export async function GET(
           balancedThreeLeg,
 
         higher_risk_4_leg:
-          higherRisk,
+          higherRiskFourLeg,
       },
 
       ranked_candidates:
-        ranked,
+        candidates,
+
+      disclaimer:
+        "RDG model differences and historical straight-up results do not establish the probability or profitability of an individual spread wager.",
     });
   } catch (error) {
+    console.error(
+      "RDG Bet Builder Error:",
+      error
+    );
+
     return NextResponse.json(
       {
         error:
           "RDG bet builder failed",
 
         details:
-          String(error),
+          error instanceof Error
+            ? error.message
+            : String(error),
       },
       {
         status: 500,
