@@ -139,6 +139,7 @@ export default function Home() {
         setNfl(data);
       } catch (err) {
         console.error(err);
+
         setNflError(
           err instanceof Error
             ? err.message
@@ -166,14 +167,10 @@ export default function Home() {
     };
 
     const aSignal =
-      priority[
-        a.rdg.market_analysis.market_signal
-      ] || 0;
+      priority[a.rdg.market_analysis.market_signal] || 0;
 
     const bSignal =
-      priority[
-        b.rdg.market_analysis.market_signal
-      ] || 0;
+      priority[b.rdg.market_analysis.market_signal] || 0;
 
     if (aSignal !== bSignal) {
       return bSignal - aSignal;
@@ -181,12 +178,10 @@ export default function Home() {
 
     return (
       Math.abs(
-        b.rdg.market_analysis
-          .model_vs_market_difference || 0
+        b.rdg.market_analysis.model_vs_market_difference || 0
       ) -
       Math.abs(
-        a.rdg.market_analysis
-          .model_vs_market_difference || 0
+        a.rdg.market_analysis.model_vs_market_difference || 0
       )
     );
   });
@@ -238,29 +233,17 @@ export default function Home() {
         <section className="mt-8 grid gap-4 md:grid-cols-4">
           <Stat
             title="NFL GAMES"
-            value={
-              nfl
-                ? String(nfl.games_found)
-                : "—"
-            }
+            value={nfl ? String(nfl.games_found) : "—"}
           />
 
           <Stat
             title="PRIORITY"
-            value={
-              nfl
-                ? String(nfl.priority_reviews)
-                : "—"
-            }
+            value={nfl ? String(nfl.priority_reviews) : "—"}
           />
 
           <Stat
             title="STRONG REVIEWS"
-            value={
-              nfl
-                ? String(nfl.strong_reviews)
-                : "—"
-            }
+            value={nfl ? String(nfl.strong_reviews) : "—"}
           />
 
           <Stat
@@ -351,7 +334,10 @@ export default function Home() {
             value={String(activeParlays.length)}
           />
 
-          <Stat title="SPORTS" value="4" />
+          <Stat
+            title="SPORTS"
+            value="4"
+          />
 
           <Stat
             title="BEST BET"
@@ -412,8 +398,7 @@ export default function Home() {
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <p className="text-xs font-bold uppercase tracking-widest text-green-400">
-                      {parlay.category ||
-                        "PARLAY"}
+                      {parlay.category || "PARLAY"}
                     </p>
 
                     <h3 className="mt-2 text-xl font-bold">
@@ -539,61 +524,74 @@ function NFLGameCard({
 }: {
   game: NFLGame;
 }) {
-  const market =
-    game.rdg.market_analysis;
-
-  const historical =
-    game.rdg.historical_signal;
+  const market = game.rdg.market_analysis;
+  const historical = game.rdg.historical_signal;
 
   const difference =
     market.model_vs_market_difference;
 
-  const spreadTeam =
-    market.spread_lean;
+  const spreadTeam = market.spread_lean;
 
   const spreadLine =
     spreadTeam === game.home_team
       ? market.hard_rock_spread.home_line
       : market.hard_rock_spread.away_line;
 
+  const gameTime = new Date(
+    game.start_date
+  ).toLocaleString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
   return (
     <article className="rounded-xl border border-green-500/20 bg-white/[0.04] p-6">
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-xs font-bold uppercase tracking-widest text-green-400">
-            {market.market_signal}
+            MARKET EDGE • {market.market_signal}
           </p>
 
           <h3 className="mt-2 text-xl font-bold">
-            {game.away_team} @{" "}
-            {game.home_team}
+            {game.away_team} @ {game.home_team}
           </h3>
 
           <p className="mt-1 text-xs text-slate-500">
-            Hard Rock Bet
+            {gameTime} • Hard Rock Bet
           </p>
         </div>
 
-        <SignalBadge
-          signal={historical.signal}
-        />
+        <span className="rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-bold text-green-400">
+          {difference !== null
+            ? `${Math.abs(difference).toFixed(1)} PT EDGE`
+            : "NO LINE"}
+        </span>
       </div>
 
       <div className="mt-6 grid grid-cols-2 gap-3">
         <MiniStat
-          title="RDG WINNER"
-          value={game.rdg.projected_winner}
-        />
-
-        <MiniStat
-          title="RDG MARGIN"
-          value={`${game.rdg.projected_margin.toFixed(
+          title="RDG PROJECTION"
+          value={`${game.rdg.projected_winner} by ${game.rdg.projected_margin.toFixed(
             1
-          )} pts`}
+          )}`}
         />
 
         <MiniStat
-          title="SPREAD LEAN"
+          title="HARD ROCK SPREAD"
+          value={
+            market.hard_rock_spread.home_line !== null
+              ? `${game.home_team} ${formatSpread(
+                  market.hard_rock_spread.home_line
+                )}`
+              : "—"
+          }
+        />
+
+        <MiniStat
+          title="RDG SPREAD LEAN"
           value={
             spreadLine !== null
               ? `${spreadTeam} ${formatSpread(
@@ -607,9 +605,7 @@ function NFLGameCard({
           title="MODEL VS MARKET"
           value={
             difference !== null
-              ? `${Math.abs(
-                  difference
-                ).toFixed(1)} pts`
+              ? `${Math.abs(difference).toFixed(1)} pts`
               : "—"
           }
         />
@@ -617,42 +613,69 @@ function NFLGameCard({
 
       <div className="mt-5 rounded-lg border border-white/10 bg-black/20 p-4">
         <p className="text-xs font-bold text-slate-500">
-          HARD ROCK LINE
+          MARKET COMPARISON
         </p>
 
-        <p className="mt-2 font-bold">
-          {game.away_team}{" "}
-          {formatSpread(
-            market.hard_rock_spread.away_line
-          )}
-          {"  •  "}
-          {game.home_team}{" "}
-          {formatSpread(
-            market.hard_rock_spread.home_line
-          )}
-        </p>
+        <div className="mt-3 grid grid-cols-2 gap-4">
+          <div>
+            <p className="text-xs text-slate-500">
+              RDG
+            </p>
+
+            <p className="mt-1 font-bold">
+              {game.rdg.projected_winner}{" "}
+              -{game.rdg.projected_margin.toFixed(1)}
+            </p>
+          </div>
+
+          <div>
+            <p className="text-xs text-slate-500">
+              HARD ROCK
+            </p>
+
+            <p className="mt-1 font-bold">
+              {market.market_favorite}{" "}
+              {market.market_favorite === game.home_team
+                ? formatSpread(
+                    market.hard_rock_spread.home_line
+                  )
+                : formatSpread(
+                    market.hard_rock_spread.away_line
+                  )}
+            </p>
+          </div>
+        </div>
       </div>
 
       <div className="mt-4 rounded-lg border border-white/10 bg-black/20 p-4">
-        <p className="text-xs font-bold text-slate-500">
-          HISTORICAL SIGNAL
-        </p>
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-xs font-bold text-slate-500">
+              MODEL HISTORY
+            </p>
 
-        <p className="mt-2 text-sm text-slate-300">
-          RDG {historical.bucket} point projection bucket:
-          {" "}
-          <span className="font-bold text-white">
-            {historical.correct}/
-            {historical.sample}
-          </span>{" "}
-          correct in the out-of-sample backtest (
-          {historical.historical_winner_accuracy}%).
+            <p className="mt-2 text-lg font-bold">
+              {historical.historical_winner_accuracy}%
+            </p>
+          </div>
+
+          <div className="text-right">
+            <p className="text-xs text-slate-500">
+              HISTORICAL RECORD
+            </p>
+
+            <p className="mt-2 font-bold">
+              {historical.correct}/{historical.sample}
+            </p>
+          </div>
+        </div>
+
+        <p className="mt-3 text-xs text-slate-500">
+          Historical performance for RDG&apos;s{" "}
+          {historical.bucket} projected-margin bucket.
+          This is not the probability that this individual wager wins.
         </p>
       </div>
-
-      <p className="mt-4 text-xs text-slate-500">
-        Historical backtest results are not a probability that this individual bet will win.
-      </p>
     </article>
   );
 }
@@ -662,8 +685,7 @@ function NFLBoardRow({
 }: {
   game: NFLGame;
 }) {
-  const market =
-    game.rdg.market_analysis;
+  const market = game.rdg.market_analysis;
 
   const difference =
     market.model_vs_market_difference;
@@ -672,8 +694,7 @@ function NFLBoardRow({
     <div className="grid gap-3 rounded-lg border border-white/10 bg-white/[0.03] p-4 md:grid-cols-5 md:items-center">
       <div>
         <p className="font-bold">
-          {game.away_team} @{" "}
-          {game.home_team}
+          {game.away_team} @ {game.home_team}
         </p>
 
         <p className="mt-1 text-xs text-slate-500">
@@ -691,8 +712,7 @@ function NFLBoardRow({
       <BoardValue
         title="HARD ROCK"
         value={
-          market.hard_rock_spread.home_line !==
-          null
+          market.hard_rock_spread.home_line !== null
             ? `${game.home_team} ${formatSpread(
                 market.hard_rock_spread.home_line
               )}`
@@ -709,25 +729,11 @@ function NFLBoardRow({
         title="DIFFERENCE"
         value={
           difference !== null
-            ? `${Math.abs(
-                difference
-              ).toFixed(1)} pts`
+            ? `${Math.abs(difference).toFixed(1)} pts`
             : "—"
         }
       />
     </div>
-  );
-}
-
-function SignalBadge({
-  signal,
-}: {
-  signal: string;
-}) {
-  return (
-    <span className="rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-bold text-green-400">
-      {signal}
-    </span>
   );
 }
 
