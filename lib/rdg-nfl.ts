@@ -1029,12 +1029,6 @@ export async function getRdgNflAnalysis() {
         },
       };
     })
-    .filter(
-      (game: any) =>
-        game.moneyline.length > 0 ||
-        game.spread.length > 0 ||
-        game.total.length > 0
-    )
     .sort(
       (a: any, b: any) =>
         new Date(
@@ -1070,7 +1064,7 @@ export async function getRdgNflAnalysis() {
     model:
       "RDG NFL Live",
 
-    version: "1.0",
+    version: "1.1-full-oddize-slate",
 
     model_status:
       "Backtested",
@@ -1085,7 +1079,7 @@ export async function getRdgNflAnalysis() {
         10.29,
 
       note:
-        "Backtest results describe historical out-of-sample performance and are not probabilities for individual future games.",
+        "Backtest results describe historical out-of-sample performance and are not probabilities for individual future games. Live board retains every NFL event returned by Oddize, including events with temporarily unavailable markets.",
     },
 
     calibration: {
