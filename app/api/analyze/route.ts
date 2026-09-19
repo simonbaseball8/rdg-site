@@ -1,5 +1,63 @@
 import { NextResponse } from "next/server";
 
+function normalizeTeam(team: string) {
+  const teamMap: Record<string, string> = {
+    ARI: "ARI",
+    ATL: "ATL",
+    BAL: "BAL",
+    BUF: "BUF",
+    CAR: "CAR",
+    CHI: "CHI",
+    CIN: "CIN",
+
+    CLV: "CLE",
+    CLE: "CLE",
+
+    DAL: "DAL",
+    DEN: "DEN",
+
+    DET: "DET",
+
+    GB: "GB",
+
+    HTX: "HOU",
+    HOU: "HOU",
+
+    CLT: "IND",
+    IND: "IND",
+
+    JAX: "JAX",
+
+    KAN: "KC",
+    KC: "KC",
+
+    LAC: "LAC",
+    LAR: "LA",
+    LA: "LA",
+
+    LV: "LV",
+    MIA: "MIA",
+    MIN: "MIN",
+    NE: "NE",
+    NO: "NO",
+
+    NYG: "NYG",
+    NYJ: "NYJ",
+
+    PHI: "PHI",
+    PIT: "PIT",
+
+    SEA: "SEA",
+    SF: "SF",
+    TB: "TB",
+    TEN: "TEN",
+
+    WAS: "WAS",
+  };
+
+  return teamMap[team] ?? team;
+}
+
 export async function GET() {
   try {
     const apiKey = process.env.ODDIZE_API_KEY;
@@ -11,7 +69,10 @@ export async function GET() {
       );
     }
 
-    // Get Hard Rock NFL odds directly from Oddize
+    // -------------------------
+    // HARD ROCK ODDS
+    // -------------------------
+
     const oddsResponse = await fetch(
       "https://oddize.com/api/v1/odds/latest?sport=nfl&books=hrb",
       {
@@ -34,10 +95,15 @@ export async function GET() {
 
     const oddsData = await oddsResponse.json();
 
-    // Get NFL team stats directly from nflverse
+    // -------------------------
+    // NFLVERSE STATS
+    // -------------------------
+
     const statsResponse = await fetch(
       "https://github.com/nflverse/nflverse-data/releases/download/stats_team/stats_team_week_2026.csv",
-      { cache: "no-store" }
+      {
+        cache: "no-store",
+      }
     );
 
     if (!statsResponse.ok) {
@@ -53,7 +119,10 @@ export async function GET() {
     const statsCsv = await statsResponse.text();
 
     const lines = statsCsv.trim().split(/\r?\n/);
-    const headers = lines[0].split(",").map((h) => h.trim());
+
+    const headers = lines[0]
+      .split(",")
+      .map((header) => header.trim());
 
     const stats = lines.slice(1).map((line) => {
       const values = line.split(",");
@@ -67,7 +136,14 @@ export async function GET() {
       return row;
     });
 
-    const teamStats = new Map<string, Record<string, string>[]>();
+    // -------------------------
+    // ORGANIZE STATS BY TEAM
+    // -------------------------
+
+    const teamStats = new Map<
+      string,
+      Record<string, string>[]
+    >();
 
     for (const row of stats) {
       if (!row.team) continue;
@@ -79,68 +155,109 @@ export async function GET() {
       teamStats.get(row.team)!.push(row);
     }
 
+    // -------------------------
+    // MATCH ODDS + STATS
+    // -------------------------
+
     const games = (oddsData.events ?? [])
       .map((event: any) => {
         const odds = event.odds ?? [];
 
+        const awayCode = normalizeTeam(event.team1);
+        const homeCode = normalizeTeam(event.team2);
+
+        const awayStats =
+          teamStats.get(awayCode) ?? [];
+
+        const homeStats =
+          teamStats.get(homeCode) ?? [];
+
         const moneyline = odds
-          .filter((o: any) => o.market === "moneyline")
-          .map((o: any) => ({
-            team: o.team,
-            odds: o.american_odds,
+          .filter(
+            (odd: any) =>
+              odd.market === "moneyline"
+          )
+          .map((odd: any) => ({
+            team: odd.team,
+            odds: odd.american_odds,
           }));
 
         const spread = odds
-          .filter((o: any) => o.market === "spread")
-          .map((o: any) => ({
-            team: o.team,
-            line: o.line,
-            odds: o.american_odds,
+          .filter(
+            (odd: any) =>
+              odd.market === "spread"
+          )
+          .map((odd: any) => ({
+            team: odd.team,
+            line: odd.line,
+            odds: odd.american_odds,
           }));
 
         const total = odds
-          .filter((o: any) => o.market === "total")
-          .map((o: any) => ({
-            side: o.team,
-            line: o.line,
-            odds: o.american_odds,
+          .filter(
+            (odd: any) =>
+              odd.market === "total"
+          )
+          .map((odd: any) => ({
+            side: odd.team,
+            line: odd.line,
+            odds: odd.american_odds,
           }));
-
-        const awayStats = teamStats.get(event.team1) ?? [];
-        const homeStats = teamStats.get(event.team2) ?? [];
 
         return {
           event_id: event.event_id,
           start_date: event.start_date,
+
           away_team: event.team1,
           home_team: event.team2,
+
+          away_stats_code: awayCode,
+          home_stats_code: homeCode,
+
           moneyline,
           spread,
           total,
 
           stats_match: {
-            away_games_found: awayStats.length,
-            home_games_found: homeStats.length,
+            away_games_found:
+              awayStats.length,
+
+            home_games_found:
+              homeStats.length,
           },
 
           stats_connected:
-            awayStats.length > 0 && homeStats.length > 0,
+            awayStats.length > 0 &&
+            homeStats.length > 0,
         };
       })
+
+      // Remove games without active Hard Rock lines
       .filter(
         (game: any) =>
           game.moneyline.length > 0 ||
           game.spread.length > 0 ||
           game.total.length > 0
+      )
+
+      // Sort upcoming games first
+      .sort(
+        (a: any, b: any) =>
+          new Date(a.start_date).getTime() -
+          new Date(b.start_date).getTime()
       );
 
     return NextResponse.json({
       sportsbook: "Hard Rock Bet",
+
       sport: "NFL",
+
       games_found: games.length,
+
       games_with_stats: games.filter(
         (game: any) => game.stats_connected
       ).length,
+
       games,
     });
   } catch (error) {
