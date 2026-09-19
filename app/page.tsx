@@ -93,7 +93,53 @@ type NFLAnalysis = {
   updated_at: string;
   games: NFLGame[];
 };
+type CFBGame = {
+  event_id: string;
+  start_date: string;
+  away_team: string;
+  home_team: string;
+  stats_connected: boolean;
 
+  hard_rock: {
+    spread: {
+      away_team: string;
+      away_line: number | null;
+      away_odds: string | null;
+      home_team: string;
+      home_line: number | null;
+      home_odds: string | null;
+    };
+  };
+
+  rdg: {
+    projected_winner: string;
+    projected_margin: number;
+    projected_home_margin: number;
+    market_implied_home_margin: number | null;
+    model_vs_market_difference: number | null;
+    spread_lean: string | null;
+    signal: string;
+    sample_status: string;
+    minimum_core_plays: number;
+  } | null;
+};
+
+type CFBAnalysis = {
+  sportsbook: string;
+  sport: string;
+  season: number;
+  model: string;
+  version: string;
+  model_status: string;
+  games_found: number;
+  games_with_core: number;
+  games_missing_core: number;
+  priority_reviews: number;
+  strong_reviews: number;
+  watch_reviews: number;
+  updated_at: string;
+  games: CFBGame[];
+};
 type BetCandidate = {
   event_id: string;
   matchup: string;
