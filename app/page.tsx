@@ -556,6 +556,29 @@ const [cfbError, setCfbError] =
       </header>
 
       <div className="mx-auto max-w-7xl px-6 py-8">
+        <div className="mb-8 flex gap-3">
+  <button
+    onClick={() => setActiveSport("NFL")}
+    className={
+      activeSport === "NFL"
+        ? "rounded-lg bg-green-500 px-5 py-3 text-sm font-bold text-black"
+        : "rounded-lg border border-white/10 bg-white/[0.03] px-5 py-3 text-sm font-bold text-slate-400"
+    }
+  >
+    NFL
+  </button>
+
+  <button
+    onClick={() => setActiveSport("CFB")}
+    className={
+      activeSport === "CFB"
+        ? "rounded-lg bg-green-500 px-5 py-3 text-sm font-bold text-black"
+        : "rounded-lg border border-white/10 bg-white/[0.03] px-5 py-3 text-sm font-bold text-slate-400"
+    }
+  >
+    COLLEGE FOOTBALL
+  </button>
+</div>
         <p className="text-xs font-bold uppercase tracking-[0.25em] text-green-400">
           RDG NFL MODEL
         </p>
