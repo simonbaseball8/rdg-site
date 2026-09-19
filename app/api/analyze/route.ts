@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+type Row = Record<string, string>;
+
 function normalizeTeam(team: string) {
   const teamMap: Record<string, string> = {
     ARI: "ARI", CRD: "ARI",
@@ -39,28 +41,44 @@ function normalizeTeam(team: string) {
   return teamMap[team] ?? team;
 }
 
-function number(value: string | undefined) {
+function num(value: string | undefined) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function average(
-  rows: Record<string, string>[],
-  field: string
-) {
+function average(rows: Row[], field: string) {
   if (!rows.length) return 0;
 
   return (
     rows.reduce(
-      (sum, row) => sum + number(row[field]),
+      (sum, row) => sum + num(row[field]),
       0
     ) / rows.length
   );
 }
 
-function buildTeamMetrics(
-  rows: Record<string, string>[]
-) {
+function parseCsv(csv: string) {
+  const lines = csv.trim().split(/\r?\n/);
+
+  if (lines.length < 2) return [];
+
+  const headers = lines[0]
+    .split(",")
+    .map((header) => header.trim());
+
+  return lines.slice(1).map((line) => {
+    const values = line.split(",");
+    const row: Row = {};
+
+    headers.forEach((header, index) => {
+      row[header] = values[index]?.trim() ?? "";
+    });
+
+    return row;
+  });
+}
+
+function buildMetrics(rows: Row[]) {
   return {
     games: rows.length,
 
@@ -90,6 +108,129 @@ function buildTeamMetrics(
 
     rushing_epa_per_game: Number(
       average(rows, "rushing_epa").toFixed(2)
+    ),
+  };
+}
+
+function getWeights(currentGames: number) {
+  if (currentGames >= 8) {
+    return {
+      weight2024: 0.05,
+      weight2025: 0.15,
+      weight2026: 0.80,
+    };
+  }
+
+  if (currentGames >= 6) {
+    return {
+      weight2024: 0.08,
+      weight2025: 0.22,
+      weight2026: 0.70,
+    };
+  }
+
+  if (currentGames >= 4) {
+    return {
+      weight2024: 0.10,
+      weight2025: 0.30,
+      weight2026: 0.60,
+    };
+  }
+
+  if (currentGames >= 2) {
+    return {
+      weight2024: 0.15,
+      weight2025: 0.35,
+      weight2026: 0.50,
+    };
+  }
+
+  if (currentGames === 1) {
+    return {
+      weight2024: 0.20,
+      weight2025: 0.45,
+      weight2026: 0.35,
+    };
+  }
+
+  return {
+    weight2024: 0.30,
+    weight2025: 0.70,
+    weight2026: 0,
+  };
+}
+
+function blendMetrics(
+  metrics2024: ReturnType<typeof buildMetrics>,
+  metrics2025: ReturnType<typeof buildMetrics>,
+  metrics2026: ReturnType<typeof buildMetrics>
+) {
+  const weights = getWeights(metrics2026.games);
+
+  const blend = (
+    value2024: number,
+    value2025: number,
+    value2026: number
+  ) =>
+    Number(
+      (
+        value2024 * weights.weight2024 +
+        value2025 * weights.weight2025 +
+        value2026 * weights.weight2026
+      ).toFixed(2)
+    );
+
+  return {
+    games_2024: metrics2024.games,
+    games_2025: metrics2025.games,
+    games_2026: metrics2026.games,
+
+    weights: {
+      season_2024: weights.weight2024,
+      season_2025: weights.weight2025,
+      season_2026: weights.weight2026,
+    },
+
+    passing_yards_per_game: blend(
+      metrics2024.passing_yards_per_game,
+      metrics2025.passing_yards_per_game,
+      metrics2026.passing_yards_per_game
+    ),
+
+    rushing_yards_per_game: blend(
+      metrics2024.rushing_yards_per_game,
+      metrics2025.rushing_yards_per_game,
+      metrics2026.rushing_yards_per_game
+    ),
+
+    passing_tds_per_game: blend(
+      metrics2024.passing_tds_per_game,
+      metrics2025.passing_tds_per_game,
+      metrics2026.passing_tds_per_game
+    ),
+
+    rushing_tds_per_game: blend(
+      metrics2024.rushing_tds_per_game,
+      metrics2025.rushing_tds_per_game,
+      metrics2026.rushing_tds_per_game
+    ),
+
+    sacks_allowed_per_game: blend(
+      metrics2024.sacks_allowed_per_game,
+      metrics2025.sacks_allowed_per_game,
+      metrics2026.sacks_allowed_per_game
+    ),
+
+    passing_epa_per_game: blend(
+      metrics2024.passing_epa_per_game,
+      metrics2025.passing_epa_per_game,
+      metrics2026.passing_epa_per_game
+    ),
+
+    rushing_epa_per_game: blend(
+      metrics2024.rushing_epa_per_game,
+      metrics2025.rushing_epa_per_game,
+      metrics2026.rushing_epa_per_game
     ),
   };
 }
@@ -145,15 +286,37 @@ export async function GET() {
       );
     }
 
-    const oddsResponse = await fetch(
-      "https://oddize.com/api/v1/odds/latest?sport=nfl&books=hrb",
-      {
-        headers: {
-          "X-API-Key": apiKey,
-        },
-        cache: "no-store",
-      }
-    );
+    const [
+      oddsResponse,
+      stats2024Response,
+      stats2025Response,
+      stats2026Response,
+    ] = await Promise.all([
+      fetch(
+        "https://oddize.com/api/v1/odds/latest?sport=nfl&books=hrb",
+        {
+          headers: {
+            "X-API-Key": apiKey,
+          },
+          cache: "no-store",
+        }
+      ),
+
+      fetch(
+        "https://github.com/nflverse/nflverse-data/releases/download/stats_team/stats_team_week_2024.csv",
+        { cache: "no-store" }
+      ),
+
+      fetch(
+        "https://github.com/nflverse/nflverse-data/releases/download/stats_team/stats_team_week_2025.csv",
+        { cache: "no-store" }
+      ),
+
+      fetch(
+        "https://github.com/nflverse/nflverse-data/releases/download/stats_team/stats_team_week_2026.csv",
+        { cache: "no-store" }
+      ),
+    ]);
 
     if (!oddsResponse.ok) {
       return NextResponse.json(
@@ -165,68 +328,91 @@ export async function GET() {
       );
     }
 
-    const oddsData = await oddsResponse.json();
-
-    const statsResponse = await fetch(
-      "https://github.com/nflverse/nflverse-data/releases/download/stats_team/stats_team_week_2026.csv",
-      { cache: "no-store" }
-    );
-
-    if (!statsResponse.ok) {
+    if (
+      !stats2024Response.ok ||
+      !stats2025Response.ok ||
+      !stats2026Response.ok
+    ) {
       return NextResponse.json(
         {
           error: "NFL stats request failed",
-          status: statsResponse.status,
+          stats_2024_status: stats2024Response.status,
+          stats_2025_status: stats2025Response.status,
+          stats_2026_status: stats2026Response.status,
         },
         { status: 500 }
       );
     }
 
-    const statsCsv = await statsResponse.text();
+    const oddsData = await oddsResponse.json();
 
-    const lines = statsCsv.trim().split(/\r?\n/);
-    const headers = lines[0]
-      .split(",")
-      .map((header) => header.trim());
+    const stats2024 = parseCsv(
+      await stats2024Response.text()
+    );
 
-    const stats = lines.slice(1).map((line) => {
-      const values = line.split(",");
-      const row: Record<string, string> = {};
+    const stats2025 = parseCsv(
+      await stats2025Response.text()
+    );
 
-      headers.forEach((header, index) => {
-        row[header] = values[index]?.trim() ?? "";
-      });
+    const stats2026 = parseCsv(
+      await stats2026Response.text()
+    );
 
-      return row;
-    });
-
-    const teamStats = new Map<
-      string,
-      Record<string, string>[]
-    >();
-
-    for (const row of stats) {
-      if (!row.team) continue;
-
-      if (!teamStats.has(row.team)) {
-        teamStats.set(row.team, []);
-      }
-
-      teamStats.get(row.team)!.push(row);
-    }
+    const getTeamRows = (
+      stats: Row[],
+      team: string
+    ) =>
+      stats.filter(
+        (row) =>
+          normalizeTeam(row.team) ===
+          normalizeTeam(team)
+      );
 
     const games = (oddsData.events ?? [])
       .map((event: any) => {
         const odds = event.odds ?? [];
 
-        const awayCode = normalizeTeam(event.team1);
-        const homeCode = normalizeTeam(event.team2);
+        const away2024 = getTeamRows(
+          stats2024,
+          event.team1
+        );
 
-        const awayStats = teamStats.get(awayCode) ?? [];
-        const homeStats = teamStats.get(homeCode) ?? [];
+        const home2024 = getTeamRows(
+          stats2024,
+          event.team2
+        );
 
-        const awayMetrics = buildTeamMetrics(awayStats);
-        const homeMetrics = buildTeamMetrics(homeStats);
+        const away2025 = getTeamRows(
+          stats2025,
+          event.team1
+        );
+
+        const home2025 = getTeamRows(
+          stats2025,
+          event.team2
+        );
+
+        const away2026 = getTeamRows(
+          stats2026,
+          event.team1
+        );
+
+        const home2026 = getTeamRows(
+          stats2026,
+          event.team2
+        );
+
+        const awayMetrics = blendMetrics(
+          buildMetrics(away2024),
+          buildMetrics(away2025),
+          buildMetrics(away2026)
+        );
+
+        const homeMetrics = blendMetrics(
+          buildMetrics(home2024),
+          buildMetrics(home2025),
+          buildMetrics(home2026)
+        );
 
         const awayStrength =
           calculateStrength(awayMetrics);
@@ -276,8 +462,12 @@ export async function GET() {
           total,
 
           stats_connected:
-            awayStats.length > 0 &&
-            homeStats.length > 0,
+            away2024.length > 0 &&
+            home2024.length > 0 &&
+            away2025.length > 0 &&
+            home2025.length > 0 &&
+            away2026.length > 0 &&
+            home2026.length > 0,
 
           away_metrics: awayMetrics,
           home_metrics: homeMetrics,
@@ -286,11 +476,8 @@ export async function GET() {
             away_strength: awayStrength,
             home_strength: homeStrength,
             lean,
-            sample_size_warning:
-              awayMetrics.games < 3 ||
-              homeMetrics.games < 3
-                ? "Small sample size"
-                : null,
+            data_note:
+              "2024 + 2025 historical data blended with 2026 current-season performance",
           },
         };
       })
@@ -309,13 +496,17 @@ export async function GET() {
     return NextResponse.json({
       sportsbook: "Hard Rock Bet",
       sport: "NFL",
+
+      model_version: "RDG NFL v0.3",
+
+      methodology:
+        "2024 + 2025 historical baseline blended with 2026 current-season statistics",
+
       games_found: games.length,
 
       games_with_stats: games.filter(
         (game: any) => game.stats_connected
       ).length,
-
-      model_version: "RDG NFL v0.1",
 
       games,
     });
