@@ -934,6 +934,10 @@ const [cfbError, setCfbError] =
             </section>
           </>
         )}
+
+      </>
+    )}
+
 <PerformanceDashboard />
         {/* TRACKED SLIPS */}
 
