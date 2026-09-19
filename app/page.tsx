@@ -237,8 +237,41 @@ const [cfbError, setCfbError] =
       }
     }
 
+        async function loadCFB() {
+      try {
+        const response = await fetch(
+          "/api/cfb-picks",
+          {
+            cache: "no-store",
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(
+            `CFB analysis failed: ${response.status}`
+          );
+        }
+
+        const data =
+          await response.json();
+
+        setCfb(data);
+      } catch (err) {
+        console.error(err);
+
+        setCfbError(
+          err instanceof Error
+            ? err.message
+            : "CFB analysis failed"
+        );
+      } finally {
+        setCfbLoading(false);
+      }
+    }
+
     loadParlays();
     loadNFL();
+    loadCFB();
   }, []);
 
   const activeParlays =
