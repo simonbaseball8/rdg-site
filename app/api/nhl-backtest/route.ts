@@ -8,20 +8,17 @@ const NHL_API = "https://api-web.nhle.com/v1";
 const TRAINING_SEASONS = [
   {
     name: "2023-24",
-    start: "2023-10-10",
-    end: "2024-04-18",
+    id: "20232024",
   },
   {
     name: "2024-25",
-    start: "2024-10-04",
-    end: "2025-04-17",
+    id: "20242025",
   },
 ];
 
 const EVALUATION_SEASON = {
   name: "2025-26",
-  start: "2025-10-07",
-  end: "2026-04-16",
+  id: "20252026",
 };
 
 const MIN_PRIOR_GAMES = 10;
@@ -96,30 +93,6 @@ function clampProbability(
   );
 }
 
-function addDays(
-  dateString: string,
-  days: number
-): string {
-  const date = new Date(
-    `${dateString}T12:00:00Z`
-  );
-
-  date.setUTCDate(
-    date.getUTCDate() + days
-  );
-
-  return date
-    .toISOString()
-    .slice(0, 10);
-}
-
-function compareDates(
-  a: string,
-  b: string
-): number {
-  return a.localeCompare(b);
-}
-
 function createTeamState(): TeamState {
   return {
     games: 0,
@@ -158,162 +131,246 @@ function getGoalDiffPerGame(
   ) / state.games;
 }
 
-async function fetchSeasonGames(
-  startDate: string,
-  endDate: string
-): Promise<HistoricalGame[]> {
-  const gameMap =
-    new Map<number, HistoricalGame>();
+/*
+  Small delay helper.
 
-  let currentDate = startDate;
+  If NHL temporarily returns 429,
+  we wait before retrying.
+*/
 
-  while (
-    compareDates(
-      currentDate,
-      endDate
-    ) <= 0
+function sleep(
+  milliseconds: number
+): Promise<void> {
+  return new Promise(
+    (resolve) =>
+      setTimeout(
+        resolve,
+        milliseconds
+      )
+  );
+}
+
+async function fetchWithRetry(
+  url: string
+): Promise<Response> {
+  let lastStatus = 0;
+
+  for (
+    let attempt = 1;
+    attempt <= 3;
+    attempt++
   ) {
-    const response = await fetch(
-      `${NHL_API}/schedule/${currentDate}`,
-      {
+    const response =
+      await fetch(url, {
         cache: "no-store",
-      }
-    );
+      });
 
-    if (!response.ok) {
+    lastStatus =
+      response.status;
+
+    if (response.ok) {
+      return response;
+    }
+
+    if (
+      response.status !== 429
+    ) {
       throw new Error(
-        `NHL schedule failed for ${currentDate}: ${response.status}`
+        `NHL request failed: ${response.status}`
       );
     }
+
+    /*
+      429 = rate limited.
+
+      Wait longer after each
+      failed attempt.
+    */
+
+    await sleep(
+      attempt * 1500
+    );
+  }
+
+  throw new Error(
+    `NHL request failed after retries: ${lastStatus}`
+  );
+}
+
+/*
+  Get a team's complete season schedule.
+
+  We use one team's schedule as an entry
+  point, then gather all league games
+  through every NHL team's schedule.
+
+  Duplicate games are removed by game ID.
+*/
+
+async function fetchSeasonGames(
+  seasonId: string
+): Promise<HistoricalGame[]> {
+  /*
+    Current NHL team abbreviations.
+
+    Using team season schedules greatly
+    reduces the number of requests versus
+    repeatedly requesting weekly schedules.
+  */
+
+  const teams = [
+    "ANA",
+    "BOS",
+    "BUF",
+    "CAR",
+    "CBJ",
+    "CGY",
+    "CHI",
+    "COL",
+    "DAL",
+    "DET",
+    "EDM",
+    "FLA",
+    "LAK",
+    "MIN",
+    "MTL",
+    "NJD",
+    "NSH",
+    "NYI",
+    "NYR",
+    "OTT",
+    "PHI",
+    "PIT",
+    "SEA",
+    "SJS",
+    "STL",
+    "TBL",
+    "TOR",
+    "UTA",
+    "VAN",
+    "VGK",
+    "WPG",
+    "WSH",
+  ];
+
+  const gameMap =
+    new Map<
+      number,
+      HistoricalGame
+    >();
+
+  for (
+    const abbreviation
+    of teams
+  ) {
+    const url =
+      `${NHL_API}/club-schedule-season/${abbreviation}/${seasonId}`;
+
+    const response =
+      await fetchWithRetry(url);
 
     const data: any =
       await response.json();
 
-    const weeks =
+    const games =
       Array.isArray(
-        data?.gameWeek
+        data?.games
       )
-        ? data.gameWeek
+        ? data.games
         : [];
 
-    for (const day of weeks) {
-      const date =
-        typeof day?.date === "string"
-          ? day.date
-          : null;
+    for (const game of games) {
+      /*
+        NHL gameType 2 =
+        regular season.
 
-      if (!date) {
-        continue;
-      }
+        Excludes preseason and
+        playoffs.
+      */
 
       if (
-        compareDates(
-          date,
-          startDate
-        ) < 0 ||
-        compareDates(
-          date,
-          endDate
-        ) > 0
+        game?.gameType !== 2
       ) {
         continue;
       }
 
-      const games =
-        Array.isArray(day?.games)
-          ? day.games
-          : [];
+      const gameId =
+        typeof game?.id ===
+        "number"
+          ? game.id
+          : null;
 
-      for (const game of games) {
-        /*
-          gameType 2 =
-          NHL regular season.
+      const date =
+        typeof game?.gameDate ===
+        "string"
+          ? game.gameDate
+          : null;
 
-          This intentionally excludes
-          preseason and playoffs.
-        */
+      const homeTeam =
+        game?.homeTeam?.abbrev;
 
-        if (game?.gameType !== 2) {
-          continue;
-        }
+      const awayTeam =
+        game?.awayTeam?.abbrev;
 
-        const gameId =
-          typeof game?.id === "number"
-            ? game.id
-            : null;
+      const homeScore =
+        game?.homeTeam?.score;
 
-        const homeTeam =
-          game?.homeTeam?.abbrev;
+      const awayScore =
+        game?.awayTeam?.score;
 
-        const awayTeam =
-          game?.awayTeam?.abbrev;
-
-        const homeScore =
-          game?.homeTeam?.score;
-
-        const awayScore =
-          game?.awayTeam?.score;
-
-        if (
-          gameId === null ||
-          typeof homeTeam !==
-            "string" ||
-          typeof awayTeam !==
-            "string" ||
-          typeof homeScore !==
-            "number" ||
-          typeof awayScore !==
-            "number"
-        ) {
-          continue;
-        }
-
-        /*
-          NHL regular-season games
-          finish with a winner.
-        */
-
-        if (
-          homeScore === awayScore
-        ) {
-          continue;
-        }
-
-        gameMap.set(
-          gameId,
-          {
-            gameId,
-            date,
-            homeTeam,
-            awayTeam,
-            homeScore,
-            awayScore,
-          }
-        );
+      if (
+        gameId === null ||
+        !date ||
+        typeof homeTeam !==
+          "string" ||
+        typeof awayTeam !==
+          "string" ||
+        typeof homeScore !==
+          "number" ||
+        typeof awayScore !==
+          "number"
+      ) {
+        continue;
       }
+
+      if (
+        homeScore ===
+        awayScore
+      ) {
+        continue;
+      }
+
+      gameMap.set(
+        gameId,
+        {
+          gameId,
+          date,
+          homeTeam,
+          awayTeam,
+          homeScore,
+          awayScore,
+        }
+      );
     }
 
     /*
-      NHL schedule endpoint returns
-      approximately one week of games.
-
-      Move forward seven days and
-      deduplicate by game ID.
+      Tiny pause between team
+      requests to be polite to
+      NHL's API.
     */
 
-    currentDate =
-      addDays(
-        currentDate,
-        7
-      );
+    await sleep(100);
   }
 
   return Array.from(
     gameMap.values()
   ).sort(
     (a, b) =>
-      a.date.localeCompare(b.date) ||
-      a.gameId - b.gameId
+      a.date.localeCompare(
+        b.date
+      ) ||
+      a.gameId -
+        b.gameId
   );
 }
 
@@ -322,15 +379,21 @@ function buildPregameRows(
   games: HistoricalGame[]
 ): ModelRow[] {
   const teams =
-    new Map<string, TeamState>();
+    new Map<
+      string,
+      TeamState
+    >();
 
-  const rows: ModelRow[] = [];
+  const rows:
+    ModelRow[] = [];
 
   function stateFor(
     abbreviation: string
   ): TeamState {
     const existing =
-      teams.get(abbreviation);
+      teams.get(
+        abbreviation
+      );
 
     if (existing) {
       return existing;
@@ -349,17 +412,23 @@ function buildPregameRows(
 
   for (const game of games) {
     const home =
-      stateFor(game.homeTeam);
+      stateFor(
+        game.homeTeam
+      );
 
     const away =
-      stateFor(game.awayTeam);
+      stateFor(
+        game.awayTeam
+      );
 
     /*
       IMPORTANT:
 
-      These values are calculated
-      BEFORE today's game is added
-      to either team's record.
+      Everything below is calculated
+      BEFORE the current game's result
+      is added.
+
+      This prevents future-game leakage.
     */
 
     if (
@@ -374,11 +443,15 @@ function buildPregameRows(
       const awayPointPct =
         getPointPct(away);
 
-      const homeGD =
-        getGoalDiffPerGame(home);
+      const homeGoalDiff =
+        getGoalDiffPerGame(
+          home
+        );
 
-      const awayGD =
-        getGoalDiffPerGame(away);
+      const awayGoalDiff =
+        getGoalDiffPerGame(
+          away
+        );
 
       rows.push({
         season:
@@ -413,24 +486,24 @@ function buildPregameRows(
         awayPointPct,
 
         homeGoalDiffPerGame:
-          homeGD,
+          homeGoalDiff,
 
         awayGoalDiffPerGame:
-          awayGD,
+          awayGoalDiff,
 
         pointPctDiff:
           homePointPct -
           awayPointPct,
 
         goalDiffPerGameDiff:
-          homeGD -
-          awayGD,
+          homeGoalDiff -
+          awayGoalDiff,
       });
     }
 
     /*
-      Update records AFTER the
-      pregame snapshot is captured.
+      Update AFTER capturing
+      the pregame snapshot.
     */
 
     home.games++;
@@ -452,6 +525,23 @@ function buildPregameRows(
       game.homeScore >
       game.awayScore;
 
+    /*
+      We only need standings strength
+      here.
+
+      Regulation/OT distinction is not
+      available consistently from this
+      schedule response, so winner gets
+      2 points and loser gets 0.
+
+      Goal differential remains fully
+      chronological.
+
+      This is a simplified points feature,
+      not an exact reconstruction of NHL
+      standings points.
+    */
+
     if (homeWon) {
       home.wins++;
       home.points += 2;
@@ -471,36 +561,30 @@ function buildPregameRows(
 function fitLogisticRegression(
   rows: ModelRow[]
 ): Coefficients {
-  /*
-    Logistic regression:
-
-    logit(home win probability)
-      =
-      intercept
-      +
-      b1 * point percentage difference
-      +
-      b2 * goal differential/game difference
-
-    Gradient descent keeps the route
-    dependency-free.
-  */
-
   let intercept = 0;
   let pointPct = 0;
   let goalDiffPerGame = 0;
 
-  const learningRate = 0.08;
-  const iterations = 8000;
+  const learningRate =
+    0.08;
+
+  const iterations =
+    8000;
 
   for (
     let iteration = 0;
-    iteration < iterations;
+    iteration <
+    iterations;
     iteration++
   ) {
-    let gradientIntercept = 0;
-    let gradientPointPct = 0;
-    let gradientGoalDiff = 0;
+    let gradientIntercept =
+      0;
+
+    let gradientPointPct =
+      0;
+
+    let gradientGoalDiff =
+      0;
 
     for (const row of rows) {
       const logit =
@@ -537,15 +621,18 @@ function fitLogisticRegression(
 
     intercept -=
       learningRate *
-      (gradientIntercept / n);
+      (gradientIntercept /
+        n);
 
     pointPct -=
       learningRate *
-      (gradientPointPct / n);
+      (gradientPointPct /
+        n);
 
     goalDiffPerGame -=
       learningRate *
-      (gradientGoalDiff / n);
+      (gradientGoalDiff /
+        n);
   }
 
   return {
@@ -641,17 +728,13 @@ function evaluate(
           Math.log(
             homeProbability
           ) +
-        (1 - row.homeWin) *
+        (1 -
+          row.homeWin) *
           Math.log(
             1 -
               homeProbability
           )
       );
-
-    /*
-      Confidence in whichever team
-      the model selected.
-    */
 
     const confidence =
       Math.max(
@@ -667,35 +750,44 @@ function evaluate(
       | "65-69"
       | "70+";
 
-    if (confidence < 55) {
-      bucket = "50-54";
+    if (
+      confidence < 55
+    ) {
+      bucket =
+        "50-54";
     } else if (
       confidence < 60
     ) {
-      bucket = "55-59";
+      bucket =
+        "55-59";
     } else if (
       confidence < 65
     ) {
-      bucket = "60-64";
+      bucket =
+        "60-64";
     } else if (
       confidence < 70
     ) {
-      bucket = "65-69";
+      bucket =
+        "65-69";
     } else {
-      bucket = "70+";
+      bucket =
+        "70+";
     }
 
-    buckets[bucket].games++;
+    buckets[bucket]
+      .games++;
 
     if (
       predictedHome ===
       actualHome
     ) {
-      buckets[bucket].correct++;
+      buckets[bucket]
+        .correct++;
     }
   }
 
-  const bucketResults =
+  const probabilityBuckets =
     Object.entries(
       buckets
     ).map(
@@ -759,21 +851,22 @@ function evaluate(
         : null,
 
     probability_buckets:
-      bucketResults,
+      probabilityBuckets,
   };
 }
 
 export async function GET(): Promise<NextResponse> {
   try {
-    /*
-      Download training seasons.
-    */
-
     const trainingRows:
       ModelRow[] = [];
 
-    const seasonDetails: any[] =
-      [];
+    const seasonDetails:
+      any[] = [];
+
+    /*
+      Fetch each season sequentially
+      to avoid hammering NHL's API.
+    */
 
     for (
       const season
@@ -781,8 +874,7 @@ export async function GET(): Promise<NextResponse> {
     ) {
       const games =
         await fetchSeasonGames(
-          season.start,
-          season.end
+          season.id
         );
 
       const rows =
@@ -805,16 +897,13 @@ export async function GET(): Promise<NextResponse> {
         usable_pregame_games:
           rows.length,
       });
-    }
 
-    /*
-      Download held-out season.
-    */
+      await sleep(500);
+    }
 
     const evaluationGames =
       await fetchSeasonGames(
-        EVALUATION_SEASON.start,
-        EVALUATION_SEASON.end
+        EVALUATION_SEASON.id
       );
 
     const evaluationRows =
@@ -839,34 +928,22 @@ export async function GET(): Promise<NextResponse> {
       );
     }
 
-    /*
-      Fit ONLY on training seasons.
-    */
-
     const coefficients =
       fitLogisticRegression(
         trainingRows
       );
 
-    const trainingEvaluation =
+    const trainingResults =
       evaluate(
         trainingRows,
         coefficients
       );
 
-    const heldOutEvaluation =
+    const heldOutResults =
       evaluate(
         evaluationRows,
         coefficients
       );
-
-    /*
-      Equal-team home probability.
-
-      This represents the model's
-      learned NHL home advantage when
-      both strength features are equal.
-    */
 
     const equalTeamHomeProbability =
       logistic(
@@ -880,7 +957,7 @@ export async function GET(): Promise<NextResponse> {
         "NHL",
 
       version:
-        "1.0-chronological-calibration",
+        "1.1-low-request-chronological",
 
       methodology: {
         training_seasons:
@@ -899,19 +976,22 @@ export async function GET(): Promise<NextResponse> {
           "Regular season only",
 
         features: [
-          "Pregame points percentage difference",
+          "Pregame simplified points percentage difference",
           "Pregame goal differential per game difference",
           "Learned home-ice advantage",
         ],
 
         leakage_control:
-          "Team statistics are calculated chronologically using only games completed before each historical game.",
+          "Each team's strength is calculated only from games completed before the game being predicted.",
+
+        standings_note:
+          "Historical schedule data does not reconstruct overtime loser points here, so the points-percentage feature is simplified. Goal differential remains chronological.",
 
         goalie_model:
-          "Not included in calibration yet.",
+          "Not included in historical calibration.",
 
         betting_note:
-          "No historical Hard Rock prices are included, so this measures winner prediction and probability calibration, not betting profitability or ROI.",
+          "Historical sportsbook prices are not included. Results measure winner prediction and probability calibration, not betting win rate, ROI, or profitability.",
       },
 
       season_details:
@@ -960,10 +1040,10 @@ export async function GET(): Promise<NextResponse> {
       },
 
       training_results:
-        trainingEvaluation,
+        trainingResults,
 
       held_out_results:
-        heldOutEvaluation,
+        heldOutResults,
 
       generated_at:
         new Date().toISOString(),
