@@ -22,21 +22,61 @@ export async function GET() {
     );
 
     if (!response.ok) {
-      const error = await response.text();
-
       return NextResponse.json(
-        {
-          error: "Oddize request failed",
-          status: response.status,
-          details: error,
-        },
+        { error: "Oddize request failed", status: response.status },
         { status: response.status }
       );
     }
 
     const data = await response.json();
 
-    return NextResponse.json(data);
+    const games = (data.events ?? []).map((event: any) => {
+      const odds = event.odds ?? [];
+
+      const moneylines = odds.filter(
+        (odd: any) => odd.market === "moneyline"
+      );
+
+      const spreads = odds.filter(
+        (odd: any) => odd.market === "spread"
+      );
+
+      const totals = odds.filter(
+        (odd: any) => odd.market === "total"
+      );
+
+      return {
+        event_id: event.event_id,
+        sport: event.sport,
+        start_date: event.start_date,
+        away_team: event.team1,
+        home_team: event.team2,
+
+        moneyline: moneylines.map((odd: any) => ({
+          team: odd.team,
+          odds: odd.american_odds,
+        })),
+
+        spread: spreads.map((odd: any) => ({
+          team: odd.team,
+          line: odd.line,
+          odds: odd.american_odds,
+        })),
+
+        total: totals.map((odd: any) => ({
+          side: odd.team,
+          line: odd.line,
+          odds: odd.american_odds,
+        })),
+      };
+    });
+
+    return NextResponse.json({
+      sportsbook: "Hard Rock Bet",
+      sport: "NFL",
+      count: games.length,
+      games,
+    });
   } catch (error) {
     return NextResponse.json(
       { error: "Server error", details: String(error) },
