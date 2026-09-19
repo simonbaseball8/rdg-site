@@ -94,6 +94,46 @@ function buildTeamMetrics(
   };
 }
 
+function calculateStrength(metrics: any) {
+  const offense =
+    metrics.passing_yards_per_game * 0.02 +
+    metrics.rushing_yards_per_game * 0.03 +
+    metrics.passing_tds_per_game * 2 +
+    metrics.rushing_tds_per_game * 2;
+
+  const efficiency =
+    metrics.passing_epa_per_game * 0.15 +
+    metrics.rushing_epa_per_game * 0.15;
+
+  const protection =
+    metrics.sacks_allowed_per_game * -0.75;
+
+  return Number(
+    (offense + efficiency + protection).toFixed(2)
+  );
+}
+
+function getLean(
+  awayTeam: string,
+  homeTeam: string,
+  awayScore: number,
+  homeScore: number
+) {
+  const difference = homeScore - awayScore;
+  const gap = Math.abs(difference);
+
+  let strength = "Slight";
+
+  if (gap >= 5) strength = "Moderate";
+  if (gap >= 10) strength = "Strong";
+
+  return {
+    team: difference >= 0 ? homeTeam : awayTeam,
+    strength,
+    score_difference: Number(gap.toFixed(2)),
+  };
+}
+
 export async function GET() {
   try {
     const apiKey = process.env.ODDIZE_API_KEY;
@@ -105,7 +145,6 @@ export async function GET() {
       );
     }
 
-    // HARD ROCK ODDS
     const oddsResponse = await fetch(
       "https://oddize.com/api/v1/odds/latest?sport=nfl&books=hrb",
       {
@@ -128,7 +167,6 @@ export async function GET() {
 
     const oddsData = await oddsResponse.json();
 
-    // NFLVERSE TEAM STATS
     const statsResponse = await fetch(
       "https://github.com/nflverse/nflverse-data/releases/download/stats_team/stats_team_week_2026.csv",
       { cache: "no-store" }
@@ -153,7 +191,6 @@ export async function GET() {
 
     const stats = lines.slice(1).map((line) => {
       const values = line.split(",");
-
       const row: Record<string, string> = {};
 
       headers.forEach((header, index) => {
@@ -185,11 +222,24 @@ export async function GET() {
         const awayCode = normalizeTeam(event.team1);
         const homeCode = normalizeTeam(event.team2);
 
-        const awayStats =
-          teamStats.get(awayCode) ?? [];
+        const awayStats = teamStats.get(awayCode) ?? [];
+        const homeStats = teamStats.get(homeCode) ?? [];
 
-        const homeStats =
-          teamStats.get(homeCode) ?? [];
+        const awayMetrics = buildTeamMetrics(awayStats);
+        const homeMetrics = buildTeamMetrics(homeStats);
+
+        const awayStrength =
+          calculateStrength(awayMetrics);
+
+        const homeStrength =
+          calculateStrength(homeMetrics);
+
+        const lean = getLean(
+          event.team1,
+          event.team2,
+          awayStrength,
+          homeStrength
+        );
 
         const moneyline = odds
           .filter((o: any) => o.market === "moneyline")
@@ -229,11 +279,19 @@ export async function GET() {
             awayStats.length > 0 &&
             homeStats.length > 0,
 
-          away_metrics:
-            buildTeamMetrics(awayStats),
+          away_metrics: awayMetrics,
+          home_metrics: homeMetrics,
 
-          home_metrics:
-            buildTeamMetrics(homeStats),
+          rdg_analysis: {
+            away_strength: awayStrength,
+            home_strength: homeStrength,
+            lean,
+            sample_size_warning:
+              awayMetrics.games < 3 ||
+              homeMetrics.games < 3
+                ? "Small sample size"
+                : null,
+          },
         };
       })
       .filter(
@@ -256,6 +314,8 @@ export async function GET() {
       games_with_stats: games.filter(
         (game: any) => game.stats_connected
       ).length,
+
+      model_version: "RDG NFL v0.1",
 
       games,
     });
