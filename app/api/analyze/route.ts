@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 
 function normalizeTeam(team: string) {
   const teamMap: Record<string, string> = {
- const teamMap: Record<string, string> = {
   ARI: "ARI",
   CRD: "ARI",
 
