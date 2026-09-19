@@ -1,28 +1,110 @@
 import { NextResponse } from "next/server";
 
-import {
-  analyzeCfbGame,
-  type CfbGame,
-  type CfbTeamProfile,
-} from "../../../lib/rdg.cfb";
-
 export const dynamic = "force-dynamic";
+
+const SEASON = 2026;
+const HOME_FIELD_ADVANTAGE = 2.5;
 
 const ODDIZE_URL =
   "https://oddize.com/api/v1/odds/latest?sport=ncaaf&books=hrb";
 
-const ESPN_URL =
-  "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard?groups=80";
+const CFBD_CORE_URL =
+  `https://api.collegefootballdata.com/ratings/core?year=${SEASON}`;
 
-function num(value: unknown): number {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : 0;
+type CoreRating = {
+  year: number;
+  throughSeasonType: string;
+  throughWeek: number;
+  team: string;
+  conference: string | null;
+  overall: number;
+  offense: number;
+  defense: number;
+  offensePlays: number;
+  defensePlays: number;
+  modelVersion: string;
+};
+
+function normalizeTeam(value: string): string {
+  return value
+    .toUpperCase()
+    .replace(/&/g, "AND")
+    .replace(/STATE/g, "ST")
+    .replace(/UNIVERSITY/g, "")
+    .replace(/[^A-Z0-9]/g, "");
 }
 
-function americanToImplied(
-  odds: string | number | null | undefined
+function findCoreRating(
+  oddizeTeam: string,
+  ratings: CoreRating[]
+): CoreRating | null {
+  const target = normalizeTeam(oddizeTeam);
+
+  const exact = ratings.find(
+    (rating) =>
+      normalizeTeam(rating.team) === target
+  );
+
+  if (exact) return exact;
+
+  const partial = ratings.find((rating) => {
+    const candidate = normalizeTeam(rating.team);
+
+    return (
+      candidate.includes(target) ||
+      target.includes(candidate)
+    );
+  });
+
+  return partial ?? null;
+}
+
+function numberValue(value: unknown): number | null {
+  const parsed = Number(value);
+
+  return Number.isFinite(parsed)
+    ? parsed
+    : null;
+}
+
+function getSpread(
+  odds: any[],
+  team: string
+) {
+  return odds.find(
+    (item: any) =>
+      item.market === "spread" &&
+      item.team === team
+  );
+}
+
+function getMoneyline(
+  odds: any[],
+  team: string
+) {
+  return odds.find(
+    (item: any) =>
+      item.market === "moneyline" &&
+      item.team === team
+  );
+}
+
+function getTotal(
+  odds: any[],
+  side: string
+) {
+  return odds.find(
+    (item: any) =>
+      item.market === "total" &&
+      String(item.team).toLowerCase() ===
+        side.toLowerCase()
+  );
+}
+
+function impliedProbability(
+  odds: string | number | null
 ): number | null {
-  if (odds === null || odds === undefined) return null;
+  if (odds === null) return null;
 
   const value = Number(
     String(odds).replace("+", "")
@@ -34,472 +116,550 @@ function americanToImplied(
 
   if (value > 0) {
     return Number(
-      (100 / (value + 100) * 100).toFixed(2)
+      ((100 / (value + 100)) * 100).toFixed(2)
     );
   }
 
   return Number(
-    (Math.abs(value) /
-      (Math.abs(value) + 100) *
+    (
+      (Math.abs(value) /
+        (Math.abs(value) + 100)) *
       100
     ).toFixed(2)
   );
 }
 
-function makeProfile(
-  team: string,
-  recent: any[]
-): CfbTeamProfile {
-  const games = recent.filter(
-    (g) =>
-      g.home === team ||
-      g.away === team
-  );
-
-  if (!games.length) {
-    return {
-      team,
-      games: 0,
-      offense: {
-        pointsPerGame: 0,
-        yardsPerGame: 0,
-        passingYardsPerGame: 0,
-        rushingYardsPerGame: 0,
-        turnoversPerGame: 0,
-      },
-      defense: {
-        pointsAllowedPerGame: 0,
-        yardsAllowedPerGame: 0,
-        passingYardsAllowedPerGame: 0,
-        rushingYardsAllowedPerGame: 0,
-        takeawaysPerGame: 0,
-      },
-    };
-  }
-
-  let pointsFor = 0;
-  let pointsAgainst = 0;
-
-  for (const game of games) {
-    if (game.home === team) {
-      pointsFor += game.homeScore;
-      pointsAgainst += game.awayScore;
-    } else {
-      pointsFor += game.awayScore;
-      pointsAgainst += game.homeScore;
-    }
-  }
-
-  const ppg =
-    pointsFor / games.length;
-
-  const papg =
-    pointsAgainst / games.length;
-
+function calculateProjection(
+  away: CoreRating,
+  home: CoreRating
+) {
   /*
-   * CFB has very different levels of competition,
-   * so early-season data is intentionally conservative.
+   * CORE overall is an opponent-adjusted efficiency
+   * rating, NOT a point spread.
    *
-   * The current model uses scoring strength as the
-   * foundation until a dedicated historical CFB
-   * statistics dataset is connected.
+   * We therefore use the rating DIFFERENCE as the
+   * foundation of RDG's CFB projection and apply a
+   * conservative scaling factor.
+   *
+   * This factor is provisional until RDG performs
+   * its own historical CFB calibration/backtest.
    */
 
+  const CORE_TO_POINTS = 0.55;
+
+  const ratingDifference =
+    home.overall - away.overall;
+
+  const neutralProjection =
+    ratingDifference * CORE_TO_POINTS;
+
+  const projectedHomeMargin =
+    neutralProjection +
+    HOME_FIELD_ADVANTAGE;
+
   return {
-    team,
-    games: games.length,
+    ratingDifference:
+      Number(ratingDifference.toFixed(2)),
 
-    offense: {
-      pointsPerGame: ppg,
-      yardsPerGame: ppg * 6,
-      passingYardsPerGame: ppg * 3.5,
-      rushingYardsPerGame: ppg * 2.5,
-      turnoversPerGame: 1,
-    },
+    neutralProjection:
+      Number(neutralProjection.toFixed(2)),
 
-    defense: {
-      pointsAllowedPerGame: papg,
-      yardsAllowedPerGame: papg * 6,
-      passingYardsAllowedPerGame: papg * 3.5,
-      rushingYardsAllowedPerGame: papg * 2.5,
-      takeawaysPerGame: 1,
-    },
+    projectedHomeMargin:
+      Number(projectedHomeMargin.toFixed(2)),
   };
-}
-
-function parseEspnGames(data: any) {
-  const results: any[] = [];
-
-  for (const event of data?.events ?? []) {
-    const competition =
-      event?.competitions?.[0];
-
-    if (!competition) continue;
-
-    const competitors =
-      competition.competitors ?? [];
-
-    const home =
-      competitors.find(
-        (c: any) =>
-          c.homeAway === "home"
-      );
-
-    const away =
-      competitors.find(
-        (c: any) =>
-          c.homeAway === "away"
-      );
-
-    if (!home || !away) continue;
-
-    const homeScore =
-      num(home.score);
-
-    const awayScore =
-      num(away.score);
-
-    const completed =
-      competition.status?.type?.completed ===
-      true;
-
-    if (!completed) continue;
-
-    results.push({
-      home:
-        home.team?.displayName ??
-        home.team?.abbreviation,
-
-      away:
-        away.team?.displayName ??
-        away.team?.abbreviation,
-
-      homeScore,
-      awayScore,
-    });
-  }
-
-  return results;
-}
-
-function findEspnTeam(
-  name: string,
-  games: any[]
-): string {
-  const normalized =
-    name.toLowerCase();
-
-  for (const game of games) {
-    for (const team of [
-      game.home,
-      game.away,
-    ]) {
-      if (
-        String(team)
-          .toLowerCase()
-          .includes(normalized) ||
-        normalized.includes(
-          String(team).toLowerCase()
-        )
-      ) {
-        return team;
-      }
-    }
-  }
-
-  return name;
 }
 
 export async function GET() {
   try {
-    const apiKey =
+    const oddizeKey =
       process.env.ODDIZE_API_KEY;
 
-    if (!apiKey) {
+    const cfbdKey =
+      process.env.CFBD_API_KEY;
+
+    if (!oddizeKey) {
       throw new Error(
         "ODDIZE_API_KEY is missing"
       );
     }
 
+    if (!cfbdKey) {
+      throw new Error(
+        "CFBD_API_KEY is missing"
+      );
+    }
+
     const [
       oddsResponse,
-      espnResponse,
+      coreResponse,
     ] = await Promise.all([
       fetch(ODDIZE_URL, {
         headers: {
-          "X-API-Key": apiKey,
+          "X-API-Key": oddizeKey,
         },
         cache: "no-store",
       }),
 
-      fetch(ESPN_URL, {
+      fetch(CFBD_CORE_URL, {
+        headers: {
+          Authorization:
+            `Bearer ${cfbdKey}`,
+        },
         cache: "no-store",
       }),
     ]);
 
     if (!oddsResponse.ok) {
+      const text =
+        await oddsResponse.text();
+
       throw new Error(
-        `Oddize CFB request failed: ${oddsResponse.status}`
+        `Oddize failed ${oddsResponse.status}: ${text}`
       );
     }
 
-    if (!espnResponse.ok) {
+    if (!coreResponse.ok) {
+      const text =
+        await coreResponse.text();
+
       throw new Error(
-        `ESPN CFB request failed: ${espnResponse.status}`
+        `CFBD failed ${coreResponse.status}: ${text}`
       );
     }
 
     const oddsData =
       await oddsResponse.json();
 
-    const espnData =
-      await espnResponse.json();
+    const coreRatings:
+      CoreRating[] =
+      await coreResponse.json();
 
-    const completedGames =
-      parseEspnGames(espnData);
+    const rawEvents =
+      oddsData.events ?? [];
 
-    const games: CfbGame[] =
-      (oddsData.events ?? [])
-        .map((event: any) => {
-          const odds =
-            event.odds ?? [];
+    const analyzedGames =
+      rawEvents.map((event: any) => {
+        const awayTeam =
+          event.team1;
 
-          const moneyline =
-            odds
-              .filter(
-                (o: any) =>
-                  o.market ===
-                  "moneyline"
-              )
-              .map((o: any) => ({
-                team: o.team,
-                odds: String(
-                  o.american_odds
+        const homeTeam =
+          event.team2;
+
+        const odds =
+          event.odds ?? [];
+
+        const awayCore =
+          findCoreRating(
+            awayTeam,
+            coreRatings
+          );
+
+        const homeCore =
+          findCoreRating(
+            homeTeam,
+            coreRatings
+          );
+
+        const awaySpread =
+          getSpread(
+            odds,
+            awayTeam
+          );
+
+        const homeSpread =
+          getSpread(
+            odds,
+            homeTeam
+          );
+
+        const awayMoneyline =
+          getMoneyline(
+            odds,
+            awayTeam
+          );
+
+        const homeMoneyline =
+          getMoneyline(
+            odds,
+            homeTeam
+          );
+
+        const over =
+          getTotal(
+            odds,
+            "Over"
+          );
+
+        const under =
+          getTotal(
+            odds,
+            "Under"
+          );
+
+        const baseGame = {
+          event_id:
+            event.event_id,
+
+          start_date:
+            event.start_date,
+
+          away_team:
+            awayTeam,
+
+          home_team:
+            homeTeam,
+
+          hard_rock: {
+            spread: {
+              away_team:
+                awayTeam,
+
+              away_line:
+                numberValue(
+                  awaySpread?.line
                 ),
-              }));
 
-          const spread =
-            odds
-              .filter(
-                (o: any) =>
-                  o.market ===
-                  "spread"
-              )
-              .map((o: any) => ({
-                team: o.team,
-                line: num(o.line),
-                odds: String(
-                  o.american_odds
+              away_odds:
+                awaySpread
+                  ?.american_odds ??
+                null,
+
+              home_team:
+                homeTeam,
+
+              home_line:
+                numberValue(
+                  homeSpread?.line
                 ),
-              }));
 
-          const total =
-            odds
-              .filter(
-                (o: any) =>
-                  o.market ===
-                  "total"
-              )
-              .map((o: any) => ({
-                side: o.team,
-                line: num(o.line),
-                odds: String(
-                  o.american_odds
+              home_odds:
+                homeSpread
+                  ?.american_odds ??
+                null,
+            },
+
+            moneyline: {
+              away_team:
+                awayTeam,
+
+              away_odds:
+                awayMoneyline
+                  ?.american_odds ??
+                null,
+
+              away_implied_probability:
+                impliedProbability(
+                  awayMoneyline
+                    ?.american_odds ??
+                    null
                 ),
-              }));
 
+              home_team:
+                homeTeam,
+
+              home_odds:
+                homeMoneyline
+                  ?.american_odds ??
+                null,
+
+              home_implied_probability:
+                impliedProbability(
+                  homeMoneyline
+                    ?.american_odds ??
+                    null
+                ),
+            },
+
+            total: {
+              over:
+                numberValue(
+                  over?.line
+                ),
+
+              over_odds:
+                over
+                  ?.american_odds ??
+                null,
+
+              under:
+                numberValue(
+                  under?.line
+                ),
+
+              under_odds:
+                under
+                  ?.american_odds ??
+                null,
+            },
+          },
+        };
+
+        if (
+          !awayCore ||
+          !homeCore
+        ) {
           return {
-            event_id:
-              event.event_id,
+            ...baseGame,
 
-            start_date:
-              event.start_date,
+            stats_connected:
+              false,
 
-            away_team:
-              event.team1,
+            missing_stats: {
+              away:
+                !awayCore,
 
-            home_team:
-              event.team2,
+              home:
+                !homeCore,
+            },
 
-            moneyline,
-            spread,
-            total,
+            rdg: null,
           };
-        })
-        .filter(
-          (game: CfbGame) =>
-            game.spread &&
-            game.spread.length >= 2
-        );
+        }
 
-    const analyzed =
-      games.map((game) => {
-        const awayName =
-          findEspnTeam(
-            game.away_team,
-            completedGames
+        const projection =
+          calculateProjection(
+            awayCore,
+            homeCore
           );
 
-        const homeName =
-          findEspnTeam(
-            game.home_team,
-            completedGames
+        let marketHomeMargin:
+          number | null = null;
+
+        if (
+          homeSpread?.line !==
+          undefined
+        ) {
+          marketHomeMargin =
+            -Number(
+              homeSpread.line
+            );
+        } else if (
+          awaySpread?.line !==
+          undefined
+        ) {
+          marketHomeMargin =
+            Number(
+              awaySpread.line
+            );
+        }
+
+        const difference =
+          marketHomeMargin === null
+            ? null
+            : Number(
+                (
+                  projection
+                    .projectedHomeMargin -
+                  marketHomeMargin
+                ).toFixed(2)
+              );
+
+        const projectedWinner =
+          projection
+            .projectedHomeMargin >= 0
+            ? homeTeam
+            : awayTeam;
+
+        const projectedMargin =
+          Math.abs(
+            projection
+              .projectedHomeMargin
           );
 
-        const awayProfile =
-          makeProfile(
-            awayName,
-            completedGames
-          );
+        let spreadLean:
+          string | null = null;
 
-        const homeProfile =
-          makeProfile(
-            homeName,
-            completedGames
-          );
-
-        const analysis =
-          analyzeCfbGame(
-            game,
-            awayProfile,
-            homeProfile
-          );
+        if (
+          marketHomeMargin !== null
+        ) {
+          spreadLean =
+            projection
+              .projectedHomeMargin >
+            marketHomeMargin
+              ? homeTeam
+              : awayTeam;
+        }
 
         const edge =
-          Math.abs(
-            analysis.market_analysis
-              .model_vs_market_difference ??
-              0
-          );
+          difference === null
+            ? 0
+            : Math.abs(
+                difference
+              );
+
+        /*
+         * IMPORTANT:
+         * These are REVIEW labels,
+         * not probabilities or claims
+         * that a bet is profitable.
+         *
+         * CFB thresholds remain
+         * provisional until RDG
+         * completes its own backtest.
+         */
 
         let signal =
           "Pass";
 
-        if (edge >= 2) {
-          signal = "Watch";
-        }
-
-        if (edge >= 3.5) {
-          signal = "Strong Review";
+        if (edge >= 3) {
+          signal =
+            "Watch";
         }
 
         if (edge >= 5) {
-          signal = "Priority Review";
+          signal =
+            "Strong Review";
         }
 
+        if (edge >= 7) {
+          signal =
+            "Priority Review";
+        }
+
+        const minimumSample =
+          Math.min(
+            awayCore.offensePlays,
+            awayCore.defensePlays,
+            homeCore.offensePlays,
+            homeCore.defensePlays
+          );
+
+        const sampleStatus =
+          minimumSample >= 150
+            ? "Established"
+            : minimumSample >= 75
+            ? "Developing"
+            : "Small Sample";
+
         return {
-          ...game,
+          ...baseGame,
 
           stats_connected:
-            awayProfile.games > 0 &&
-            homeProfile.games > 0,
+            true,
 
           rdg: {
-            ...analysis,
-            market_analysis: {
-              ...analysis.market_analysis,
+            projected_winner:
+              projectedWinner,
 
-              signal,
+            projected_margin:
+              Number(
+                projectedMargin.toFixed(
+                  2
+                )
+              ),
 
-              hard_rock_spread: {
-                away_team:
-                  game.away_team,
+            projected_home_margin:
+              projection
+                .projectedHomeMargin,
 
-                away_line:
-                  game.spread?.find(
-                    (s) =>
-                      s.team ===
-                      game.away_team
-                  )?.line ?? null,
+            home_field_adjustment:
+              HOME_FIELD_ADVANTAGE,
 
-                away_odds:
-                  game.spread?.find(
-                    (s) =>
-                      s.team ===
-                      game.away_team
-                  )?.odds ?? null,
+            core_to_points_factor:
+              0.55,
 
-                home_team:
-                  game.home_team,
+            market_implied_home_margin:
+              marketHomeMargin,
 
-                home_line:
-                  game.spread?.find(
-                    (s) =>
-                      s.team ===
-                      game.home_team
-                  )?.line ?? null,
+            model_vs_market_difference:
+              difference,
 
-                home_odds:
-                  game.spread?.find(
-                    (s) =>
-                      s.team ===
-                      game.home_team
-                  )?.odds ?? null,
-              },
+            spread_lean:
+              spreadLean,
 
-              hard_rock_moneyline: {
-                away_team:
-                  game.away_team,
+            signal,
 
-                away_odds:
-                  game.moneyline?.find(
-                    (m) =>
-                      m.team ===
-                      game.away_team
-                  )?.odds ?? null,
+            sample_status:
+              sampleStatus,
 
-                away_implied_probability:
-                  americanToImplied(
-                    game.moneyline?.find(
-                      (m) =>
-                        m.team ===
-                        game.away_team
-                    )?.odds
-                  ),
-
-                home_team:
-                  game.home_team,
-
-                home_odds:
-                  game.moneyline?.find(
-                    (m) =>
-                      m.team ===
-                      game.home_team
-                  )?.odds ?? null,
-
-                home_implied_probability:
-                  americanToImplied(
-                    game.moneyline?.find(
-                      (m) =>
-                        m.team ===
-                        game.home_team
-                    )?.odds
-                  ),
-              },
-            },
+            minimum_core_plays:
+              minimumSample,
           },
 
-          profiles: {
-            away: awayProfile,
-            home: homeProfile,
+          core: {
+            through_week:
+              Math.min(
+                awayCore.throughWeek,
+                homeCore.throughWeek
+              ),
+
+            model_version:
+              homeCore.modelVersion,
+
+            away: {
+              team:
+                awayCore.team,
+
+              conference:
+                awayCore.conference,
+
+              overall:
+                awayCore.overall,
+
+              offense:
+                awayCore.offense,
+
+              defense:
+                awayCore.defense,
+
+              offense_plays:
+                awayCore.offensePlays,
+
+              defense_plays:
+                awayCore.defensePlays,
+            },
+
+            home: {
+              team:
+                homeCore.team,
+
+              conference:
+                homeCore.conference,
+
+              overall:
+                homeCore.overall,
+
+              offense:
+                homeCore.offense,
+
+              defense:
+                homeCore.defense,
+
+              offense_plays:
+                homeCore.offensePlays,
+
+              defense_plays:
+                homeCore.defensePlays,
+            },
           },
         };
       });
 
-    const priorityReviews =
-      analyzed.filter(
-        (game) =>
-          game.rdg.market_analysis
-            .signal ===
+    const connected =
+      analyzedGames.filter(
+        (game: any) =>
+          game.stats_connected
+      );
+
+    const priority =
+      connected.filter(
+        (game: any) =>
+          game.rdg?.signal ===
           "Priority Review"
       );
 
-    const strongReviews =
-      analyzed.filter(
-        (game) =>
-          game.rdg.market_analysis
-            .signal ===
+    const strong =
+      connected.filter(
+        (game: any) =>
+          game.rdg?.signal ===
           "Strong Review"
+      );
+
+    const watch =
+      connected.filter(
+        (game: any) =>
+          game.rdg?.signal ===
+          "Watch"
       );
 
     return NextResponse.json({
@@ -509,37 +669,59 @@ export async function GET() {
       sport:
         "College Football",
 
+      season:
+        SEASON,
+
       model:
-        "RDG CFB",
+        "RDG CFB CORE",
 
       version:
-        "1.0",
+        "1.0-beta",
 
       model_status:
-        "Early-Season",
+        "Uncalibrated Beta",
 
       games_found:
-        analyzed.length,
+        analyzedGames.length,
 
-      games_with_stats:
-        analyzed.filter(
-          (g) =>
-            g.stats_connected
-        ).length,
+      games_with_core:
+        connected.length,
+
+      games_missing_core:
+        analyzedGames.length -
+        connected.length,
 
       priority_reviews:
-        priorityReviews.length,
+        priority.length,
 
       strong_reviews:
-        strongReviews.length,
+        strong.length,
+
+      watch_reviews:
+        watch.length,
 
       updated_at:
         new Date().toISOString(),
 
-      note:
-        "CFB model currently uses completed-game scoring data plus Hard Rock market lines. Historical calibration will be added after sufficient CFB samples are collected.",
+      methodology: {
+        source:
+          "CFBD CORE",
 
-      games: analyzed,
+        description:
+          "Opponent-relative offensive and defensive efficiency combined with live Hard Rock Bet market lines.",
+
+        home_field_points:
+          HOME_FIELD_ADVANTAGE,
+
+        core_to_points_factor:
+          0.55,
+
+        warning:
+          "RDG CFB 1.0-beta has not yet been historically calibrated or backtested against spreads. Review labels are model-market differences, not win probabilities.",
+      },
+
+      games:
+        analyzedGames,
     });
   } catch (error) {
     console.error(
