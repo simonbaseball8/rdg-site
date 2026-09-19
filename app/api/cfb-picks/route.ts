@@ -4,7 +4,7 @@ import {
   analyzeCfbGame,
   type CfbGame,
   type CfbTeamProfile,
-} from "../../../lib/rdg-cfb";
+} from "../../../lib/rdg.cfb";
 
 export const dynamic = "force-dynamic";
 
