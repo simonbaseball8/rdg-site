@@ -78,179 +78,315 @@ function parseCsv(csv: string) {
   });
 }
 
-function buildMetrics(rows: Row[]) {
+function getTeamRows(stats: Row[], team: string) {
+  return stats.filter(
+    (row) =>
+      normalizeTeam(row.team) === normalizeTeam(team)
+  );
+}
+
+function getOpponentRows(stats: Row[], team: string) {
+  return stats.filter(
+    (row) =>
+      normalizeTeam(row.opponent) ===
+      normalizeTeam(team)
+  );
+}
+
+function buildOffense(rows: Row[]) {
   return {
     games: rows.length,
 
-    passing_yards_per_game: Number(
-      average(rows, "passing_yards").toFixed(1)
+    pass_yards: Number(
+      average(rows, "passing_yards").toFixed(2)
     ),
 
-    rushing_yards_per_game: Number(
-      average(rows, "rushing_yards").toFixed(1)
+    rush_yards: Number(
+      average(rows, "rushing_yards").toFixed(2)
     ),
 
-    passing_tds_per_game: Number(
+    pass_tds: Number(
       average(rows, "passing_tds").toFixed(2)
     ),
 
-    rushing_tds_per_game: Number(
+    rush_tds: Number(
       average(rows, "rushing_tds").toFixed(2)
     ),
 
-    sacks_allowed_per_game: Number(
+    sacks_allowed: Number(
       average(rows, "sacks_suffered").toFixed(2)
     ),
 
-    passing_epa_per_game: Number(
+    pass_epa: Number(
       average(rows, "passing_epa").toFixed(2)
     ),
 
-    rushing_epa_per_game: Number(
+    rush_epa: Number(
       average(rows, "rushing_epa").toFixed(2)
+    ),
+  };
+}
+
+function buildDefense(opponentRows: Row[]) {
+  return {
+    games: opponentRows.length,
+
+    pass_yards_allowed: Number(
+      average(opponentRows, "passing_yards").toFixed(2)
+    ),
+
+    rush_yards_allowed: Number(
+      average(opponentRows, "rushing_yards").toFixed(2)
+    ),
+
+    pass_tds_allowed: Number(
+      average(opponentRows, "passing_tds").toFixed(2)
+    ),
+
+    rush_tds_allowed: Number(
+      average(opponentRows, "rushing_tds").toFixed(2)
+    ),
+
+    sacks_generated: Number(
+      average(opponentRows, "sacks_suffered").toFixed(2)
+    ),
+
+    pass_epa_allowed: Number(
+      average(opponentRows, "passing_epa").toFixed(2)
+    ),
+
+    rush_epa_allowed: Number(
+      average(opponentRows, "rushing_epa").toFixed(2)
     ),
   };
 }
 
 function getWeights(currentGames: number) {
   if (currentGames >= 8) {
-    return {
-      weight2024: 0.05,
-      weight2025: 0.15,
-      weight2026: 0.80,
-    };
+    return { w24: 0.05, w25: 0.15, w26: 0.80 };
   }
 
   if (currentGames >= 6) {
-    return {
-      weight2024: 0.08,
-      weight2025: 0.22,
-      weight2026: 0.70,
-    };
+    return { w24: 0.08, w25: 0.22, w26: 0.70 };
   }
 
   if (currentGames >= 4) {
-    return {
-      weight2024: 0.10,
-      weight2025: 0.30,
-      weight2026: 0.60,
-    };
+    return { w24: 0.10, w25: 0.30, w26: 0.60 };
   }
 
   if (currentGames >= 2) {
-    return {
-      weight2024: 0.15,
-      weight2025: 0.35,
-      weight2026: 0.50,
-    };
+    return { w24: 0.15, w25: 0.35, w26: 0.50 };
   }
 
   if (currentGames === 1) {
-    return {
-      weight2024: 0.20,
-      weight2025: 0.45,
-      weight2026: 0.35,
-    };
+    return { w24: 0.20, w25: 0.45, w26: 0.35 };
   }
 
-  return {
-    weight2024: 0.30,
-    weight2025: 0.70,
-    weight2026: 0,
-  };
+  return { w24: 0.30, w25: 0.70, w26: 0 };
 }
 
-function blendMetrics(
-  metrics2024: ReturnType<typeof buildMetrics>,
-  metrics2025: ReturnType<typeof buildMetrics>,
-  metrics2026: ReturnType<typeof buildMetrics>
+function blend(
+  value24: number,
+  value25: number,
+  value26: number,
+  weights: ReturnType<typeof getWeights>
 ) {
-  const weights = getWeights(metrics2026.games);
+  return Number(
+    (
+      value24 * weights.w24 +
+      value25 * weights.w25 +
+      value26 * weights.w26
+    ).toFixed(2)
+  );
+}
 
-  const blend = (
-    value2024: number,
-    value2025: number,
-    value2026: number
-  ) =>
-    Number(
-      (
-        value2024 * weights.weight2024 +
-        value2025 * weights.weight2025 +
-        value2026 * weights.weight2026
-      ).toFixed(2)
-    );
+function buildTeamProfile(
+  stats24: Row[],
+  stats25: Row[],
+  stats26: Row[],
+  team: string
+) {
+  const offense24 = buildOffense(
+    getTeamRows(stats24, team)
+  );
+
+  const offense25 = buildOffense(
+    getTeamRows(stats25, team)
+  );
+
+  const offense26 = buildOffense(
+    getTeamRows(stats26, team)
+  );
+
+  const defense24 = buildDefense(
+    getOpponentRows(stats24, team)
+  );
+
+  const defense25 = buildDefense(
+    getOpponentRows(stats25, team)
+  );
+
+  const defense26 = buildDefense(
+    getOpponentRows(stats26, team)
+  );
+
+  const weights = getWeights(offense26.games);
 
   return {
-    games_2024: metrics2024.games,
-    games_2025: metrics2025.games,
-    games_2026: metrics2026.games,
-
-    weights: {
-      season_2024: weights.weight2024,
-      season_2025: weights.weight2025,
-      season_2026: weights.weight2026,
+    games: {
+      season_2024: offense24.games,
+      season_2025: offense25.games,
+      season_2026: offense26.games,
     },
 
-    passing_yards_per_game: blend(
-      metrics2024.passing_yards_per_game,
-      metrics2025.passing_yards_per_game,
-      metrics2026.passing_yards_per_game
-    ),
+    weights: {
+      season_2024: weights.w24,
+      season_2025: weights.w25,
+      season_2026: weights.w26,
+    },
 
-    rushing_yards_per_game: blend(
-      metrics2024.rushing_yards_per_game,
-      metrics2025.rushing_yards_per_game,
-      metrics2026.rushing_yards_per_game
-    ),
+    offense: {
+      passing_yards: blend(
+        offense24.pass_yards,
+        offense25.pass_yards,
+        offense26.pass_yards,
+        weights
+      ),
 
-    passing_tds_per_game: blend(
-      metrics2024.passing_tds_per_game,
-      metrics2025.passing_tds_per_game,
-      metrics2026.passing_tds_per_game
-    ),
+      rushing_yards: blend(
+        offense24.rush_yards,
+        offense25.rush_yards,
+        offense26.rush_yards,
+        weights
+      ),
 
-    rushing_tds_per_game: blend(
-      metrics2024.rushing_tds_per_game,
-      metrics2025.rushing_tds_per_game,
-      metrics2026.rushing_tds_per_game
-    ),
+      passing_tds: blend(
+        offense24.pass_tds,
+        offense25.pass_tds,
+        offense26.pass_tds,
+        weights
+      ),
 
-    sacks_allowed_per_game: blend(
-      metrics2024.sacks_allowed_per_game,
-      metrics2025.sacks_allowed_per_game,
-      metrics2026.sacks_allowed_per_game
-    ),
+      rushing_tds: blend(
+        offense24.rush_tds,
+        offense25.rush_tds,
+        offense26.rush_tds,
+        weights
+      ),
 
-    passing_epa_per_game: blend(
-      metrics2024.passing_epa_per_game,
-      metrics2025.passing_epa_per_game,
-      metrics2026.passing_epa_per_game
-    ),
+      sacks_allowed: blend(
+        offense24.sacks_allowed,
+        offense25.sacks_allowed,
+        offense26.sacks_allowed,
+        weights
+      ),
 
-    rushing_epa_per_game: blend(
-      metrics2024.rushing_epa_per_game,
-      metrics2025.rushing_epa_per_game,
-      metrics2026.rushing_epa_per_game
-    ),
+      passing_epa: blend(
+        offense24.pass_epa,
+        offense25.pass_epa,
+        offense26.pass_epa,
+        weights
+      ),
+
+      rushing_epa: blend(
+        offense24.rush_epa,
+        offense25.rush_epa,
+        offense26.rush_epa,
+        weights
+      ),
+    },
+
+    defense: {
+      passing_yards_allowed: blend(
+        defense24.pass_yards_allowed,
+        defense25.pass_yards_allowed,
+        defense26.pass_yards_allowed,
+        weights
+      ),
+
+      rushing_yards_allowed: blend(
+        defense24.rush_yards_allowed,
+        defense25.rush_yards_allowed,
+        defense26.rush_yards_allowed,
+        weights
+      ),
+
+      passing_tds_allowed: blend(
+        defense24.pass_tds_allowed,
+        defense25.pass_tds_allowed,
+        defense26.pass_tds_allowed,
+        weights
+      ),
+
+      rushing_tds_allowed: blend(
+        defense24.rush_tds_allowed,
+        defense25.rush_tds_allowed,
+        defense26.rush_tds_allowed,
+        weights
+      ),
+
+      sacks_generated: blend(
+        defense24.sacks_generated,
+        defense25.sacks_generated,
+        defense26.sacks_generated,
+        weights
+      ),
+
+      passing_epa_allowed: blend(
+        defense24.pass_epa_allowed,
+        defense25.pass_epa_allowed,
+        defense26.pass_epa_allowed,
+        weights
+      ),
+
+      rushing_epa_allowed: blend(
+        defense24.rush_epa_allowed,
+        defense25.rush_epa_allowed,
+        defense26.rush_epa_allowed,
+        weights
+      ),
+    },
   };
 }
 
-function calculateStrength(metrics: any) {
-  const offense =
-    metrics.passing_yards_per_game * 0.02 +
-    metrics.rushing_yards_per_game * 0.03 +
-    metrics.passing_tds_per_game * 2 +
-    metrics.rushing_tds_per_game * 2;
+function offenseScore(profile: any) {
+  const o = profile.offense;
 
-  const efficiency =
-    metrics.passing_epa_per_game * 0.15 +
-    metrics.rushing_epa_per_game * 0.15;
+  return (
+    o.passing_yards * 0.02 +
+    o.rushing_yards * 0.03 +
+    o.passing_tds * 2 +
+    o.rushing_tds * 2 +
+    o.passing_epa * 0.15 +
+    o.rushing_epa * 0.15 -
+    o.sacks_allowed * 0.75
+  );
+}
 
-  const protection =
-    metrics.sacks_allowed_per_game * -0.75;
+function defenseScore(profile: any) {
+  const d = profile.defense;
 
+  return (
+    15 -
+    d.passing_yards_allowed * 0.015 -
+    d.rushing_yards_allowed * 0.02 -
+    d.passing_tds_allowed * 1.5 -
+    d.rushing_tds_allowed * 1.5 -
+    d.passing_epa_allowed * 0.12 -
+    d.rushing_epa_allowed * 0.12 +
+    d.sacks_generated * 0.6
+  );
+}
+
+function matchupScore(
+  offenseProfile: any,
+  opponentProfile: any
+) {
   return Number(
-    (offense + efficiency + protection).toFixed(2)
+    (
+      offenseScore(offenseProfile) +
+      defenseScore(opponentProfile)
+    ).toFixed(2)
   );
 }
 
@@ -269,9 +405,16 @@ function getLean(
   if (gap >= 10) strength = "Strong";
 
   return {
-    team: difference >= 0 ? homeTeam : awayTeam,
+    team:
+      difference >= 0
+        ? homeTeam
+        : awayTeam,
+
     strength,
-    score_difference: Number(gap.toFixed(2)),
+
+    score_difference: Number(
+      gap.toFixed(2)
+    ),
   };
 }
 
@@ -288,9 +431,9 @@ export async function GET() {
 
     const [
       oddsResponse,
-      stats2024Response,
-      stats2025Response,
-      stats2026Response,
+      response24,
+      response25,
+      response26,
     ] = await Promise.all([
       fetch(
         "https://oddize.com/api/v1/odds/latest?sport=nfl&books=hrb",
@@ -329,113 +472,90 @@ export async function GET() {
     }
 
     if (
-      !stats2024Response.ok ||
-      !stats2025Response.ok ||
-      !stats2026Response.ok
+      !response24.ok ||
+      !response25.ok ||
+      !response26.ok
     ) {
       return NextResponse.json(
         {
           error: "NFL stats request failed",
-          stats_2024_status: stats2024Response.status,
-          stats_2025_status: stats2025Response.status,
-          stats_2026_status: stats2026Response.status,
+          stats_2024_status: response24.status,
+          stats_2025_status: response25.status,
+          stats_2026_status: response26.status,
         },
         { status: 500 }
       );
     }
 
-    const oddsData = await oddsResponse.json();
+    const oddsData =
+      await oddsResponse.json();
 
-    const stats2024 = parseCsv(
-      await stats2024Response.text()
+    const stats24 = parseCsv(
+      await response24.text()
     );
 
-    const stats2025 = parseCsv(
-      await stats2025Response.text()
+    const stats25 = parseCsv(
+      await response25.text()
     );
 
-    const stats2026 = parseCsv(
-      await stats2026Response.text()
+    const stats26 = parseCsv(
+      await response26.text()
     );
-
-    const getTeamRows = (
-      stats: Row[],
-      team: string
-    ) =>
-      stats.filter(
-        (row) =>
-          normalizeTeam(row.team) ===
-          normalizeTeam(team)
-      );
 
     const games = (oddsData.events ?? [])
       .map((event: any) => {
         const odds = event.odds ?? [];
 
-        const away2024 = getTeamRows(
-          stats2024,
-          event.team1
-        );
+        const awayProfile =
+          buildTeamProfile(
+            stats24,
+            stats25,
+            stats26,
+            event.team1
+          );
 
-        const home2024 = getTeamRows(
-          stats2024,
-          event.team2
-        );
+        const homeProfile =
+          buildTeamProfile(
+            stats24,
+            stats25,
+            stats26,
+            event.team2
+          );
 
-        const away2025 = getTeamRows(
-          stats2025,
-          event.team1
-        );
+        const awayScore =
+          matchupScore(
+            awayProfile,
+            homeProfile
+          );
 
-        const home2025 = getTeamRows(
-          stats2025,
-          event.team2
-        );
-
-        const away2026 = getTeamRows(
-          stats2026,
-          event.team1
-        );
-
-        const home2026 = getTeamRows(
-          stats2026,
-          event.team2
-        );
-
-        const awayMetrics = blendMetrics(
-          buildMetrics(away2024),
-          buildMetrics(away2025),
-          buildMetrics(away2026)
-        );
-
-        const homeMetrics = blendMetrics(
-          buildMetrics(home2024),
-          buildMetrics(home2025),
-          buildMetrics(home2026)
-        );
-
-        const awayStrength =
-          calculateStrength(awayMetrics);
-
-        const homeStrength =
-          calculateStrength(homeMetrics);
+        const homeScore =
+          matchupScore(
+            homeProfile,
+            awayProfile
+          );
 
         const lean = getLean(
           event.team1,
           event.team2,
-          awayStrength,
-          homeStrength
+          awayScore,
+          homeScore
         );
 
         const moneyline = odds
-          .filter((o: any) => o.market === "moneyline")
+          .filter(
+            (o: any) =>
+              o.market === "moneyline"
+          )
           .map((o: any) => ({
             team: o.team,
             odds: o.american_odds,
           }));
 
         const spread = odds
-          .filter((o: any) => o.market === "spread")
+          .filter(
+            (o: any) =>
+              o.market === "spread"
+          )
           .map((o: any) => ({
             team: o.team,
             line: o.line,
@@ -443,12 +563,23 @@ export async function GET() {
           }));
 
         const total = odds
-          .filter((o: any) => o.market === "total")
+          .filter(
+            (o: any) =>
+              o.market === "total"
+          )
           .map((o: any) => ({
             side: o.team,
             line: o.line,
             odds: o.american_odds,
           }));
+
+        const statsConnected =
+          awayProfile.games.season_2024 > 0 &&
+          awayProfile.games.season_2025 > 0 &&
+          awayProfile.games.season_2026 > 0 &&
+          homeProfile.games.season_2024 > 0 &&
+          homeProfile.games.season_2025 > 0 &&
+          homeProfile.games.season_2026 > 0;
 
         return {
           event_id: event.event_id,
@@ -462,22 +593,22 @@ export async function GET() {
           total,
 
           stats_connected:
-            away2024.length > 0 &&
-            home2024.length > 0 &&
-            away2025.length > 0 &&
-            home2025.length > 0 &&
-            away2026.length > 0 &&
-            home2026.length > 0,
+            statsConnected,
 
-          away_metrics: awayMetrics,
-          home_metrics: homeMetrics,
+          away_profile: awayProfile,
+          home_profile: homeProfile,
 
           rdg_analysis: {
-            away_strength: awayStrength,
-            home_strength: homeStrength,
+            away_matchup_score:
+              awayScore,
+
+            home_matchup_score:
+              homeScore,
+
             lean,
+
             data_note:
-              "2024 + 2025 historical data blended with 2026 current-season performance",
+              "2024 + 2025 + 2026 offense and opponent-derived defensive metrics",
           },
         };
       })
@@ -489,32 +620,42 @@ export async function GET() {
       )
       .sort(
         (a: any, b: any) =>
-          new Date(a.start_date).getTime() -
-          new Date(b.start_date).getTime()
+          new Date(
+            a.start_date
+          ).getTime() -
+          new Date(
+            b.start_date
+          ).getTime()
       );
 
     return NextResponse.json({
       sportsbook: "Hard Rock Bet",
       sport: "NFL",
 
-      model_version: "RDG NFL v0.3",
+      model_version:
+        "RDG NFL v0.4",
 
       methodology:
-        "2024 + 2025 historical baseline blended with 2026 current-season statistics",
+        "2024 + 2025 + 2026 weighted offense and opponent-derived defensive matchup analysis",
 
       games_found: games.length,
 
-      games_with_stats: games.filter(
-        (game: any) => game.stats_connected
-      ).length,
+      games_with_stats:
+        games.filter(
+          (game: any) =>
+            game.stats_connected
+        ).length,
 
       games,
     });
   } catch (error) {
     return NextResponse.json(
       {
-        error: "Analysis route failed",
-        details: String(error),
+        error:
+          "Analysis route failed",
+
+        details:
+          String(error),
       },
       { status: 500 }
     );
