@@ -760,18 +760,22 @@ const [cfbError, setCfbError] =
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_50%_18%,rgba(16,185,129,0.07),transparent_28%),linear-gradient(180deg,#020a07_0%,#020806_42%,#010403_100%)] text-white">
       <header className="border-b border-emerald-500/20 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.16),transparent_38%),linear-gradient(180deg,#03110c_0%,#020806_100%)]">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-6 px-6 py-5">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-5 px-4 py-3 sm:px-6 sm:py-4">
           <div className="flex min-w-0 items-center gap-5">
-            <img
-              src="/rdg-logo.png"
-              alt="Responsible Degenerate Gambling"
-              className="h-16 w-auto max-w-[220px] shrink-0 object-contain sm:h-20 sm:max-w-[300px]"
-            />
+            <div className="relative flex shrink-0 items-center justify-center">
+              <div className="pointer-events-none absolute h-24 w-40 rounded-full bg-emerald-500/15 blur-3xl sm:h-28 sm:w-52" />
+              <img
+                src="/rdg-logo.png"
+                alt="Responsible Degenerate Gambling"
+                className="relative h-20 w-auto max-w-[260px] object-contain drop-shadow-[0_0_14px_rgba(34,197,94,0.18)] sm:h-28 sm:max-w-[390px] lg:h-32 lg:max-w-[440px]"
+              />
+            </div>
+
             <div className="hidden border-l border-white/10 pl-5 md:block">
-              <p className="text-2xl font-black italic uppercase tracking-tight text-white">
+              <p className="text-3xl font-black italic uppercase tracking-tight text-white lg:text-4xl">
                 RDG <span className="text-emerald-400">SPORTS</span>
               </p>
-              <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-400">
+              <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400 lg:text-xs">
                 Data-Driven Betting Dashboard
               </p>
             </div>
