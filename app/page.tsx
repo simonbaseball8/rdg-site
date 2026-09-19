@@ -1764,6 +1764,9 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
   const twoLeg = stricter.slice(0, 2);
   const threeLeg = broader.slice(0, 3);
   const fourLeg = broader.slice(0, 4);
+  const fiveLeg = broader.slice(0, 5);
+  const sixLeg = broader.slice(0, 6);
+  const eightLeg = broader.slice(0, 8);
 
   return (
     <div>
@@ -1853,6 +1856,24 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
               subtitle="Includes Watch Reviews"
               candidates={fourLeg}
               required={4}
+            />
+            <MLBBuilderCard
+              title="5-LEG"
+              subtitle="Extended Review Card"
+              candidates={fiveLeg}
+              required={5}
+            />
+            <MLBBuilderCard
+              title="6-LEG"
+              subtitle="Extended Review Card"
+              candidates={sixLeg}
+              required={6}
+            />
+            <MLBBuilderCard
+              title="8-LEG"
+              subtitle="Long-Shot Review Card"
+              candidates={eightLeg}
+              required={8}
             />
           </section>
 
