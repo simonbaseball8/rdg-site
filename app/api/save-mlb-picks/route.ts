@@ -4,6 +4,34 @@ import { GET as getMLBPicks } from "../mlb-picks/route";
 
 export const dynamic = "force-dynamic";
 
+type MLBPickRow = {
+  event_id: string;
+  game_pk: number | null;
+  game_date: string;
+  generated_at: string;
+  sport: string;
+  sportsbook: string;
+  matchup: string;
+  team: string;
+  bet_type: string;
+  line: number | null;
+  odds: string | null;
+  rdg_projected_winner: string;
+  rdg_projected_margin: number | null;
+  model_market_difference: number | null;
+  model_probability: number | null;
+  market_probability: number | null;
+  historical_bucket: string | null;
+  historical_sample: number | null;
+  historical_correct: number | null;
+  historical_accuracy: number | null;
+  tier: string;
+  status: string;
+  actual_home_score: number | null;
+  actual_away_score: number | null;
+  graded_at: string | null;
+};
+
 export async function GET(): Promise<NextResponse> {
   try {
     const supabaseUrl =
@@ -16,7 +44,8 @@ export async function GET(): Promise<NextResponse> {
       return NextResponse.json(
         {
           success: false,
-          error: "Missing Supabase environment variables.",
+          error:
+            "Missing Supabase environment variables.",
         },
         { status: 500 }
       );
@@ -35,7 +64,6 @@ export async function GET(): Promise<NextResponse> {
 
     /*
       Run the existing MLB model directly.
-      This avoids problems with Vercel Deployment Protection.
     */
 
     const mlbResponse: Response =
@@ -48,7 +76,8 @@ export async function GET(): Promise<NextResponse> {
       return NextResponse.json(
         {
           success: false,
-          error: `MLB model failed: ${errorText}`,
+          error:
+            `MLB model failed: ${errorText}`,
         },
         { status: 500 }
       );
@@ -62,11 +91,6 @@ export async function GET(): Promise<NextResponse> {
         ? mlb.games
         : [];
 
-    /*
-      Save review-qualified MLB selections.
-      Pass-rated games are excluded.
-    */
-
     const allowedSignals =
       new Set<string>([
         "Priority Review",
@@ -74,88 +98,102 @@ export async function GET(): Promise<NextResponse> {
         "Watch",
       ]);
 
-    const rows = games
-      .map((game: any) => {
-        if (!game?.rdg) {
-          return null;
-        }
+    /*
+      Build rows using a loop instead of
+      map/filter.
 
-        if (
-          !allowedSignals.has(
-            game.rdg.signal
-          )
-        ) {
-          return null;
-        }
+      This guarantees TypeScript knows
+      every item in rows is a real
+      MLBPickRow and never null.
+    */
 
-        const team =
-          game.rdg.moneyline_lean ||
-          game.rdg.projected_winner;
+    const rows: MLBPickRow[] = [];
 
-        if (!team) {
-          return null;
-        }
+    for (const game of games) {
+      if (!game?.rdg) {
+        continue;
+      }
 
-        const isHome =
-          team === game.home_team;
+      if (
+        !allowedSignals.has(
+          game.rdg.signal
+        )
+      ) {
+        continue;
+      }
 
-        const isAway =
-          team === game.away_team;
+      const team =
+        game.rdg.moneyline_lean ||
+        game.rdg.projected_winner;
 
-        if (!isHome && !isAway) {
-          return null;
-        }
+      if (
+        !team ||
+        typeof team !== "string"
+      ) {
+        continue;
+      }
 
-        /*
-          Hard Rock odds for the selected team.
-        */
+      const isHome =
+        team === game.home_team;
 
-        const odds = isHome
-          ? game.hard_rock?.moneyline?.home_odds
-          : game.hard_rock?.moneyline?.away_odds;
+      const isAway =
+        team === game.away_team;
 
-        /*
-          RDG model probability.
-        */
+      if (!isHome && !isAway) {
+        continue;
+      }
 
-        const modelProbability = isHome
-          ? game.rdg.model_home_probability
-          : game.rdg.model_away_probability;
+      /*
+        Get the Hard Rock moneyline
+        for RDG's selected team.
+      */
 
-        /*
-          Hard Rock no-vig market probability.
-        */
+      const odds = isHome
+        ? game.hard_rock?.moneyline
+            ?.home_odds
+        : game.hard_rock?.moneyline
+            ?.away_odds;
 
-        const marketProbability = isHome
+      /*
+        Get RDG model probability.
+      */
+
+      const modelProbability =
+        isHome
+          ? game.rdg
+              .model_home_probability
+          : game.rdg
+              .model_away_probability;
+
+      /*
+        Get Hard Rock no-vig
+        market probability.
+      */
+
+      const marketProbability =
+        isHome
           ? game.hard_rock?.moneyline
               ?.no_vig_home_probability
           : game.hard_rock?.moneyline
               ?.no_vig_away_probability;
 
-        /*
-          MLB model returns percentages such as
-          54.28 rather than decimals such as .5428.
-        */
+      /*
+        Determine game date.
+      */
 
-        const modelProbabilityNumber =
-          typeof modelProbability === "number"
-            ? modelProbability
-            : null;
+      let gameDate: string;
 
-        const marketProbabilityNumber =
-          typeof marketProbability === "number"
-            ? marketProbability
-            : null;
+      if (game.start_date) {
+        const parsedDate =
+          new Date(game.start_date);
 
-        /*
-          Determine the game date.
-        */
-
-        let gameDate: string;
-
-        if (game.start_date) {
+        if (
+          !Number.isNaN(
+            parsedDate.getTime()
+          )
+        ) {
           gameDate =
-            new Date(game.start_date)
+            parsedDate
               .toISOString()
               .slice(0, 10);
         } else {
@@ -164,102 +202,118 @@ export async function GET(): Promise<NextResponse> {
               .toISOString()
               .slice(0, 10);
         }
+      } else {
+        gameDate =
+          new Date()
+            .toISOString()
+            .slice(0, 10);
+      }
 
-        return {
-          event_id:
-            String(game.event_id),
+      const row: MLBPickRow = {
+        event_id:
+          String(game.event_id),
 
-          game_pk:
-            game.game_pk ?? null,
+        game_pk:
+          typeof game.game_pk ===
+          "number"
+            ? game.game_pk
+            : null,
 
-          game_date:
-            gameDate,
+        game_date:
+          gameDate,
 
-          generated_at:
-            new Date().toISOString(),
+        generated_at:
+          new Date().toISOString(),
 
-          sport:
-            "MLB",
+        sport:
+          "MLB",
 
-          sportsbook:
-            "Hard Rock Bet",
+        sportsbook:
+          "Hard Rock Bet",
 
-          matchup:
-            `${game.away_team} @ ${game.home_team}`,
+        matchup:
+          `${game.away_team} @ ${game.home_team}`,
 
-          team,
+        team,
 
-          bet_type:
-            "Moneyline",
+        bet_type:
+          "Moneyline",
 
-          /*
-            Moneyline selections do not have
-            a spread line.
-          */
+        line:
+          null,
 
-          line:
-            null,
+        odds:
+          odds !== undefined &&
+          odds !== null
+            ? String(odds)
+            : null,
 
-          odds:
-            odds !== undefined &&
-            odds !== null
-              ? String(odds)
-              : null,
+        rdg_projected_winner:
+          typeof game.rdg
+            .projected_winner ===
+          "string"
+            ? game.rdg
+                .projected_winner
+            : team,
 
-          rdg_projected_winner:
-            game.rdg.projected_winner ??
-            team,
+        rdg_projected_margin:
+          null,
 
-          rdg_projected_margin:
-            null,
+        model_market_difference:
+          typeof game.rdg
+            .model_market_edge ===
+          "number"
+            ? game.rdg
+                .model_market_edge
+            : null,
 
-          model_market_difference:
-            typeof game.rdg
-              .model_market_edge === "number"
-              ? game.rdg.model_market_edge
-              : null,
+        model_probability:
+          typeof modelProbability ===
+          "number"
+            ? modelProbability
+            : null,
 
-          model_probability:
-            modelProbabilityNumber,
+        market_probability:
+          typeof marketProbability ===
+          "number"
+            ? marketProbability
+            : null,
 
-          market_probability:
-            marketProbabilityNumber,
+        historical_bucket:
+          null,
 
-          historical_bucket:
-            null,
+        historical_sample:
+          null,
 
-          historical_sample:
-            null,
+        historical_correct:
+          null,
 
-          historical_correct:
-            null,
+        historical_accuracy:
+          null,
 
-          historical_accuracy:
-            null,
+        tier:
+          String(
+            game.rdg.signal
+          ),
 
-          tier:
-            game.rdg.signal,
+        status:
+          "pending",
 
-          status:
-            "pending",
+        actual_home_score:
+          null,
 
-          actual_home_score:
-            null,
+        actual_away_score:
+          null,
 
-          actual_away_score:
-            null,
+        graded_at:
+          null,
+      };
 
-          graded_at:
-            null,
-        };
-      })
-      .filter(
-        (row: any) =>
-          row !== null
-      );
+      rows.push(row);
+    }
 
     /*
-      No qualifying MLB selections today.
+      Nothing qualifies today.
     */
 
     if (rows.length === 0) {
@@ -271,6 +325,9 @@ export async function GET(): Promise<NextResponse> {
 
         sportsbook:
           "Hard Rock Bet",
+
+        model_version:
+          mlb?.version ?? null,
 
         games_checked:
           games.length,
@@ -293,11 +350,10 @@ export async function GET(): Promise<NextResponse> {
     }
 
     /*
-      Save the first snapshot of each selection.
+      Save first snapshot.
 
-      Supabase's unique index prevents the
-      same event/team/bet type/tier combination
-      from being repeatedly inserted.
+      Existing identical selections
+      are ignored by Supabase.
     */
 
     const {
@@ -367,15 +423,11 @@ export async function GET(): Promise<NextResponse> {
 
     return NextResponse.json(
       {
-        success:
-          false,
-
-        error:
-          message,
+        success: false,
+        error: message,
       },
       {
-        status:
-          500,
+        status: 500,
       }
     );
   }
