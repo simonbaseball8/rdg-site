@@ -2,6 +2,13 @@ import { NextResponse } from "next/server";
 
 type Row = Record<string, string>;
 
+const BASELINE_ACCURACY = 53.87;
+const BASELINE_MAE = 11.15;
+
+// NFL home-field advantage starting assumption.
+// Backtest output will tell us whether the overall model improves.
+const HOME_FIELD_ADVANTAGE = 1.5;
+
 function num(value: string | undefined) {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
@@ -27,7 +34,7 @@ function parseCsv(csv: string): Row[] {
 
 function regularSeason(rows: Row[]) {
   return rows.filter(
-    (row) => (row.season_type ?? "").toUpperCase() === "REG"
+    (row) => (row.season_type ?? "").trim().toUpperCase() === "REG"
   );
 }
 
@@ -38,6 +45,27 @@ function average(rows: Row[], field: string) {
     rows.reduce((sum, row) => sum + num(row[field]), 0) /
     rows.length
   );
+}
+
+function weightedAverage(rows: Row[], field: string) {
+  if (!rows.length) return 0;
+
+  const sorted = [...rows].sort(
+    (a, b) => num(a.week) - num(b.week)
+  );
+
+  let total = 0;
+  let totalWeight = 0;
+
+  sorted.forEach((row, index) => {
+    // Newer games receive more weight.
+    const weight = 1 + index * 0.12;
+
+    total += num(row[field]) * weight;
+    totalWeight += weight;
+  });
+
+  return totalWeight ? total / totalWeight : 0;
 }
 
 function teamRows(rows: Row[], team: string) {
@@ -61,163 +89,152 @@ function opponentRows(rows: Row[], team: string) {
   return opponents;
 }
 
-function offense(rows: Row[]) {
+function offense(rows: Row[], recent = false) {
+  const avg = recent ? weightedAverage : average;
+
   return {
-    passing_yards: average(rows, "passing_yards"),
-    rushing_yards: average(rows, "rushing_yards"),
-    passing_tds: average(rows, "passing_tds"),
-    rushing_tds: average(rows, "rushing_tds"),
-    sacks_allowed: average(rows, "sacks_suffered"),
-    passing_epa: average(rows, "passing_epa"),
-    rushing_epa: average(rows, "rushing_epa"),
+    passing_yards: avg(rows, "passing_yards"),
+    rushing_yards: avg(rows, "rushing_yards"),
+    passing_tds: avg(rows, "passing_tds"),
+    rushing_tds: avg(rows, "rushing_tds"),
+    sacks_allowed: avg(rows, "sacks_suffered"),
+    passing_epa: avg(rows, "passing_epa"),
+    rushing_epa: avg(rows, "rushing_epa"),
   };
 }
 
-function defense(rows: Row[]) {
+function defense(rows: Row[], recent = false) {
+  const avg = recent ? weightedAverage : average;
+
   return {
-    passing_yards_allowed: average(rows, "passing_yards"),
-    rushing_yards_allowed: average(rows, "rushing_yards"),
-    passing_tds_allowed: average(rows, "passing_tds"),
-    rushing_tds_allowed: average(rows, "rushing_tds"),
-    sacks_generated: average(rows, "sacks_suffered"),
-    passing_epa_allowed: average(rows, "passing_epa"),
-    rushing_epa_allowed: average(rows, "rushing_epa"),
+    passing_yards_allowed: avg(rows, "passing_yards"),
+    rushing_yards_allowed: avg(rows, "rushing_yards"),
+    passing_tds_allowed: avg(rows, "passing_tds"),
+    rushing_tds_allowed: avg(rows, "rushing_tds"),
+    sacks_generated: avg(rows, "sacks_suffered"),
+    passing_epa_allowed: avg(rows, "passing_epa"),
+    rushing_epa_allowed: avg(rows, "rushing_epa"),
   };
+}
+
+function currentWeight(games: number) {
+  if (games <= 0) return 0;
+  if (games === 1) return 0.30;
+  if (games <= 3) return 0.45;
+  if (games <= 5) return 0.60;
+  if (games <= 8) return 0.72;
+  if (games <= 12) return 0.82;
+  return 0.88;
 }
 
 function blend(
   historical: number,
   current: number,
-  currentGames: number
+  games: number
 ) {
-  let historicalWeight = 0.7;
-  let currentWeight = 0.3;
+  const cw = currentWeight(games);
+  const hw = 1 - cw;
 
-  if (currentGames >= 2) {
-    historicalWeight = 0.6;
-    currentWeight = 0.4;
-  }
-
-  if (currentGames >= 4) {
-    historicalWeight = 0.45;
-    currentWeight = 0.55;
-  }
-
-  if (currentGames >= 6) {
-    historicalWeight = 0.3;
-    currentWeight = 0.7;
-  }
-
-  if (currentGames >= 8) {
-    historicalWeight = 0.2;
-    currentWeight = 0.8;
-  }
-
-  if (currentGames === 0) {
-    historicalWeight = 1;
-    currentWeight = 0;
-  }
-
-  return historical * historicalWeight + current * currentWeight;
+  return historical * hw + current * cw;
 }
 
 function buildProfile(
-  stats2024: Row[],
-  prior2025: Row[],
+  historicalRows: Row[],
+  currentRows: Row[],
   team: string
 ) {
-  const historicalOffenseRows = teamRows(stats2024, team);
-  const currentOffenseRows = teamRows(prior2025, team);
+  const histTeam = teamRows(historicalRows, team);
+  const currTeam = teamRows(currentRows, team);
 
-  const historicalDefenseRows = opponentRows(stats2024, team);
-  const currentDefenseRows = opponentRows(prior2025, team);
+  const histOpp = opponentRows(historicalRows, team);
+  const currOpp = opponentRows(currentRows, team);
 
-  const oldO = offense(historicalOffenseRows);
-  const newO = offense(currentOffenseRows);
+  const histO = offense(histTeam);
+  const currO = offense(currTeam, true);
 
-  const oldD = defense(historicalDefenseRows);
-  const newD = defense(currentDefenseRows);
+  const histD = defense(histOpp);
+  const currD = defense(currOpp, true);
 
-  const games = currentOffenseRows.length;
+  const games = currTeam.length;
 
   return {
+    games,
+
     offense: {
       passing_yards: blend(
-        oldO.passing_yards,
-        newO.passing_yards,
+        histO.passing_yards,
+        currO.passing_yards,
         games
       ),
       rushing_yards: blend(
-        oldO.rushing_yards,
-        newO.rushing_yards,
+        histO.rushing_yards,
+        currO.rushing_yards,
         games
       ),
       passing_tds: blend(
-        oldO.passing_tds,
-        newO.passing_tds,
+        histO.passing_tds,
+        currO.passing_tds,
         games
       ),
       rushing_tds: blend(
-        oldO.rushing_tds,
-        newO.rushing_tds,
+        histO.rushing_tds,
+        currO.rushing_tds,
         games
       ),
       sacks_allowed: blend(
-        oldO.sacks_allowed,
-        newO.sacks_allowed,
+        histO.sacks_allowed,
+        currO.sacks_allowed,
         games
       ),
       passing_epa: blend(
-        oldO.passing_epa,
-        newO.passing_epa,
+        histO.passing_epa,
+        currO.passing_epa,
         games
       ),
       rushing_epa: blend(
-        oldO.rushing_epa,
-        newO.rushing_epa,
+        histO.rushing_epa,
+        currO.rushing_epa,
         games
       ),
     },
 
     defense: {
       passing_yards_allowed: blend(
-        oldD.passing_yards_allowed,
-        newD.passing_yards_allowed,
+        histD.passing_yards_allowed,
+        currD.passing_yards_allowed,
         games
       ),
       rushing_yards_allowed: blend(
-        oldD.rushing_yards_allowed,
-        newD.rushing_yards_allowed,
+        histD.rushing_yards_allowed,
+        currD.rushing_yards_allowed,
         games
       ),
       passing_tds_allowed: blend(
-        oldD.passing_tds_allowed,
-        newD.passing_tds_allowed,
+        histD.passing_tds_allowed,
+        currD.passing_tds_allowed,
         games
       ),
       rushing_tds_allowed: blend(
-        oldD.rushing_tds_allowed,
-        newD.rushing_tds_allowed,
+        histD.rushing_tds_allowed,
+        currD.rushing_tds_allowed,
         games
       ),
       sacks_generated: blend(
-        oldD.sacks_generated,
-        newD.sacks_generated,
+        histD.sacks_generated,
+        currD.sacks_generated,
         games
       ),
       passing_epa_allowed: blend(
-        oldD.passing_epa_allowed,
-        newD.passing_epa_allowed,
+        histD.passing_epa_allowed,
+        currD.passing_epa_allowed,
         games
       ),
       rushing_epa_allowed: blend(
-        oldD.rushing_epa_allowed,
-        newD.rushing_epa_allowed,
+        histD.rushing_epa_allowed,
+        currD.rushing_epa_allowed,
         games
       ),
     },
-
-    prior_games: games,
   };
 }
 
@@ -225,13 +242,13 @@ function offenseScore(profile: any) {
   const o = profile.offense;
 
   return (
-    o.passing_yards * 0.02 +
-    o.rushing_yards * 0.03 +
-    o.passing_tds * 2 +
-    o.rushing_tds * 2 +
-    o.passing_epa * 0.15 +
-    o.rushing_epa * 0.15 -
-    o.sacks_allowed * 0.75
+    o.passing_yards * 0.018 +
+    o.rushing_yards * 0.025 +
+    o.passing_tds * 1.8 +
+    o.rushing_tds * 1.8 +
+    o.passing_epa * 0.12 +
+    o.rushing_epa * 0.12 -
+    o.sacks_allowed * 0.65
   );
 }
 
@@ -239,40 +256,177 @@ function defenseScore(profile: any) {
   const d = profile.defense;
 
   return (
-    15 -
-    d.passing_yards_allowed * 0.015 -
-    d.rushing_yards_allowed * 0.02 -
-    d.passing_tds_allowed * 1.5 -
-    d.rushing_tds_allowed * 1.5 -
-    d.passing_epa_allowed * 0.12 -
-    d.rushing_epa_allowed * 0.12 +
-    d.sacks_generated * 0.6
+    14 -
+    d.passing_yards_allowed * 0.012 -
+    d.rushing_yards_allowed * 0.018 -
+    d.passing_tds_allowed * 1.3 -
+    d.rushing_tds_allowed * 1.3 -
+    d.passing_epa_allowed * 0.10 -
+    d.rushing_epa_allowed * 0.10 +
+    d.sacks_generated * 0.55
   );
 }
 
-function matchupScore(offenseTeam: any, opponent: any) {
-  return offenseScore(offenseTeam) + defenseScore(opponent);
+function teamStrength(profile: any) {
+  return offenseScore(profile) + defenseScore(profile);
+}
+
+function strengthOfSchedule(
+  historical: Row[],
+  current: Row[],
+  team: string
+) {
+  const rows = teamRows(current, team);
+
+  if (!rows.length) return 0;
+
+  const opponents: string[] = [];
+
+  for (const row of rows) {
+    const opp = current.find(
+      (x) =>
+        x.game_id === row.game_id &&
+        x.team !== team
+    );
+
+    if (opp) opponents.push(opp.team);
+  }
+
+  if (!opponents.length) return 0;
+
+  const values = opponents.map((opponent) => {
+    const profile = buildProfile(
+      historical,
+      current,
+      opponent
+    );
+
+    return teamStrength(profile);
+  });
+
+  const leagueProfiles = Array.from(
+    new Set(historical.map((r) => r.team))
+  ).map((t) =>
+    teamStrength(buildProfile(historical, current, t))
+  );
+
+  const leagueAverage =
+    leagueProfiles.reduce((a, b) => a + b, 0) /
+    Math.max(leagueProfiles.length, 1);
+
+  const opponentAverage =
+    values.reduce((a, b) => a + b, 0) /
+    Math.max(values.length, 1);
+
+  // Keep SOS adjustment deliberately modest.
+  return (opponentAverage - leagueAverage) * 0.15;
+}
+
+function rawMatchupDifference(
+  historical: Row[],
+  current: Row[],
+  awayTeam: string,
+  homeTeam: string
+) {
+  const away = buildProfile(
+    historical,
+    current,
+    awayTeam
+  );
+
+  const home = buildProfile(
+    historical,
+    current,
+    homeTeam
+  );
+
+  const awaySOS = strengthOfSchedule(
+    historical,
+    current,
+    awayTeam
+  );
+
+  const homeSOS = strengthOfSchedule(
+    historical,
+    current,
+    homeTeam
+  );
+
+  const awayRating =
+    teamStrength(away) + awaySOS;
+
+  const homeRating =
+    teamStrength(home) +
+    homeSOS +
+    HOME_FIELD_ADVANTAGE;
+
+  return homeRating - awayRating;
+}
+
+function regression(
+  x: number[],
+  y: number[]
+) {
+  if (!x.length || x.length !== y.length) {
+    return {
+      slope: 1,
+      intercept: 0,
+    };
+  }
+
+  const xMean =
+    x.reduce((a, b) => a + b, 0) / x.length;
+
+  const yMean =
+    y.reduce((a, b) => a + b, 0) / y.length;
+
+  let numerator = 0;
+  let denominator = 0;
+
+  for (let i = 0; i < x.length; i++) {
+    numerator +=
+      (x[i] - xMean) * (y[i] - yMean);
+
+    denominator +=
+      Math.pow(x[i] - xMean, 2);
+  }
+
+  const slope =
+    denominator === 0
+      ? 1
+      : numerator / denominator;
+
+  const intercept =
+    yMean - slope * xMean;
+
+  return {
+    slope,
+    intercept,
+  };
 }
 
 export async function GET() {
   try {
-    const [gamesRes, stats24Res, stats25Res] =
-      await Promise.all([
-        fetch(
-          "https://raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv",
-          { cache: "no-store" }
-        ),
+    const [
+      gamesRes,
+      stats24Res,
+      stats25Res,
+    ] = await Promise.all([
+      fetch(
+        "https://raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv",
+        { cache: "no-store" }
+      ),
 
-        fetch(
-          "https://github.com/nflverse/nflverse-data/releases/download/stats_team/stats_team_week_2024.csv",
-          { cache: "no-store" }
-        ),
+      fetch(
+        "https://github.com/nflverse/nflverse-data/releases/download/stats_team/stats_team_week_2024.csv",
+        { cache: "no-store" }
+      ),
 
-        fetch(
-          "https://github.com/nflverse/nflverse-data/releases/download/stats_team/stats_team_week_2025.csv",
-          { cache: "no-store" }
-        ),
-      ]);
+      fetch(
+        "https://github.com/nflverse/nflverse-data/releases/download/stats_team/stats_team_week_2025.csv",
+        { cache: "no-store" }
+      ),
+    ]);
 
     if (
       !gamesRes.ok ||
@@ -280,12 +434,16 @@ export async function GET() {
       !stats25Res.ok
     ) {
       return NextResponse.json(
-        { error: "Historical data request failed" },
+        {
+          error: "Historical data request failed",
+        },
         { status: 500 }
       );
     }
 
-    const games = parseCsv(await gamesRes.text());
+    const games = parseCsv(
+      await gamesRes.text()
+    );
 
     const stats24 = regularSeason(
       parseCsv(await stats24Res.text())
@@ -303,145 +461,309 @@ export async function GET() {
         game.away_score !== ""
     );
 
-    const results = testGames.map((game) => {
-      const week = num(game.week);
+    /*
+      PHASE 1:
+      Generate true walk-forward raw predictions.
 
-      // CRITICAL:
-      // Only stats from weeks BEFORE this game.
-      const prior2025 = stats25.filter(
-        (row) => num(row.week) < week
+      Each game only receives statistics from weeks
+      completed BEFORE that game.
+    */
+    const rawResults = testGames.map(
+      (game) => {
+        const week = num(game.week);
+
+        const available2025 =
+          stats25.filter(
+            (row) => num(row.week) < week
+          );
+
+        const rawDifference =
+          rawMatchupDifference(
+            stats24,
+            available2025,
+            game.away_team,
+            game.home_team
+          );
+
+        const actualMargin =
+          num(game.home_score) -
+          num(game.away_score);
+
+        return {
+          week,
+          away_team: game.away_team,
+          home_team: game.home_team,
+          raw_difference: rawDifference,
+          actual_margin: actualMargin,
+          prior_games:
+            teamRows(
+              available2025,
+              game.home_team
+            ).length,
+        };
+      }
+    );
+
+    /*
+      PHASE 2:
+      Calibration.
+
+      IMPORTANT:
+      We use the first half of the season to fit the
+      raw-score -> actual-margin relationship, then
+      evaluate weeks 10+ out of sample.
+
+      This avoids fitting and grading on the exact
+      same games.
+    */
+    const calibrationGames =
+      rawResults.filter(
+        (game) => game.week <= 9
       );
 
-      const awayProfile = buildProfile(
-        stats24,
-        prior2025,
-        game.away_team
+    const evaluationGames =
+      rawResults.filter(
+        (game) => game.week >= 10
       );
 
-      const homeProfile = buildProfile(
-        stats24,
-        prior2025,
-        game.home_team
-      );
+    const calibration = regression(
+      calibrationGames.map(
+        (g) => g.raw_difference
+      ),
+      calibrationGames.map(
+        (g) => g.actual_margin
+      )
+    );
 
-      const awayScore = matchupScore(
-        awayProfile,
-        homeProfile
-      );
+    const evaluated = evaluationGames.map(
+      (game) => {
+        const projectedMargin =
+          calibration.intercept +
+          calibration.slope *
+            game.raw_difference;
 
-      const homeScore = matchupScore(
-        homeProfile,
-        awayProfile
-      );
+        const modelWinner =
+          projectedMargin > 0
+            ? game.home_team
+            : projectedMargin < 0
+            ? game.away_team
+            : "EVEN";
 
-      const modelDifference = homeScore - awayScore;
+        const actualWinner =
+          game.actual_margin > 0
+            ? game.home_team
+            : game.actual_margin < 0
+            ? game.away_team
+            : "TIE";
 
-      const actualDifference =
-        num(game.home_score) - num(game.away_score);
+        const error = Math.abs(
+          projectedMargin -
+            game.actual_margin
+        );
 
-      const modelWinner =
-        modelDifference > 0
-          ? game.home_team
-          : modelDifference < 0
-          ? game.away_team
-          : "EVEN";
+        return {
+          week: game.week,
+          away_team: game.away_team,
+          home_team: game.home_team,
 
-      const actualWinner =
-        actualDifference > 0
-          ? game.home_team
-          : actualDifference < 0
-          ? game.away_team
-          : "TIE";
+          raw_rdg_difference: Number(
+            game.raw_difference.toFixed(2)
+          ),
 
-      return {
-        week,
-        away_team: game.away_team,
-        home_team: game.home_team,
+          projected_margin: Number(
+            projectedMargin.toFixed(2)
+          ),
 
-        prior_2025_games: {
-          away: awayProfile.prior_games,
-          home: homeProfile.prior_games,
-        },
+          actual_margin:
+            game.actual_margin,
 
-        rdg_difference: Number(
-          modelDifference.toFixed(2)
-        ),
+          model_winner: modelWinner,
+          actual_winner: actualWinner,
 
-        actual_margin: actualDifference,
+          winner_correct:
+            modelWinner === actualWinner,
 
-        model_winner: modelWinner,
-        actual_winner: actualWinner,
+          absolute_error: Number(
+            error.toFixed(2)
+          ),
+        };
+      }
+    );
 
-        winner_correct:
-          modelWinner === actualWinner,
-      };
-    });
-
-    const decisiveGames = results.filter(
+    const decisive = evaluated.filter(
       (game) =>
         game.model_winner !== "EVEN" &&
         game.actual_winner !== "TIE"
     );
 
-    const correct = decisiveGames.filter(
+    const correct = decisive.filter(
       (game) => game.winner_correct
     ).length;
 
     const accuracy =
-      decisiveGames.length > 0
-        ? Number(
-            (
-              (correct / decisiveGames.length) *
-              100
-            ).toFixed(2)
-          )
+      decisive.length > 0
+        ? (correct / decisive.length) * 100
         : 0;
 
-    const avgAbsoluteError =
-      results.length > 0
-        ? Number(
-            (
-              results.reduce(
-                (sum, game) =>
-                  sum +
-                  Math.abs(
-                    game.rdg_difference -
-                      game.actual_margin
-                  ),
-                0
-              ) / results.length
-            ).toFixed(2)
-          )
+    const mae =
+      evaluated.length > 0
+        ? evaluated.reduce(
+            (sum, game) =>
+              sum + game.absolute_error,
+            0
+          ) / evaluated.length
         : 0;
+
+    const improvementAccuracy =
+      accuracy - BASELINE_ACCURACY;
+
+    const improvementMae =
+      BASELINE_MAE - mae;
+
+    /*
+      Break performance into confidence buckets
+      based on absolute projected margin.
+    */
+    function bucket(
+      min: number,
+      max: number
+    ) {
+      const games = evaluated.filter(
+        (g) => {
+          const edge = Math.abs(
+            g.projected_margin
+          );
+
+          return edge >= min && edge < max;
+        }
+      );
+
+      const decisiveGames = games.filter(
+        (g) =>
+          g.actual_winner !== "TIE" &&
+          g.model_winner !== "EVEN"
+      );
+
+      const wins = decisiveGames.filter(
+        (g) => g.winner_correct
+      ).length;
+
+      return {
+        games: decisiveGames.length,
+        correct: wins,
+        accuracy:
+          decisiveGames.length > 0
+            ? Number(
+                (
+                  (wins /
+                    decisiveGames.length) *
+                  100
+                ).toFixed(2)
+              )
+            : null,
+      };
+    }
 
     return NextResponse.json({
-      backtest_version: "RDG Backtest v0.2",
+      model:
+        "RDG NFL Complete Backtest",
 
-      methodology:
-        "2025 walk-forward backtest using 2024 regular-season baseline plus only 2025 statistics available before each tested game",
+      version: "1.0",
 
-      leakage_protection:
-        "Each 2025 game only uses 2025 team statistics from earlier weeks.",
-
-      games_tested: results.length,
-
-      winner_accuracy: {
-        correct,
-        tested: decisiveGames.length,
-        percentage: accuracy,
+      methodology: {
+        historical_baseline:
+          "2024 regular season",
+        walk_forward:
+          "Only 2025 games completed before each tested game are available to the model.",
+        recent_form:
+          "Later current-season games receive progressively greater weight.",
+        opponent_adjustment:
+          "Strength of schedule is estimated from prior opponents.",
+        home_field_advantage:
+          HOME_FIELD_ADVANTAGE,
+        calibration:
+          "Weeks 1-9 calibrate raw RDG difference to actual NFL margin. Weeks 10+ are evaluated out of sample.",
       },
 
-      raw_margin_mae: avgAbsoluteError,
+      data_integrity: {
+        future_game_leakage: false,
+        postseason_removed: true,
+      },
 
-      calibration_note:
-        "Raw RDG score difference is not yet a projected NFL point spread. This backtest is measuring its relationship with actual margins so it can be calibrated.",
+      calibration_sample:
+        calibrationGames.length,
 
-      sample_results: results.slice(0, 10),
+      evaluation_sample:
+        evaluated.length,
+
+      calibration_equation: {
+        intercept: Number(
+          calibration.intercept.toFixed(4)
+        ),
+        slope: Number(
+          calibration.slope.toFixed(4)
+        ),
+        formula:
+          "projected_margin = intercept + (slope × raw_rdg_difference)",
+      },
+
+      finished_model_results: {
+        winner_accuracy: {
+          correct,
+          tested: decisive.length,
+          percentage: Number(
+            accuracy.toFixed(2)
+          ),
+        },
+
+        margin_mae: Number(
+          mae.toFixed(2)
+        ),
+      },
+
+      old_model_baseline: {
+        winner_accuracy:
+          BASELINE_ACCURACY,
+        margin_mae: BASELINE_MAE,
+      },
+
+      improvement: {
+        accuracy_percentage_points:
+          Number(
+            improvementAccuracy.toFixed(2)
+          ),
+
+        mae_points:
+          Number(
+            improvementMae.toFixed(2)
+          ),
+
+        accuracy_improved:
+          accuracy >
+          BASELINE_ACCURACY,
+
+        mae_improved:
+          mae < BASELINE_MAE,
+      },
+
+      performance_by_projected_margin: {
+        under_3: bucket(0, 3),
+        margin_3_to_6: bucket(3, 6),
+        margin_6_to_10: bucket(6, 10),
+        margin_10_plus: bucket(
+          10,
+          Infinity
+        ),
+      },
+
+      sample_predictions:
+        evaluated.slice(0, 15),
     });
   } catch (error) {
     return NextResponse.json(
       {
-        error: "Backtest failed",
+        error:
+          "Complete RDG backtest failed",
         details: String(error),
       },
       { status: 500 }
