@@ -678,7 +678,7 @@ export default function Home() {
             </section>
           </>
         )}
-
+<PerformanceDashboard />
         {/* TRACKED SLIPS */}
 
         <div className="mt-14 border-t border-white/10 pt-10">
