@@ -947,6 +947,8 @@ export async function getRdgNflAnalysis() {
     );
   }
 
+  const nowMs = Date.now();
+
   const games = slate
     .map((schedule: Row) => {
       const awayTeam = normalizeTeam(schedule.away_team);
@@ -1088,6 +1090,10 @@ export async function getRdgNflAnalysis() {
         },
       };
     })
+    .filter(
+      (game: any) =>
+        new Date(game.start_date).getTime() > nowMs
+    )
     .sort(
       (a: any, b: any) =>
         new Date(
@@ -1123,7 +1129,7 @@ export async function getRdgNflAnalysis() {
     model:
       "RDG NFL Live",
 
-    version: "1.2-nflverse-schedule-master",
+    version: "1.3-upcoming-only",
 
     model_status:
       "Backtested",
@@ -1138,7 +1144,7 @@ export async function getRdgNflAnalysis() {
         10.29,
 
       note:
-        "Backtest results describe historical out-of-sample performance and are not probabilities for individual future games. nflverse is the schedule master for the current regular-season week; Oddize Hard Rock markets are attached when available.",
+        "Backtest results describe historical out-of-sample performance and are not probabilities for individual future games. nflverse remains the schedule master for the current regular-season week; the live betting board returns only games that have not started yet, with Oddize Hard Rock markets attached when available.",
     },
 
     calibration: {
@@ -1154,6 +1160,12 @@ export async function getRdgNflAnalysis() {
 
     schedule_week:
       nextWeek,
+
+    weekly_schedule_games:
+      slate.length,
+
+    upcoming_games:
+      games.length,
 
     games_found:
       games.length,
