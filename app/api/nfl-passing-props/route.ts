@@ -24,8 +24,6 @@ type PlayerGame = {
   attempts: number;
   completions: number;
   yards: number;
-  touchdowns: number;
-  interceptions: number;
 };
 
 type PlayerHistory = {
@@ -33,6 +31,15 @@ type PlayerHistory = {
   player_id: string;
   current: PlayerGame[];
   prior: PlayerGame[];
+};
+
+type SportsbookLine = {
+  sportsbook: string;
+  side: string | null;
+  line: number;
+  odds: string | number | null;
+  available: boolean;
+  updated_at: string | null;
 };
 
 function num(value: unknown): number {
@@ -43,6 +50,46 @@ function num(value: unknown): number {
 function round(value: number, digits = 1): number {
   const factor = 10 ** digits;
   return Math.round(value * factor) / factor;
+}
+
+function average(values: number[]): number | null {
+  if (!values.length) return null;
+
+  return (
+    values.reduce((sum, value) => sum + value, 0) /
+    values.length
+  );
+}
+
+function weightedAverage(
+  values: Array<{
+    value: number;
+    weight: number;
+  }>
+): number | null {
+  const valid = values.filter(
+    (item) =>
+      Number.isFinite(item.value) &&
+      Number.isFinite(item.weight) &&
+      item.weight > 0
+  );
+
+  if (!valid.length) return null;
+
+  const totalWeight = valid.reduce(
+    (sum, item) => sum + item.weight,
+    0
+  );
+
+  if (!totalWeight) return null;
+
+  return (
+    valid.reduce(
+      (sum, item) =>
+        sum + item.value * item.weight,
+      0
+    ) / totalWeight
+  );
 }
 
 function normalizeName(name: string): string {
@@ -89,6 +136,7 @@ function parseCSVLine(line: string): string[] {
   }
 
   result.push(current);
+
   return result;
 }
 
@@ -141,9 +189,11 @@ function passingGames(
     )
     .map((row) => ({
       season,
+
       week: num(row.week),
 
-      player_id: row.player_id ?? "",
+      player_id:
+        row.player_id ?? "",
 
       player_name:
         row.player_display_name ||
@@ -155,80 +205,59 @@ function passingGames(
         row.team ||
         "",
 
-      attempts: num(row.attempts),
-      completions: num(row.completions),
-      yards: num(row.passing_yards),
-      touchdowns: num(row.passing_tds),
-      interceptions: num(row.interceptions),
-    }));
-}
+      attempts:
+        num(row.attempts),
 
-function average(values: number[]): number | null {
-  if (!values.length) return null;
+      completions:
+        num(row.completions),
 
-  return (
-    values.reduce((sum, value) => sum + value, 0) /
-    values.length
-  );
-}
-
-function weightedAverage(
-  values: Array<{
-    value: number;
-    weight: number;
-  }>
-): number | null {
-  const valid = values.filter(
-    (item) =>
-      Number.isFinite(item.value) &&
-      Number.isFinite(item.weight) &&
-      item.weight > 0
-  );
-
-  if (!valid.length) return null;
-
-  const totalWeight = valid.reduce(
-    (sum, item) => sum + item.weight,
-    0
-  );
-
-  if (!totalWeight) return null;
-
-  return (
-    valid.reduce(
-      (sum, item) =>
-        sum + item.value * item.weight,
-      0
-    ) / totalWeight
-  );
+      yards:
+        num(row.passing_yards),
+    }))
+    .sort(
+      (a, b) =>
+        a.season - b.season ||
+        a.week - b.week
+    );
 }
 
 function buildPlayerHistory(
   currentGames: PlayerGame[],
   priorGames: PlayerGame[]
 ): Map<string, PlayerHistory> {
-  const map = new Map<string, PlayerHistory>();
+  const map =
+    new Map<string, PlayerHistory>();
 
   for (const game of [
     ...priorGames,
     ...currentGames,
   ]) {
-    const key = normalizeName(game.player_name);
+    const key =
+      normalizeName(game.player_name);
 
     if (!key) continue;
 
     if (!map.has(key)) {
       map.set(key, {
-        player_name: game.player_name,
-        player_id: game.player_id,
+        player_name:
+          game.player_name,
+
+        player_id:
+          game.player_id,
+
         current: [],
+
         prior: [],
       });
     }
 
-    const player = map.get(key)!;
+    const player =
+      map.get(key)!;
 
-    if (game.season === CURRENT_SEASON) {
+    if (
+      game.season ===
+      CURRENT_SEASON
+    ) {
       player.current.push(game);
     } else {
       player.prior.push(game);
@@ -237,195 +266,412 @@ function buildPlayerHistory(
 
   for (const player of map.values()) {
     player.current.sort(
-      (a, b) => a.week - b.week
+      (a, b) =>
+        a.week - b.week
     );
 
     player.prior.sort(
-      (a, b) => a.week - b.week
+      (a, b) =>
+        a.week - b.week
     );
   }
 
   return map;
 }
 
-function projectPassingYards(
-  player: PlayerHistory
-) {
-  const current = player.current;
-  const prior = player.prior;
+function yardsPerAttempt(
+  game: PlayerGame
+): number {
+  if (game.attempts <= 0) {
+    return 0;
+  }
 
-  const currentAvg = average(
-    current.map((game) => game.yards)
+  return (
+    game.yards /
+    game.attempts
   );
+}
 
-  const priorAvg = average(
-    prior.map((game) => game.yards)
-  );
+function recencyWeighted(
+  games: PlayerGame[],
+  selector: (
+    game: PlayerGame
+  ) => number,
+  maxGames = 8
+): number | null {
+  const selected =
+    games.slice(-maxGames);
 
-  const currentAttemptAvg = average(
-    current.map((game) => game.attempts)
-  );
-
-  const priorAttemptAvg = average(
-    prior.map((game) => game.attempts)
-  );
-
-  const recentCurrentAvg = average(
-    current
-      .slice(-3)
-      .map((game) => game.yards)
-  );
-
-  const recentPriorAvg = average(
-    prior
-      .slice(-5)
-      .map((game) => game.yards)
-  );
-
-  const currentGames = current.length;
-  const priorGames = prior.length;
-
-  let currentWeight = 0;
-
-  if (currentGames === 1) {
-    currentWeight = 0.2;
-  } else if (currentGames === 2) {
-    currentWeight = 0.35;
-  } else if (currentGames === 3) {
-    currentWeight = 0.5;
-  } else if (currentGames === 4) {
-    currentWeight = 0.6;
-  } else if (currentGames >= 5) {
-    currentWeight = 0.7;
-  }
-
-  if (!priorGames) {
-    currentWeight = 1;
-  }
-
-  const priorWeight =
-    priorGames > 0
-      ? 1 - currentWeight
-      : 0;
-
-  const seasonValues: Array<{
-    value: number;
-    weight: number;
-  }> = [];
-
-  if (currentAvg !== null) {
-    seasonValues.push({
-      value: currentAvg,
-      weight: currentWeight,
-    });
-  }
-
-  if (priorAvg !== null) {
-    seasonValues.push({
-      value: priorAvg,
-      weight: priorWeight,
-    });
-  }
-
-  const seasonBaseline =
-    weightedAverage(seasonValues);
-
-  const recentValues: Array<{
-    value: number;
-    weight: number;
-  }> = [];
-
-  if (recentCurrentAvg !== null) {
-    recentValues.push({
-      value: recentCurrentAvg,
-      weight:
-        currentGames >= 3 ? 0.65 : 0.4,
-    });
-  }
-
-  if (recentPriorAvg !== null) {
-    recentValues.push({
-      value: recentPriorAvg,
-      weight:
-        currentGames >= 3 ? 0.35 : 0.6,
-    });
-  }
-
-  const recentBaseline =
-    weightedAverage(recentValues);
-
-  let projection =
-    seasonBaseline ??
-    recentBaseline ??
-    null;
-
-  if (
-    projection !== null &&
-    recentBaseline !== null
-  ) {
-    projection =
-      projection * 0.75 +
-      recentBaseline * 0.25;
-  }
-
-  if (
-    projection !== null &&
-    currentAttemptAvg !== null &&
-    priorAttemptAvg !== null &&
-    priorAttemptAvg >= 20
-  ) {
-    const ratio =
-      currentAttemptAvg /
-      priorAttemptAvg;
-
-    const cappedRatio = Math.min(
-      1.15,
-      Math.max(0.85, ratio)
-    );
-
-    projection *=
-      1 +
-      (cappedRatio - 1) * 0.25;
-  }
-
-  if (projection === null) {
+  if (!selected.length) {
     return null;
   }
 
+  return weightedAverage(
+    selected.map(
+      (game, index) => ({
+        value:
+          selector(game),
+
+        weight:
+          index + 1,
+      })
+    )
+  );
+}
+
+/*
+  FROZEN RDG V2 PASSING MODEL
+
+  Validated results:
+
+  2025 held-out:
+  MAE 59.60
+
+  2026 untouched validation:
+  MAE 57.27
+
+  Simple baseline on same 2026 sample:
+  MAE 60.06
+
+  The model projects:
+
+  expected passing attempts
+             ×
+  expected yards per attempt
+
+  It also applies conservative early-season
+  shrinkage for small samples.
+*/
+function projectPassingYardsV2(
+  player: PlayerHistory
+) {
+  const history: PlayerGame[] = [
+    ...player.prior,
+    ...player.current,
+  ].sort(
+    (a, b) =>
+      a.season - b.season ||
+      a.week - b.week
+  );
+
+  if (history.length < 3) {
+    return null;
+  }
+
+  const current =
+    player.current;
+
+  const prior =
+    player.prior.slice(-17);
+
+  const careerWindow =
+    history.slice(-20);
+
+  /*
+    PASSING ATTEMPTS
+  */
+
+  const priorAttempts =
+    average(
+      prior.map(
+        (game) =>
+          game.attempts
+      )
+    );
+
+  const currentAttempts =
+    average(
+      current.map(
+        (game) =>
+          game.attempts
+      )
+    );
+
+  const recentAttempts =
+    recencyWeighted(
+      careerWindow,
+      (game) =>
+        game.attempts,
+      8
+    );
+
+  let currentWeight = 0;
+
+  if (current.length === 1) {
+    currentWeight = 0.15;
+  } else if (
+    current.length === 2
+  ) {
+    currentWeight = 0.25;
+  } else if (
+    current.length === 3
+  ) {
+    currentWeight = 0.35;
+  } else if (
+    current.length === 4
+  ) {
+    currentWeight = 0.45;
+  } else if (
+    current.length >= 5
+  ) {
+    currentWeight = 0.55;
+  }
+
+  let expectedAttempts:
+    | number
+    | null = null;
+
+  if (
+    priorAttempts !== null &&
+    currentAttempts !== null
+  ) {
+    expectedAttempts =
+      priorAttempts *
+        (1 - currentWeight) +
+      currentAttempts *
+        currentWeight;
+  } else {
+    expectedAttempts =
+      currentAttempts ??
+      priorAttempts ??
+      recentAttempts;
+  }
+
+  if (
+    expectedAttempts !== null &&
+    recentAttempts !== null
+  ) {
+    expectedAttempts =
+      expectedAttempts * 0.8 +
+      recentAttempts * 0.2;
+  }
+
+  /*
+    YARDS PER ATTEMPT
+  */
+
+  const priorYPA =
+    average(
+      prior.map(
+        yardsPerAttempt
+      )
+    );
+
+  const currentYPA =
+    average(
+      current.map(
+        yardsPerAttempt
+      )
+    );
+
+  const recentYPA =
+    recencyWeighted(
+      careerWindow,
+      yardsPerAttempt,
+      8
+    );
+
+  let efficiencyWeight = 0;
+
+  if (current.length === 1) {
+    efficiencyWeight = 0.1;
+  } else if (
+    current.length === 2
+  ) {
+    efficiencyWeight = 0.18;
+  } else if (
+    current.length === 3
+  ) {
+    efficiencyWeight = 0.25;
+  } else if (
+    current.length === 4
+  ) {
+    efficiencyWeight = 0.32;
+  } else if (
+    current.length >= 5
+  ) {
+    efficiencyWeight = 0.4;
+  }
+
+  let expectedYPA:
+    | number
+    | null = null;
+
+  if (
+    priorYPA !== null &&
+    currentYPA !== null
+  ) {
+    expectedYPA =
+      priorYPA *
+        (1 - efficiencyWeight) +
+      currentYPA *
+        efficiencyWeight;
+  } else {
+    expectedYPA =
+      currentYPA ??
+      priorYPA ??
+      recentYPA;
+  }
+
+  if (
+    expectedYPA !== null &&
+    recentYPA !== null
+  ) {
+    expectedYPA =
+      expectedYPA * 0.85 +
+      recentYPA * 0.15;
+  }
+
+  if (
+    expectedAttempts === null ||
+    expectedYPA === null
+  ) {
+    return null;
+  }
+
+  /*
+    Guardrails validated in V2.
+  */
+
+  expectedAttempts =
+    Math.min(
+      45,
+      Math.max(
+        20,
+        expectedAttempts
+      )
+    );
+
+  expectedYPA =
+    Math.min(
+      9.5,
+      Math.max(
+        5,
+        expectedYPA
+      )
+    );
+
+  let projection =
+    expectedAttempts *
+    expectedYPA;
+
+  /*
+    Small-sample shrinkage.
+  */
+
+  const totalHistory =
+    history.length;
+
+  const LEAGUE_BASELINE =
+    225;
+
+  if (
+    totalHistory <= 5
+  ) {
+    projection =
+      projection * 0.65 +
+      LEAGUE_BASELINE *
+        0.35;
+  } else if (
+    totalHistory <= 10
+  ) {
+    projection =
+      projection * 0.8 +
+      LEAGUE_BASELINE *
+        0.2;
+  }
+
   return {
-    projection: round(projection, 1),
+    projection:
+      round(
+        projection,
+        1
+      ),
 
-    current_games: currentGames,
-    prior_games: priorGames,
+    expected_attempts:
+      round(
+        expectedAttempts,
+        1
+      ),
 
-    current_season_average:
-      currentAvg !== null
-        ? round(currentAvg, 1)
+    expected_yards_per_attempt:
+      round(
+        expectedYPA,
+        2
+      ),
+
+    current_games:
+      current.length,
+
+    prior_games:
+      prior.length,
+
+    total_history_games:
+      totalHistory,
+
+    current_season_yards_average:
+      current.length
+        ? round(
+            average(
+              current.map(
+                (game) =>
+                  game.yards
+              )
+            ) ?? 0,
+            1
+          )
         : null,
 
-    prior_season_average:
-      priorAvg !== null
-        ? round(priorAvg, 1)
+    prior_season_yards_average:
+      prior.length
+        ? round(
+            average(
+              prior.map(
+                (game) =>
+                  game.yards
+              )
+            ) ?? 0,
+            1
+          )
         : null,
 
-    recent_average:
-      recentBaseline !== null
-        ? round(recentBaseline, 1)
+    current_attempts_average:
+      currentAttempts !== null
+        ? round(
+            currentAttempts,
+            1
+          )
         : null,
 
-    current_attempts_per_game:
-      currentAttemptAvg !== null
-        ? round(currentAttemptAvg, 1)
+    prior_attempts_average:
+      priorAttempts !== null
+        ? round(
+            priorAttempts,
+            1
+          )
         : null,
 
-    prior_attempts_per_game:
-      priorAttemptAvg !== null
-        ? round(priorAttemptAvg, 1)
+    current_ypa:
+      currentYPA !== null
+        ? round(
+            currentYPA,
+            2
+          )
+        : null,
+
+    prior_ypa:
+      priorYPA !== null
+        ? round(
+            priorYPA,
+            2
+          )
         : null,
   };
 }
 
-function getEventStart(event: any): string | null {
+function getEventStart(
+  event: any
+): string | null {
   return (
     event?.status?.startsAt ??
     event?.startsAt ??
@@ -435,111 +681,183 @@ function getEventStart(event: any): string | null {
   );
 }
 
-function isPregame(event: any): boolean {
-  if (event?.status?.started === true) {
+function isPregame(
+  event: any
+): boolean {
+  if (
+    event?.status?.started === true
+  ) {
     return false;
   }
 
-  if (event?.status?.completed === true) {
+  if (
+    event?.status?.completed === true
+  ) {
     return false;
   }
 
-  if (event?.status?.ended === true) {
+  if (
+    event?.status?.ended === true
+  ) {
     return false;
   }
 
-  const start = getEventStart(event);
+  const start =
+    getEventStart(event);
 
-  if (!start) return true;
-
-  const timestamp = new Date(start).getTime();
-
-  if (!Number.isFinite(timestamp)) {
+  if (!start) {
     return true;
   }
 
-  return timestamp > Date.now();
+  const timestamp =
+    new Date(start).getTime();
+
+  if (
+    !Number.isFinite(timestamp)
+  ) {
+    return true;
+  }
+
+  return (
+    timestamp >
+    Date.now()
+  );
 }
 
-function extractPassingProps(event: any): any[] {
+function extractPassingProps(
+  event: any
+): any[] {
   const odds: any[] =
     event?.odds &&
-    typeof event.odds === "object"
-      ? (Object.values(event.odds) as any[])
+    typeof event.odds ===
+      "object"
+      ? (Object.values(
+          event.odds
+        ) as any[])
       : [];
 
-  return odds.filter((odd: any) => {
-    return (
-      odd?.statID === "passing_yards" &&
-      odd?.betTypeID === "ou" &&
-      odd?.periodID === "game" &&
-      Boolean(odd?.playerID)
-    );
-  });
+  return odds.filter(
+    (odd: any) =>
+      odd?.statID ===
+        "passing_yards" &&
+      odd?.betTypeID ===
+        "ou" &&
+      (!odd?.periodID ||
+        odd?.periodID ===
+          "game") &&
+      Boolean(
+        odd?.playerID
+      )
+  );
 }
 
-function sportsbookLines(odd: any): any[] {
-  const books =
+function sportsbookLines(
+  odd: any
+): SportsbookLine[] {
+  const books: Record<
+    string,
+    any
+  > =
     odd?.byBookmaker &&
-    typeof odd.byBookmaker === "object"
-      ? odd.byBookmaker
+    typeof odd.byBookmaker ===
+      "object"
+      ? (odd.byBookmaker as Record<
+          string,
+          any
+        >)
       : {};
 
-  const entries = Object.entries(
-    books
-  ) as Array<[string, any]>;
+  const lines:
+    SportsbookLine[] = [];
 
-  return entries
-    .map(([book, data]) => {
-      const rawLine =
-        data?.overUnder;
+  for (
+    const [book, data]
+    of Object.entries(books)
+  ) {
+    const rawLine =
+      data?.overUnder;
 
-      const line =
-        rawLine !== undefined &&
-        rawLine !== null
-          ? Number(rawLine)
-          : null;
+    const line =
+      Number(rawLine);
 
-      return {
-        sportsbook: book,
+    if (
+      !Number.isFinite(line)
+    ) {
+      continue;
+    }
 
-        side:
-          odd?.sideID ?? null,
+    lines.push({
+      sportsbook:
+        book,
 
-        line:
-          line !== null &&
-          Number.isFinite(line)
-            ? line
-            : null,
+      side:
+        odd?.sideID ??
+        null,
 
-        odds:
-          data?.odds ?? null,
+      line,
 
-        available:
-          data?.available === true,
+      odds:
+        data?.odds ??
+        null,
 
-        updated_at:
-          data?.lastUpdatedAt ?? null,
-      };
-    })
-    .filter(
-      (item) =>
-        item.line !== null
+      available:
+        data?.available ===
+        true,
+
+      updated_at:
+        data?.lastUpdatedAt ??
+        null,
+    });
+  }
+
+  return lines;
+}
+
+function median(
+  values: number[]
+): number | null {
+  if (!values.length) {
+    return null;
+  }
+
+  const sorted =
+    [...values].sort(
+      (a, b) => a - b
     );
+
+  const middle =
+    Math.floor(
+      sorted.length / 2
+    );
+
+  if (
+    sorted.length % 2
+  ) {
+    return sorted[middle];
+  }
+
+  return (
+    sorted[middle - 1] +
+    sorted[middle]
+  ) / 2;
 }
 
 export async function GET() {
   const apiKey =
-    process.env.SPORTSGAMEODDS_API_KEY;
+    process.env
+      .SPORTSGAMEODDS_API_KEY;
 
   if (!apiKey) {
     return NextResponse.json(
       {
         success: false,
+
         error:
           "SPORTSGAMEODDS_API_KEY is missing.",
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
 
@@ -549,21 +867,35 @@ export async function GET() {
       priorRows,
       oddsResponse,
     ] = await Promise.all([
-      fetchCSV(CURRENT_STATS_URL),
+      fetchCSV(
+        CURRENT_STATS_URL
+      ),
 
-      fetchCSV(PRIOR_STATS_URL),
+      fetchCSV(
+        PRIOR_STATS_URL
+      ),
 
       fetch(
-        `${SGO_URL}?${new URLSearchParams({
-          leagueID: "NFL",
-          oddsAvailable: "true",
-          limit: "50",
-        }).toString()}`,
+        `${SGO_URL}?${new URLSearchParams(
+          {
+            leagueID:
+              "NFL",
+
+            oddsAvailable:
+              "true",
+
+            limit:
+              "50",
+          }
+        ).toString()}`,
         {
           headers: {
-            "x-api-key": apiKey,
+            "x-api-key":
+              apiKey,
           },
-          cache: "no-store",
+
+          cache:
+            "no-store",
         }
       ),
     ]);
@@ -575,11 +907,15 @@ export async function GET() {
       return NextResponse.json(
         {
           success: false,
+
           provider:
             "SportsGameOdds",
+
           status:
             oddsResponse.status,
-          error: body,
+
+          error:
+            body,
         },
         {
           status:
@@ -592,7 +928,9 @@ export async function GET() {
       await oddsResponse.json();
 
     const events: any[] =
-      Array.isArray(oddsData?.data)
+      Array.isArray(
+        oddsData?.data
+      )
         ? oddsData.data
         : Array.isArray(
               oddsData?.events
@@ -618,36 +956,56 @@ export async function GET() {
         priorGames
       );
 
-    const props: any[] = [];
+    const props: any[] =
+      [];
 
     let matchedPlayers = 0;
     let unmatchedPlayers = 0;
     let pregameEvents = 0;
 
-    for (const event of events) {
-      if (!isPregame(event)) {
+    for (
+      const event
+      of events
+    ) {
+      if (
+        !isPregame(event)
+      ) {
         continue;
       }
 
       pregameEvents++;
 
-      const passingProps: any[] =
-        extractPassingProps(event);
+      const passingProps:
+        any[] =
+        extractPassingProps(
+          event
+        );
 
       const grouped =
-        new Map<string, any[]>();
+        new Map<
+          string,
+          any[]
+        >();
 
-      for (const odd of passingProps) {
+      for (
+        const odd
+        of passingProps
+      ) {
         const playerID =
           String(
-            odd?.playerID ?? ""
+            odd?.playerID ??
+              ""
           );
 
         if (!playerID) {
           continue;
         }
 
-        if (!grouped.has(playerID)) {
+        if (
+          !grouped.has(
+            playerID
+          )
+        ) {
           grouped.set(
             playerID,
             []
@@ -659,10 +1017,13 @@ export async function GET() {
           .push(odd);
       }
 
-      for (const [
-        playerID,
-        playerOdds,
-      ] of grouped.entries()) {
+      for (
+        const [
+          playerID,
+          playerOdds,
+        ]
+        of grouped.entries()
+      ) {
         const sample: any =
           playerOdds[0];
 
@@ -701,7 +1062,7 @@ export async function GET() {
         }
 
         const projection =
-          projectPassingYards(
+          projectPassingYardsV2(
             player
           );
 
@@ -711,7 +1072,8 @@ export async function GET() {
 
         matchedPlayers++;
 
-        const allBookLines: any[] =
+        const allBookLines:
+          SportsbookLine[] =
           playerOdds.flatMap(
             (odd: any) =>
               sportsbookLines(
@@ -721,73 +1083,34 @@ export async function GET() {
 
         const availableLines =
           allBookLines.filter(
-            (line: any) =>
-              line.available ===
-              true
+            (line) =>
+              line.available
           );
 
         const numericLines =
-          availableLines
-            .map(
-              (line: any) =>
-                Number(
-                  line.line
-                )
-            )
-            .filter(
-              (line: number) =>
-                Number.isFinite(
-                  line
-                )
-            );
-
-        const uniqueLines =
-          Array.from(
-            new Set<number>(
-              numericLines
-            )
-          ).sort(
-            (a, b) => a - b
+          availableLines.map(
+            (line) =>
+              line.line
           );
 
-        let consensusLine:
-          | number
-          | null = null;
+        /*
+          Deduplicate the same line appearing
+          on both OVER and UNDER.
+        */
+        const uniqueLines =
+          Array.from(
+            new Set(
+              numericLines
+            )
+          );
+
+        const consensusLine =
+          median(
+            uniqueLines
+          );
 
         if (
-          uniqueLines.length
-        ) {
-          const middle =
-            Math.floor(
-              uniqueLines.length /
-                2
-            );
-
-          if (
-            uniqueLines.length %
-              2 ===
-            1
-          ) {
-            consensusLine =
-              uniqueLines[
-                middle
-              ];
-          } else {
-            consensusLine =
-              (
-                uniqueLines[
-                  middle - 1
-                ] +
-                uniqueLines[
-                  middle
-                ]
-              ) / 2;
-          }
-        }
-
-        if (
-          consensusLine ===
-          null
+          consensusLine === null
         ) {
           continue;
         }
@@ -802,6 +1125,10 @@ export async function GET() {
           | "PASS" =
           "PASS";
 
+        /*
+          These remain REVIEW thresholds,
+          not calibrated betting probabilities.
+        */
         if (
           difference >= 8
         ) {
@@ -828,20 +1155,37 @@ export async function GET() {
         } else if (
           absDifference >= 12
         ) {
-          review = "REVIEW";
+          review =
+            "REVIEW";
         } else if (
           absDifference >= 8
         ) {
-          review = "WATCH";
+          review =
+            "WATCH";
         }
 
+        /*
+          Extra caution for QBs with
+          limited historical samples.
+        */
         if (
-          projection.current_games <
-            3 &&
+          projection.total_history_games <
+            11 &&
           review ===
             "STRONG REVIEW"
         ) {
-          review = "REVIEW";
+          review =
+            "REVIEW";
+        }
+
+        if (
+          projection.total_history_games <
+            6 &&
+          review ===
+            "REVIEW"
+        ) {
+          review =
+            "WATCH";
         }
 
         props.push({
@@ -858,19 +1202,23 @@ export async function GET() {
           matchup: {
             away:
               event?.teams
-                ?.away?.names
+                ?.away
+                ?.names
                 ?.short ??
               event?.teams
-                ?.away?.names
+                ?.away
+                ?.names
                 ?.long ??
               null,
 
             home:
               event?.teams
-                ?.home?.names
+                ?.home
+                ?.names
                 ?.short ??
               event?.teams
-                ?.home?.names
+                ?.home
+                ?.names
                 ?.long ??
               null,
           },
@@ -904,34 +1252,46 @@ export async function GET() {
 
           review,
 
-          sample: {
+          projection_details: {
+            expected_attempts:
+              projection.expected_attempts,
+
+            expected_yards_per_attempt:
+              projection.expected_yards_per_attempt,
+
             current_games:
               projection.current_games,
 
             prior_games:
               projection.prior_games,
 
-            current_season_average:
-              projection.current_season_average,
+            total_history_games:
+              projection.total_history_games,
 
-            prior_season_average:
-              projection.prior_season_average,
+            current_season_yards_average:
+              projection.current_season_yards_average,
 
-            recent_average:
-              projection.recent_average,
+            prior_season_yards_average:
+              projection.prior_season_yards_average,
 
-            current_attempts_per_game:
-              projection.current_attempts_per_game,
+            current_attempts_average:
+              projection.current_attempts_average,
 
-            prior_attempts_per_game:
-              projection.prior_attempts_per_game,
+            prior_attempts_average:
+              projection.prior_attempts_average,
+
+            current_ypa:
+              projection.current_ypa,
+
+            prior_ypa:
+              projection.prior_ypa,
           },
 
           sportsbook_lines:
             availableLines,
 
           note:
-            "Projection review only. No calibrated over/under probability or validated betting edge is assigned yet.",
+            "Frozen RDG V2 projection. Model-vs-line is a yardage difference, not a calibrated betting edge or win probability.",
         });
       }
     }
@@ -950,37 +1310,62 @@ export async function GET() {
       success: true,
 
       version:
-        "1.1-rdg-passing-yards-projection",
+        "2.0-rdg-passing-yards-live",
 
-      sport: "NFL",
+      sport:
+        "NFL",
 
       market:
         "passing_yards",
 
       model_status:
-        "Projection Model / Probability Not Yet Calibrated",
+        "Frozen V2 Projection Model",
+
+      validation: {
+        development_test_2025: {
+          games:
+            517,
+
+          mae:
+            59.6,
+
+          rmse:
+            75.07,
+        },
+
+        untouched_2026_validation: {
+          games:
+            48,
+
+          rdg_v2_mae:
+            57.27,
+
+          rdg_v2_rmse:
+            71.51,
+
+          simple_baseline_mae:
+            60.06,
+
+          note:
+            "2026 validation sample is still small and should continue to be monitored.",
+        },
+      },
 
       methodology: {
-        current_season:
-          CURRENT_SEASON,
-
-        prior_season:
-          PRIOR_SEASON,
-
         stats_source:
           "nflverse",
 
         market_source:
           "SportsGameOdds",
 
-        projection:
-          "Prior-season baseline blended with current-season performance, recent form, and a capped passing-attempt volume adjustment.",
+        model:
+          "Expected passing attempts multiplied by expected yards per attempt, using prior-season history, current-season performance, mild recency weighting and small-sample shrinkage.",
 
-        sportsbook_line:
+        market_line:
           "Median of currently available sportsbook passing-yard lines.",
 
         important:
-          "model_vs_line is a yardage difference, not a betting edge or win probability.",
+          "No model probability is assigned yet. Model-vs-line represents projected passing yards minus the sportsbook consensus line.",
       },
 
       current_player_games:
@@ -1023,7 +1408,9 @@ export async function GET() {
             ? error.message
             : "Unknown NFL passing props error",
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
 }
