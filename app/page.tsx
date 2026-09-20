@@ -108,6 +108,14 @@ type NFLPassingProp = {
   market_no_vig_probability: number | null;
   model_vs_market_probability: number | null;
   review: string;
+  sportsbook_lines?: Array<{
+    sportsbook: string;
+    side: string | null;
+    line: number;
+    odds: string | number | null;
+    available: boolean;
+    updated_at: string | null;
+  }>;
 };
 
 type NFLPassingPropsAnalysis = {
@@ -811,6 +819,27 @@ const [cfbError, setCfbError] =
         const home = prop.matchup.home || "HOME";
         const edge = prop.model_vs_market_probability || 0;
 
+        // Use the best currently available price for the exact displayed
+        // line and selected side. This prevents mixing a line from one
+        // market with odds attached to a different line.
+        const matchingPrices = (prop.sportsbook_lines || [])
+          .filter((book) =>
+            book.available &&
+            Number(book.line) === Number(prop.market_line) &&
+            String(book.side || "").toUpperCase() === prop.selection &&
+            book.odds !== null &&
+            book.odds !== undefined
+          )
+          .map((book) => ({
+            sportsbook: book.sportsbook,
+            odds: String(book.odds),
+            numericOdds: Number(book.odds),
+          }))
+          .filter((book) => Number.isFinite(book.numericOdds))
+          .sort((a, b) => b.numericOdds - a.numericOdds);
+
+        const bestPrice = matchingPrices[0] || null;
+
         let score = edge * 10;
         if (prop.review === "STRONG REVIEW") score += 20;
         else if (prop.review === "REVIEW") score += 10;
@@ -825,8 +854,8 @@ const [cfbError, setCfbError] =
           matchup: `${away} @ ${home}`,
           team: "",
           line: prop.market_line,
-          odds: null,
-          display_bet: `${prop.player_name} ${prop.selection} ${prop.market_line}`,
+          odds: bestPrice?.odds || null,
+          display_bet: `${prop.player_name} ${prop.selection} ${prop.market_line}${bestPrice?.odds ? ` (${Number(bestPrice.odds) > 0 ? "+" : ""}${bestPrice.odds})` : ""}`,
           projected_winner: "",
           projected_margin: prop.rdg_projection,
           difference: Number(edge.toFixed(2)),
@@ -1781,6 +1810,14 @@ function BuilderCard({
                       <MiniStat
                         title="MODEL PROB."
                         value={`${(candidate.model_probability || 0).toFixed(1)}%`}
+                      />
+                      <MiniStat
+                        title="SPORTSBOOK ODDS"
+                        value={candidate.odds ? `${Number(candidate.odds) > 0 ? "+" : ""}${candidate.odds}` : "—"}
+                      />
+                      <MiniStat
+                        title="MARKET PROB."
+                        value={candidate.market_probability !== null && candidate.market_probability !== undefined ? `${candidate.market_probability.toFixed(1)}%` : "—"}
                       />
                     </div>
                     <p className="mt-3 text-xs text-slate-500">
