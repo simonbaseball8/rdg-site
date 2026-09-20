@@ -2215,8 +2215,8 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
       // Rank by a blend of likelihood and model/market discrepancy.
       // This prevents a large edge on a low-probability underdog from
       // automatically outranking a more likely selection.
-      const aScore = a.model_probability * 100 + a.edge * 0.75;
-      const bScore = b.model_probability * 100 + b.edge * 0.75;
+      const aScore = a.model_probability + a.edge * 0.75;
+      const bScore = b.model_probability + b.edge * 0.75;
       return bScore - aScore;
     });
 
@@ -2224,16 +2224,16 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
   // Edge is still useful, but safer cards require a stronger model probability too.
   const safer = candidates.filter(
     (candidate) =>
-      candidate.model_probability >= 0.52 &&
-      candidate.edge >= 0.025 &&
+      candidate.model_probability >= 52 &&
+      candidate.edge >= 2.5 &&
       (candidate.signal === "Priority Review" ||
         candidate.signal === "Strong Review")
   );
 
   const balanced = candidates.filter(
     (candidate) =>
-      candidate.model_probability >= 0.48 &&
-      candidate.edge >= 0.025 &&
+      candidate.model_probability >= 48 &&
+      candidate.edge >= 2.5 &&
       (candidate.signal === "Priority Review" ||
         candidate.signal === "Strong Review" ||
         candidate.signal === "Watch")
@@ -2241,8 +2241,8 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
 
   const higherRisk = candidates.filter(
     (candidate) =>
-      candidate.model_probability >= 0.42 &&
-      candidate.edge >= 0.025 &&
+      candidate.model_probability >= 42 &&
+      candidate.edge >= 2.5 &&
       (candidate.signal === "Priority Review" ||
         candidate.signal === "Strong Review" ||
         candidate.signal === "Watch")
@@ -2250,8 +2250,8 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
 
   const longShot = candidates.filter(
     (candidate) =>
-      candidate.model_probability >= 0.35 &&
-      candidate.edge >= 0.025 &&
+      candidate.model_probability >= 35 &&
+      candidate.edge >= 2.5 &&
       (candidate.signal === "Priority Review" ||
         candidate.signal === "Strong Review" ||
         candidate.signal === "Watch")
