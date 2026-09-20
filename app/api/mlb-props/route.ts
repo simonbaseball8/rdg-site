@@ -3,8 +3,16 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const ODDIZE_URL =
-  "https://oddize.com/api/v1/props/mlb?prop_type=pitcher_k&limit=100";
+const ODDIZE_BASE = "https://oddize.com/api/v1";
+
+const PROP_TYPES = [
+  { code: "pitcher_k", name: "Pitcher Strikeouts" },
+  { code: "batter_h", name: "Batter Hits" },
+  { code: "batter_tb", name: "Batter Total Bases" },
+  { code: "batter_hr", name: "Batter Home Runs" },
+  { code: "batter_rbi", name: "Batter RBIs" },
+  { code: "batter_r", name: "Batter Runs" },
+];
 
 export async function GET() {
   try {
@@ -20,106 +28,170 @@ export async function GET() {
       );
     }
 
-    const response = await fetch(ODDIZE_URL, {
-      headers: {
-        "X-API-Key": apiKey,
-        Accept: "application/json",
-      },
-      cache: "no-store",
-    });
+    const results = [];
 
-    const text = await response.text();
+    let totalCreditsUsed = 0;
+    let creditsRemaining: string | null = null;
 
-    if (!response.ok) {
-      return NextResponse.json(
-        {
+    for (const prop of PROP_TYPES) {
+      const url =
+        `${ODDIZE_BASE}/props/mlb` +
+        `?prop_type=${prop.code}` +
+        `&limit=100`;
+
+      const response = await fetch(url, {
+        headers: {
+          "X-API-Key": apiKey,
+          Accept: "application/json",
+        },
+        cache: "no-store",
+      });
+
+      const text = await response.text();
+
+      const creditCost = Number(
+        response.headers.get("x-credits-cost") ?? 0
+      );
+
+      totalCreditsUsed += Number.isFinite(creditCost)
+        ? creditCost
+        : 0;
+
+      creditsRemaining =
+        response.headers.get("x-credits-remaining") ??
+        creditsRemaining;
+
+      if (!response.ok) {
+        results.push({
+          prop_type: prop.code,
+          name: prop.name,
           success: false,
           status: response.status,
-          error: text.slice(0, 3000),
-        },
-        { status: response.status }
-      );
-    }
+          error: text.slice(0, 1000),
+        });
 
-    let data: any;
+        continue;
+      }
 
-    try {
-      data = JSON.parse(text);
-    } catch {
-      return NextResponse.json(
-        {
+      let data: any;
+
+      try {
+        data = JSON.parse(text);
+      } catch {
+        results.push({
+          prop_type: prop.code,
+          name: prop.name,
           success: false,
-          error: "Oddize returned non-JSON data.",
-          raw: text.slice(0, 3000),
-        },
-        { status: 500 }
-      );
+          error: "Oddize returned invalid JSON.",
+        });
+
+        continue;
+      }
+
+      const events = Array.isArray(data?.events)
+        ? data.events
+        : [];
+
+      let eventsWithPlayers = 0;
+      let totalPlayers = 0;
+
+      const populatedEvents: any[] = [];
+
+      for (const event of events) {
+        const players = Array.isArray(event?.players)
+          ? event.players
+          : [];
+
+        if (players.length === 0) {
+          continue;
+        }
+
+        eventsWithPlayers++;
+        totalPlayers += players.length;
+
+        populatedEvents.push({
+          event_id: event?.event_id ?? null,
+          start_date: event?.start_date ?? null,
+          away_team: event?.team1 ?? null,
+          home_team: event?.team2 ?? null,
+          player_count: players.length,
+
+          // Keep actual player data so we can inspect
+          // the Oddize structure if props are available.
+          players,
+        });
+      }
+
+      results.push({
+        prop_type: prop.code,
+        name: prop.name,
+        success: true,
+        events_returned: events.length,
+        events_with_players: eventsWithPlayers,
+        total_players: totalPlayers,
+
+        market_available:
+          totalPlayers > 0,
+
+        // Only return populated games.
+        populated_events: populatedEvents,
+      });
     }
 
-    /*
-      TEMPORARY DIAGNOSTIC
-
-      We are requesting the league-wide MLB
-      Pitcher Strikeouts market:
-
-      prop_type = pitcher_k
-
-      We intentionally return the full Oddize response
-      so we can inspect the exact structure for:
-
-      - Pitcher name
-      - Team
-      - Event ID
-      - Main strikeout line
-      - Over odds
-      - Under odds
-      - Hard Rock sportsbook identifier
-      - Alternate lines
-      - All available sportsbook prices
-
-      After confirming the structure, this route will
-      be converted into the production RDG prop feed.
-    */
-
-    const games =
-      data?.events ??
-      data?.games ??
-      data?.data ??
-      data?.props ??
-      [];
+    const availableMarkets = results
+      .filter(
+        (result: any) =>
+          result.success &&
+          result.total_players > 0
+      )
+      .map((result: any) => ({
+        prop_type: result.prop_type,
+        name: result.name,
+        total_players: result.total_players,
+        events_with_players:
+          result.events_with_players,
+      }));
 
     return NextResponse.json({
       success: true,
 
       sport: "MLB",
 
-      prop_market: {
-        name: "Pitcher Strikeouts",
-        code: "pitcher_k",
-      },
+      purpose:
+        "Check all supported Oddize MLB player-prop markets for currently available data.",
 
-      sportsbook_target: "Hard Rock",
-
-      diagnostic: true,
+      sportsbook_target:
+        "Hard Rock will be isolated after confirming populated prop data.",
 
       credits: {
-        cost:
-          response.headers.get("x-credits-cost") ??
-          "unknown",
+        estimated_used_this_request:
+          totalCreditsUsed,
 
         remaining:
-          response.headers.get("x-credits-remaining") ??
-          "unknown",
+          creditsRemaining ?? "unknown",
       },
 
-      games_returned: Array.isArray(games)
-        ? games.length
-        : null,
+      summary: {
+        prop_markets_checked:
+          PROP_TYPES.length,
 
-      oddize_response: data,
+        markets_with_data:
+          availableMarkets.length,
+
+        markets_without_data:
+          PROP_TYPES.length -
+          availableMarkets.length,
+
+        available_markets:
+          availableMarkets,
+      },
+
+      markets: results,
 
       next_step:
-        "Inspect the exact pitcher_k response structure, identify Hard Rock prices, then build the RDG Pitcher Strikeouts model.",
+        availableMarkets.length > 0
+          ? "Inspect populated player data and identify the exact Hard Rock sportsbook structure."
+          : "Oddize currently returned no MLB player props. Do not build the RDG prop odds integration until the feed contains player data.",
     });
   } catch (error) {
     return NextResponse.json(
@@ -129,7 +201,7 @@ export async function GET() {
         error:
           error instanceof Error
             ? error.message
-            : "Unknown MLB pitcher props error",
+            : "Unknown MLB props diagnostic error",
       },
       { status: 500 }
     );
