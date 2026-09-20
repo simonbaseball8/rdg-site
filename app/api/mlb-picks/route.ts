@@ -56,6 +56,30 @@ function todayET() {
   }).format(new Date());
 }
 
+function isPregame(startDate: string | null | undefined) {
+  if (!startDate) return false;
+  const start = new Date(startDate).getTime();
+  if (!Number.isFinite(start)) return false;
+
+  // Do not compare a pregame RDG projection against live/in-game prices.
+  // A 5-minute cushion also avoids markets flipping while the game begins.
+  return start > Date.now() + 5 * 60 * 1000;
+}
+
+function isReasonablePregameMarket(
+  awayOdds: string | number | null,
+  homeOdds: string | number | null
+) {
+  const away = Number(String(awayOdds ?? "").replace("+", ""));
+  const home = Number(String(homeOdds ?? "").replace("+", ""));
+
+  if (!Number.isFinite(away) || !Number.isFinite(home)) return false;
+
+  // Extreme MLB moneylines such as +900/-1800 are commonly live/stale or
+  // otherwise unsuitable for this pregame value model.
+  return Math.abs(away) <= 600 && Math.abs(home) <= 600;
+}
+
 async function fetchJson(
   url: string,
   headers?: Record<string, string>
@@ -625,13 +649,27 @@ export async function GET() {
           const under =
             findTotal(odds, "Under");
 
+          const awayMlOdds =
+            awayMoneyline?.american_odds ?? null;
+
+          const homeMlOdds =
+            homeMoneyline?.american_odds ?? null;
+
+          // RDG MLB v1.2 is a PRE-GAME model. Never compare its projection
+          // with live/in-game moneylines.
+          if (!isPregame(event.start_date)) {
+            return null;
+          }
+
+          // Reject obviously extreme/stale market snapshots from the value board.
+          if (!isReasonablePregameMarket(awayMlOdds, homeMlOdds)) {
+            return null;
+          }
+
           const market =
             removeVig(
-              awayMoneyline
-                ?.american_odds ?? null,
-
-              homeMoneyline
-                ?.american_odds ?? null
+              awayMlOdds,
+              homeMlOdds
             );
 
           const awayTeamScore =
@@ -767,14 +805,10 @@ export async function GET() {
             hard_rock: {
               moneyline: {
                 away_odds:
-                  awayMoneyline
-                    ?.american_odds ??
-                  null,
+                  awayMlOdds,
 
                 home_odds:
-                  homeMoneyline
-                    ?.american_odds ??
-                  null,
+                  homeMlOdds,
 
                 no_vig_away_probability:
                   awayMarket !== null
@@ -998,10 +1032,10 @@ export async function GET() {
         "RDG MLB",
 
       version:
-        "1.1-calibrated",
+        "1.2-pregame-only",
 
       model_status:
-        "Team Model Calibrated / Pitcher Adjustment Experimental",
+        "Pregame Team Model Calibrated / Pitcher Adjustment Experimental",
 
       games_found:
         games.length,
@@ -1052,7 +1086,7 @@ export async function GET() {
           "ERA and WHIP with sample-size adjustment. Pitcher coefficient remains experimental and intentionally conservative.",
 
         market:
-          "Hard Rock moneyline probabilities with sportsbook vig removed.",
+          "Pregame Hard Rock moneyline probabilities with sportsbook vig removed. Started games and extreme/stale market snapshots are excluded.",
 
         warning:
           "The 55.22% held-out result applies to the calibrated team model on the 2025 evaluation sample. It is not a betting win rate and does not establish profitability. The live pitcher-adjusted probabilities have not yet been historically validated.",
