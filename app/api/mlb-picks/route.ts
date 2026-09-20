@@ -370,6 +370,89 @@ function getSignal(edge: number) {
   return "Pass";
 }
 
+
+function poissonPmf(k: number, lambda: number) {
+  if (lambda <= 0) return 0;
+  let factorial = 1;
+  for (let i = 2; i <= k; i++) factorial *= i;
+  return Math.exp(-lambda) * Math.pow(lambda, k) / factorial;
+}
+
+function totalProbabilities(projectedTotal: number, line: number) {
+  /*
+    Experimental first-pass total-runs distribution.
+    MLB game totals are usually half-runs. Integer totals can push, so
+    this returns conditional win probabilities after removing push mass.
+  */
+  const maxRuns = 30;
+  let over = 0;
+  let under = 0;
+  let push = 0;
+
+  for (let runs = 0; runs <= maxRuns; runs++) {
+    const p = poissonPmf(runs, projectedTotal);
+    if (runs > line) over += p;
+    else if (runs < line) under += p;
+    else push += p;
+  }
+
+  const decided = over + under;
+  if (decided <= 0) return null;
+
+  return {
+    over: over / decided,
+    under: under / decided,
+    push,
+  };
+}
+
+function projectedGameTotal(
+  awayRecord: any,
+  homeRecord: any,
+  awayPitcher: PitcherStats | null,
+  homePitcher: PitcherStats | null
+) {
+  const awayGames = Number(awayRecord.wins ?? 0) + Number(awayRecord.losses ?? 0);
+  const homeGames = Number(homeRecord.wins ?? 0) + Number(homeRecord.losses ?? 0);
+
+  if (awayGames <= 0 || homeGames <= 0) return null;
+
+  const awayRunsFor = Number(awayRecord.runs_scored ?? 0) / awayGames;
+  const awayRunsAgainst = Number(awayRecord.runs_allowed ?? 0) / awayGames;
+  const homeRunsFor = Number(homeRecord.runs_scored ?? 0) / homeGames;
+  const homeRunsAgainst = Number(homeRecord.runs_allowed ?? 0) / homeGames;
+
+  /*
+    Baseline expected scoring:
+    each offense's season RPG blended with the opponent's runs allowed/G.
+  */
+  let awayExpected = (awayRunsFor + homeRunsAgainst) / 2;
+  let homeExpected = (homeRunsFor + awayRunsAgainst) / 2;
+
+  /*
+    Conservative starter adjustment.
+    4.25 is the same neutral ERA reference already used by RDG's pitcher score.
+    Only 35% of the ERA difference is applied because starters do not pitch
+    the entire game and this totals component has not yet been backtested.
+  */
+  if (homePitcher?.era !== null && homePitcher?.era !== undefined) {
+    awayExpected += (homePitcher.era - 4.25) * 0.35;
+  }
+
+  if (awayPitcher?.era !== null && awayPitcher?.era !== undefined) {
+    homeExpected += (awayPitcher.era - 4.25) * 0.35;
+  }
+
+  awayExpected = Math.max(2.0, Math.min(7.5, awayExpected));
+  homeExpected = Math.max(2.0, Math.min(7.5, homeExpected));
+
+  return {
+    away_runs: awayExpected,
+    home_runs: homeExpected,
+    total_runs: awayExpected + homeExpected,
+  };
+}
+
 export async function GET() {
   try {
     const oddizeKey =
@@ -782,6 +865,91 @@ export async function GET() {
               ? getSignal(edge)
               : "Pass";
 
+          const totalLine =
+            numberValue(over?.line) ??
+            numberValue(under?.line);
+
+          const totalMarket =
+            removeVig(
+              over?.american_odds ?? null,
+              under?.american_odds ?? null
+            );
+
+          const totalProjection =
+            projectedGameTotal(
+              awayRecord,
+              homeRecord,
+              awayPitcherStats,
+              homePitcherStats
+            );
+
+          const totalModel =
+            totalLine !== null &&
+            totalProjection !== null
+              ? totalProbabilities(
+                  totalProjection.total_runs,
+                  totalLine
+                )
+              : null;
+
+          const overModelProbability =
+            totalModel?.over ?? null;
+
+          const underModelProbability =
+            totalModel?.under ?? null;
+
+          // removeVig returns away/home keys; for totals we pass Over first,
+          // Under second, so away = Over and home = Under.
+          const overMarketProbability =
+            totalMarket?.away ?? null;
+
+          const underMarketProbability =
+            totalMarket?.home ?? null;
+
+          const overEdge =
+            overModelProbability !== null &&
+            overMarketProbability !== null
+              ? overModelProbability -
+                overMarketProbability
+              : null;
+
+          const underEdge =
+            underModelProbability !== null &&
+            underMarketProbability !== null
+              ? underModelProbability -
+                underMarketProbability
+              : null;
+
+          let totalLean:
+            "Over" | "Under" | null = null;
+
+          let totalEdge:
+            number | null = null;
+
+          if (
+            overEdge !== null &&
+            underEdge !== null
+          ) {
+            if (overEdge > underEdge) {
+              totalLean = "Over";
+              totalEdge = overEdge;
+            } else {
+              totalLean = "Under";
+              totalEdge = underEdge;
+            }
+          }
+
+          /*
+            Totals are experimental and not historically calibrated yet.
+            Require a larger discrepancy than the moneyline review board
+            before surfacing them as candidates.
+          */
+          const totalSignal =
+            totalEdge !== null &&
+            Math.abs(totalEdge) >= 0.08
+              ? "Experimental Review"
+              : "Pass";
+
           return {
             event_id:
               event.event_id,
@@ -992,6 +1160,86 @@ export async function GET() {
                   : null,
 
               signal,
+
+              total_model: {
+                status:
+                  "Experimental / Not Historically Calibrated",
+
+                projected_away_runs:
+                  totalProjection !== null
+                    ? Number(
+                        totalProjection.away_runs.toFixed(2)
+                      )
+                    : null,
+
+                projected_home_runs:
+                  totalProjection !== null
+                    ? Number(
+                        totalProjection.home_runs.toFixed(2)
+                      )
+                    : null,
+
+                projected_total_runs:
+                  totalProjection !== null
+                    ? Number(
+                        totalProjection.total_runs.toFixed(2)
+                      )
+                    : null,
+
+                market_total:
+                  totalLine,
+
+                model_over_probability:
+                  overModelProbability !== null
+                    ? Number(
+                        (
+                          overModelProbability * 100
+                        ).toFixed(2)
+                      )
+                    : null,
+
+                model_under_probability:
+                  underModelProbability !== null
+                    ? Number(
+                        (
+                          underModelProbability * 100
+                        ).toFixed(2)
+                      )
+                    : null,
+
+                no_vig_over_probability:
+                  overMarketProbability !== null
+                    ? Number(
+                        (
+                          overMarketProbability * 100
+                        ).toFixed(2)
+                      )
+                    : null,
+
+                no_vig_under_probability:
+                  underMarketProbability !== null
+                    ? Number(
+                        (
+                          underMarketProbability * 100
+                        ).toFixed(2)
+                      )
+                    : null,
+
+                lean:
+                  totalLean,
+
+                edge:
+                  totalEdge !== null
+                    ? Number(
+                        (
+                          totalEdge * 100
+                        ).toFixed(2)
+                      )
+                    : null,
+
+                signal:
+                  totalSignal,
+              },
             },
           };
         })
@@ -1032,10 +1280,10 @@ export async function GET() {
         "RDG MLB",
 
       version:
-        "1.2-pregame-only",
+        "1.3-pregame-moneyline-plus-experimental-totals",
 
       model_status:
-        "Pregame Team Model Calibrated / Pitcher Adjustment Experimental",
+        "Pregame Moneyline Model + Experimental Game Totals",
 
       games_found:
         games.length,
@@ -1086,10 +1334,13 @@ export async function GET() {
           "ERA and WHIP with sample-size adjustment. Pitcher coefficient remains experimental and intentionally conservative.",
 
         market:
-          "Pregame Hard Rock moneyline probabilities with sportsbook vig removed. Started games and extreme/stale market snapshots are excluded.",
+          "Pregame Hard Rock moneyline and game-total prices with sportsbook vig removed. Started games and extreme/stale moneyline snapshots are excluded.",
+
+        totals_model:
+          "Experimental first-pass game-total model using season runs scored/allowed per game, conservative starting-pitcher ERA adjustments, and a Poisson total-runs distribution. It has not yet been historically calibrated or backtested.",
 
         warning:
-          "The 55.22% held-out result applies to the calibrated team model on the 2025 evaluation sample. It is not a betting win rate and does not establish profitability. The live pitcher-adjusted probabilities have not yet been historically validated.",
+          "The 55.22% held-out result applies only to the calibrated moneyline team model on the 2025 evaluation sample. It is not a betting win rate and does not establish profitability. The live pitcher adjustment and the new totals model have not yet been historically validated.",
       },
 
       updated_at:
