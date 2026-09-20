@@ -59,19 +59,6 @@ function clean(value: any) {
   return result.length ? result : null;
 }
 
-/*
-  IMPORTANT:
-
-  Game designation and practice participation are DIFFERENT.
-
-  A player missing practice does NOT automatically mean:
-  OUT
-  DOUBTFUL
-  QUESTIONABLE
-
-  We only use an actual game/report designation for that.
-*/
-
 function normalizeGameStatus(value: any) {
   const status = clean(value)?.toUpperCase();
 
@@ -79,8 +66,8 @@ function normalizeGameStatus(value: any) {
 
   if (
     status === "OUT" ||
-    status.includes("INJURED RESERVE") ||
-    status === "IR"
+    status === "IR" ||
+    status.includes("INJURED RESERVE")
   ) {
     return "OUT";
   }
@@ -98,6 +85,73 @@ function normalizeGameStatus(value: any) {
   }
 
   return "NO_DESIGNATION";
+}
+
+function getBestGameDesignation(row: any) {
+  /*
+    NFLMeta can return:
+
+    report_status: "Out"
+    game_status: "Inactive"
+
+    "Inactive" tells us the player didn't play,
+    but "Out" tells us WHY they were unavailable.
+
+    Therefore:
+    1. Use recognized report_status first.
+    2. Then recognized game_status.
+    3. Never convert "Inactive" into a fake designation.
+  */
+
+  const reportStatus = clean(row?.report_status);
+  const gameStatus = clean(row?.game_status);
+
+  const normalizedReport =
+    normalizeGameStatus(reportStatus);
+
+  const normalizedGame =
+    normalizeGameStatus(gameStatus);
+
+  if (normalizedReport !== "NO_DESIGNATION") {
+    return {
+      status: normalizedReport,
+      source: "report_status",
+      raw_status: reportStatus,
+    };
+  }
+
+  if (normalizedGame !== "NO_DESIGNATION") {
+    return {
+      status: normalizedGame,
+      source: "game_status",
+      raw_status: gameStatus,
+    };
+  }
+
+  const fallbackValues = [
+    ["status", row?.status],
+    ["injury_status", row?.injury_status],
+    ["designation", row?.designation],
+  ];
+
+  for (const [source, value] of fallbackValues) {
+    const normalized =
+      normalizeGameStatus(value);
+
+    if (normalized !== "NO_DESIGNATION") {
+      return {
+        status: normalized,
+        source,
+        raw_status: clean(value),
+      };
+    }
+  }
+
+  return {
+    status: "NO_DESIGNATION",
+    source: null,
+    raw_status: null,
+  };
 }
 
 function normalizePracticeStatus(value: any) {
@@ -130,13 +184,15 @@ function normalizePracticeStatus(value: any) {
 }
 
 function isRestReason(value: any) {
-  const reason = clean(value)?.toUpperCase() || "";
+  const reason =
+    clean(value)?.toUpperCase() || "";
 
   return (
     reason.includes("NIR") ||
     reason.includes("NOT INJURY") ||
     reason.includes("NOT INJURY-RELATED") ||
     reason.includes("NOT INJURY RELATED") ||
+    reason.includes("NON-INJURY") ||
     reason.includes("RESTING PLAYER") ||
     reason === "REST" ||
     reason.includes("(REST)")
@@ -163,20 +219,11 @@ function gameSeverity(status: string) {
 }
 
 function normalizeInjury(row: any) {
-  /*
-    NFLMeta gives us report_status and game_status.
+  const designation =
+    getBestGameDesignation(row);
 
-    We intentionally DO NOT fall back to practice_status here.
-  */
-
-  const rawGameStatus =
-    clean(row?.game_status) ??
-    clean(row?.report_status) ??
-    clean(row?.status) ??
-    clean(row?.injury_status) ??
-    clean(row?.designation);
-
-  const gameStatus = normalizeGameStatus(rawGameStatus);
+  const gameStatus =
+    designation.status;
 
   const rawPracticeStatus =
     clean(row?.practice_status) ??
@@ -184,13 +231,9 @@ function normalizeInjury(row: any) {
     clean(row?.participation);
 
   const practiceStatus =
-    normalizePracticeStatus(rawPracticeStatus);
-
-  /*
-    Fix player names.
-
-    NFLMeta uses display_name.
-  */
+    normalizePracticeStatus(
+      rawPracticeStatus
+    );
 
   const playerName =
     clean(row?.display_name) ??
@@ -227,12 +270,6 @@ function normalizeInjury(row: any) {
     clean(row?.pos) ??
     clean(row?.player?.position);
 
-  /*
-    Fix injury field.
-
-    NFLMeta uses report_primary_injury.
-  */
-
   const primaryInjury =
     clean(row?.report_primary_injury) ??
     clean(row?.injury) ??
@@ -246,12 +283,8 @@ function normalizeInjury(row: any) {
   const practicePrimaryInjury =
     clean(row?.practice_primary_injury);
 
-  const restRelated = isRestReason(primaryInjury);
-
-  /*
-    A DNP because of rest should NEVER automatically
-    become an injury designation.
-  */
+  const restRelated =
+    isRestReason(primaryInjury);
 
   const actualInjury =
     primaryInjury && !restRelated
@@ -261,19 +294,8 @@ function normalizeInjury(row: any) {
         ? practicePrimaryInjury
         : null;
 
-  const noGameDesignation =
-    Boolean(row?.no_game_designation) ||
-    gameStatus === "NO_DESIGNATION";
-
-  /*
-    Model flags.
-
-    These are classifications only.
-
-    They STILL DO NOT modify projections.
-  */
-
-  const unavailable = gameStatus === "OUT";
+  const unavailable =
+    gameStatus === "OUT";
 
   const highRisk =
     gameStatus === "OUT" ||
@@ -285,79 +307,133 @@ function normalizeInjury(row: any) {
   const practiceConcern =
     !restRelated &&
     actualInjury !== null &&
-    (practiceStatus === "DNP" ||
-      practiceStatus === "LIMITED");
+    (
+      practiceStatus === "DNP" ||
+      practiceStatus === "LIMITED"
+    );
+
+  /*
+    Preserve raw inactive status separately.
+
+    We DO NOT use this alone to determine
+    whether the player should affect a future game.
+  */
+
+  const inactive =
+    clean(row?.game_status)
+      ?.toUpperCase() === "INACTIVE";
 
   return {
-    season_year: row?.season_year ?? null,
-    week: row?.week ?? null,
-    season_type: clean(row?.season_type),
+    season_year:
+      row?.season_year ?? null,
 
-    player_name: playerName,
-    player_key: playerKey,
-    player_id: playerId,
+    week:
+      row?.week ?? null,
+
+    season_type:
+      clean(row?.season_type),
+
+    player_name:
+      playerName,
+
+    player_key:
+      playerKey,
+
+    player_id:
+      playerId,
 
     team,
-    team_name: teamName,
+
+    team_name:
+      teamName,
 
     position,
 
-    injury: actualInjury,
-    primary_injury: primaryInjury,
-    secondary_injury: secondaryInjury,
+    injury:
+      actualInjury,
 
-    rest_related: restRelated,
+    primary_injury:
+      primaryInjury,
 
-    game_status: gameStatus,
-    raw_game_status: rawGameStatus,
+    secondary_injury:
+      secondaryInjury,
 
-    practice_status: practiceStatus,
-    raw_practice_status: rawPracticeStatus,
+    rest_related:
+      restRelated,
 
-    no_game_designation: noGameDesignation,
+    game_status:
+      gameStatus,
 
-    severity: gameSeverity(gameStatus),
+    designation_source:
+      designation.source,
 
-    unavailable: unavailable,
+    raw_game_designation:
+      designation.raw_status,
 
-    high_risk: highRisk,
+    nflmeta_game_status:
+      clean(row?.game_status),
 
-    monitor: monitor,
+    nflmeta_report_status:
+      clean(row?.report_status),
 
-    practice_concern: practiceConcern,
+    inactive,
+
+    practice_status:
+      practiceStatus,
+
+    raw_practice_status:
+      rawPracticeStatus,
+
+    severity:
+      gameSeverity(gameStatus),
+
+    unavailable,
+
+    high_risk:
+      highRisk,
+
+    monitor,
+
+    practice_concern:
+      practiceConcern,
 
     /*
-      IMPORTANT FOR THE FUTURE MODEL:
+      Still OFF.
 
-      false = do not automatically adjust model.
-
-      Later we will calculate this using:
-      - game status
-      - player importance
-      - depth chart
-      - historical usage
-      - historical injury impact
+      We are not allowing injuries to change
+      RDG projections until the importance +
+      historical-impact layer is built.
     */
 
-    model_adjustment_active: false,
+    model_adjustment_active:
+      false,
 
     headshot_url:
       clean(row?.headshot_url),
 
-    raw: row,
+    raw:
+      row,
   };
 }
 
-export async function GET(request: Request) {
+export async function GET(
+  request: Request
+) {
   try {
-    const { searchParams } = new URL(request.url);
+    const { searchParams } =
+      new URL(request.url);
 
     const team =
-      searchParams.get("team")?.toUpperCase() || null;
+      searchParams
+        .get("team")
+        ?.toUpperCase() || null;
 
-    const endpoint = team
-      ? `/teams/${encodeURIComponent(team)}/injuries`
-      : "/injuries";
+    const endpoint =
+      team
+        ? `/teams/${encodeURIComponent(
+            team
+          )}/injuries`
+        : "/injuries";
 
     const rawData =
       await nflMetaFetch(endpoint);
@@ -365,111 +441,131 @@ export async function GET(request: Request) {
     const rows =
       normalizeArray(rawData);
 
-    const injuries = rows
-      .map(normalizeInjury)
-      .filter((injury) => {
-        return (
-          injury.player_name ||
-          injury.player_key ||
-          injury.team
-        );
-      })
-      .sort((a, b) => {
-        if (b.severity !== a.severity) {
-          return b.severity - a.severity;
-        }
+    const injuries =
+      rows
+        .map(normalizeInjury)
+        .filter((injury) => {
+          return (
+            injury.player_name ||
+            injury.player_key ||
+            injury.team
+          );
+        })
+        .sort((a, b) => {
+          if (
+            b.severity !==
+            a.severity
+          ) {
+            return (
+              b.severity -
+              a.severity
+            );
+          }
 
-        if (
-          a.practice_concern !==
-          b.practice_concern
-        ) {
-          return a.practice_concern ? -1 : 1;
-        }
+          if (
+            a.practice_concern !==
+            b.practice_concern
+          ) {
+            return a.practice_concern
+              ? -1
+              : 1;
+          }
 
-        return (
-          a.player_name || ""
-        ).localeCompare(
-          b.player_name || ""
-        );
-      });
+          return (
+            a.player_name || ""
+          ).localeCompare(
+            b.player_name || ""
+          );
+        });
 
-    /*
-      ACTUAL GAME DESIGNATIONS
-    */
+    const out =
+      injuries.filter(
+        (x) =>
+          x.game_status === "OUT"
+      );
 
-    const out = injuries.filter(
-      (x) => x.game_status === "OUT"
-    );
+    const doubtful =
+      injuries.filter(
+        (x) =>
+          x.game_status ===
+          "DOUBTFUL"
+      );
 
-    const doubtful = injuries.filter(
-      (x) => x.game_status === "DOUBTFUL"
-    );
+    const questionable =
+      injuries.filter(
+        (x) =>
+          x.game_status ===
+          "QUESTIONABLE"
+      );
 
-    const questionable = injuries.filter(
-      (x) => x.game_status === "QUESTIONABLE"
-    );
+    const probable =
+      injuries.filter(
+        (x) =>
+          x.game_status ===
+          "PROBABLE"
+      );
 
-    const probable = injuries.filter(
-      (x) => x.game_status === "PROBABLE"
-    );
+    const practiceConcerns =
+      injuries.filter(
+        (x) =>
+          x.practice_concern &&
+          x.game_status ===
+            "NO_DESIGNATION"
+      );
 
-    /*
-      Practice concerns are separate.
+    const restOnly =
+      injuries.filter(
+        (x) =>
+          x.rest_related &&
+          x.game_status ===
+            "NO_DESIGNATION"
+      );
 
-      Example:
+    const inactiveWithDesignation =
+      injuries.filter(
+        (x) =>
+          x.inactive &&
+          x.game_status !==
+            "NO_DESIGNATION"
+      );
 
-      Player has hamstring injury
-      DNP Wednesday
-      but NO game designation yet.
-
-      He belongs here — NOT automatically in Doubtful.
-    */
-
-    const practiceConcerns = injuries.filter(
-      (x) =>
-        x.practice_concern &&
-        x.game_status === "NO_DESIGNATION"
-    );
-
-    /*
-      Rest/NIR players are tracked separately.
-
-      These should not create an injury penalty simply
-      because the player received a veteran rest day.
-    */
-
-    const restOnly = injuries.filter(
-      (x) =>
-        x.rest_related &&
-        x.game_status === "NO_DESIGNATION"
-    );
-
-    const teams = Array.from(
-      new Set(
-        injuries
-          .map((x) => x.team)
-          .filter(Boolean)
-      )
-    ).sort();
+    const teams =
+      Array.from(
+        new Set(
+          injuries
+            .map((x) => x.team)
+            .filter(Boolean)
+        )
+      ).sort();
 
     return NextResponse.json({
       success: true,
 
       version:
-        "1.1-game-status-practice-separated",
+        "1.2-report-status-priority",
 
-      provider: "NFLMeta",
+      provider:
+        "NFLMeta",
 
-      team_filter: team,
+      team_filter:
+        team,
 
       summary: {
-        total_records: injuries.length,
+        total_records:
+          injuries.length,
 
         game_designations: {
-          out: out.length,
-          doubtful: doubtful.length,
-          questionable: questionable.length,
-          probable: probable.length,
+          out:
+            out.length,
+
+          doubtful:
+            doubtful.length,
+
+          questionable:
+            questionable.length,
+
+          probable:
+            probable.length,
         },
 
         practice_concerns_without_game_designation:
@@ -478,16 +574,14 @@ export async function GET(request: Request) {
         rest_nir_without_game_designation:
           restOnly.length,
 
+        inactive_with_report_designation:
+          inactiveWithDesignation.length,
+
         teams_with_reports:
           teams.length,
       },
 
       teams,
-
-      /*
-        These are the players that matter most
-        when we eventually calculate model impact.
-      */
 
       game_designations: {
         out,
@@ -502,12 +596,22 @@ export async function GET(request: Request) {
       rest_nir:
         restOnly,
 
+      inactive_with_designation:
+        inactiveWithDesignation,
+
       injuries,
 
       model_status: {
-        injury_feed_connected: true,
+        injury_feed_connected:
+          true,
 
-        game_designation_separated_from_practice:
+        report_status_priority:
+          true,
+
+        inactive_status_handled:
+          true,
+
+        practice_separated:
           true,
 
         rest_days_filtered:
@@ -517,10 +621,10 @@ export async function GET(request: Request) {
           false,
 
         next_step:
-          "Connect player importance, depth chart role, historical usage and historical injury impact before changing RDG projections.",
+          "Calculate player importance using position, depth-chart role and historical usage before injuries modify RDG projections.",
 
         message:
-          "Injury information is classified but does not yet modify RDG projections.",
+          "RDG now preserves official injury designations even when NFLMeta game_status is Inactive. Injury adjustments remain disabled.",
       },
 
       generated_at:
