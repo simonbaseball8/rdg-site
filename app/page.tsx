@@ -732,22 +732,23 @@ const [cfbError, setCfbError] =
           b.score - a.score
       );
 
+  // NFL WEEKLY PARLAY POOLS
+  // Keep the strict tiers, but allow each larger parlay to use the widest
+  // qualified weekly pool before declaring that there are not enough legs.
+  // No candidate below RDG's minimum 2-point model/market difference is added.
   const saferCandidates =
     candidates.filter(
       (candidate) =>
         candidate.difference >= 3.5 &&
-        candidate.historical_accuracy >=
-          55 &&
-        candidate.historical_sample >=
-          30
+        candidate.historical_accuracy >= 55 &&
+        candidate.historical_sample >= 30
     );
 
   const balancedCandidates =
     candidates.filter(
       (candidate) =>
         candidate.difference >= 3 &&
-        candidate.historical_sample >=
-          30
+        candidate.historical_sample >= 30
     );
 
   const higherRiskCandidates =
@@ -759,20 +760,89 @@ const [cfbError, setCfbError] =
   const bestStraight =
     saferCandidates.length > 0
       ? saferCandidates[0]
+      : balancedCandidates.length > 0
+      ? balancedCandidates[0]
       : null;
 
-  // Build genuinely different NFL cards instead of simply extending the same core parlay.
-  // Every card uses a different starting point and traversal through the qualified pool.
-  const saferTwoLeg = diversifiedSelection(saferCandidates, 2, 0, 1);
+  // Greedy usage balancing: stronger candidates still rank first, but when
+  // building multiple cards RDG favors qualified games that have appeared
+  // fewer times already. This reduces the same game dominating every parlay.
+  const nflCandidateUsage = new Map<string, number>();
+
+  function buildWeeklyNFLParlay(
+    pool: BetCandidate[],
+    count: number
+  ) {
+    const uniqueByEvent = Array.from(
+      new Map(
+        pool.map((candidate) => [
+          candidate.event_id,
+          candidate,
+        ])
+      ).values()
+    );
+
+    const selected = [...uniqueByEvent]
+      .sort((a, b) => {
+        const aUsage =
+          nflCandidateUsage.get(a.event_id) || 0;
+        const bUsage =
+          nflCandidateUsage.get(b.event_id) || 0;
+
+        if (aUsage !== bUsage) {
+          return aUsage - bUsage;
+        }
+
+        return b.score - a.score;
+      })
+      .slice(0, Math.min(count, uniqueByEvent.length));
+
+    selected.forEach((candidate) => {
+      nflCandidateUsage.set(
+        candidate.event_id,
+        (nflCandidateUsage.get(candidate.event_id) || 0) + 1
+      );
+    });
+
+    return selected;
+  }
+
+  // Build smaller/stricter cards first, then progressively widen the pool.
+  // If a tier cannot fill the requested leg count, it stays incomplete.
+  const saferTwoLeg = buildWeeklyNFLParlay(
+    saferCandidates,
+    2
+  );
 
   const balancedThreePool =
-    balancedCandidates.length >= 3 ? balancedCandidates : higherRiskCandidates;
-  const balancedThreeLeg = diversifiedSelection(balancedThreePool, 3, 2, 2);
+    balancedCandidates.length >= 3
+      ? balancedCandidates
+      : higherRiskCandidates;
 
-  const higherRiskFourLeg = diversifiedSelection(higherRiskCandidates, 4, 4, 3);
-  const fiveLeg = diversifiedSelection(higherRiskCandidates, 5, 1, 4);
-  const sixLeg = diversifiedSelection(higherRiskCandidates, 6, 5, 5);
-  const eightLeg = diversifiedSelection(higherRiskCandidates, 8, 2, 7);
+  const balancedThreeLeg = buildWeeklyNFLParlay(
+    balancedThreePool,
+    3
+  );
+
+  const higherRiskFourLeg = buildWeeklyNFLParlay(
+    higherRiskCandidates,
+    4
+  );
+
+  const fiveLeg = buildWeeklyNFLParlay(
+    higherRiskCandidates,
+    5
+  );
+
+  const sixLeg = buildWeeklyNFLParlay(
+    higherRiskCandidates,
+    6
+  );
+
+  const eightLeg = buildWeeklyNFLParlay(
+    higherRiskCandidates,
+    8
+  );
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_50%_18%,rgba(16,185,129,0.07),transparent_28%),linear-gradient(180deg,#020a07_0%,#020806_42%,#010403_100%)] text-white">
@@ -1125,17 +1195,19 @@ const [cfbError, setCfbError] =
                 </p>
 
                 <h2 className="mt-3 text-3xl font-bold">
-                  Today&apos;s Model
+                  Weekly Model
                   Selections
                 </h2>
 
                 <p className="mt-2 max-w-3xl text-sm text-slate-400">
-                  Automatically built
-                  from RDG projections
-                  and current Hard Rock
-                  Bet spreads. RDG will
-                  not force weaker bets
-                  into a parlay.
+                  Built from all remaining
+                  games in the current NFL
+                  week using RDG projections
+                  and current Hard Rock Bet
+                  spreads. Games drop out
+                  after kickoff, and RDG will
+                  not force weaker bets into
+                  a parlay.
                 </p>
               </div>
 
