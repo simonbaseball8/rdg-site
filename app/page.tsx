@@ -333,6 +333,7 @@ type BetCandidate = {
   model_probability?: number;
   market_probability?: number | null;
   review?: string;
+  sportsbook_name?: string | null;
 };
 
 function diversifiedSelection<T>(items: T[], count: number, offset: number, stride: number) {
@@ -869,6 +870,7 @@ const [cfbError, setCfbError] =
           model_probability: prop.model_probability,
           market_probability: prop.market_no_vig_probability,
           review: prop.review,
+          sportsbook_name: bestPrice?.sportsbook || null,
         };
       })
       .sort((a, b) => b.score - a.score);
@@ -1704,6 +1706,17 @@ function BuilderCard({
   const qualified =
     candidates.length >= required;
 
+  const [expandedPicks, setExpandedPicks] = useState<Set<string>>(new Set());
+
+  function togglePickReason(key: string) {
+    setExpandedPicks((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
   return (
     <article className={featured
       ? "relative overflow-hidden rounded-2xl border-2 border-emerald-400/70 bg-emerald-500/[0.10] p-6 shadow-[0_0_35px_rgba(16,185,129,0.16)] lg:col-span-2"
@@ -1840,6 +1853,60 @@ function BuilderCard({
                       Historical {candidate.historical_bucket} bucket: {candidate.historical_correct}/{candidate.historical_sample} ({candidate.historical_accuracy}%) straight-up.
                     </p>
                   </>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => togglePickReason(`${candidate.event_id}-${index}`)}
+                  className="mt-4 flex w-full items-center justify-between rounded-lg border border-emerald-500/20 bg-emerald-500/[0.05] px-4 py-3 text-left text-xs font-black uppercase tracking-[0.16em] text-emerald-300 transition hover:border-emerald-400/40 hover:bg-emerald-500/[0.09]"
+                >
+                  <span>Why this pick?</span>
+                  <span>{expandedPicks.has(`${candidate.event_id}-${index}`) ? "▲" : "▼"}</span>
+                </button>
+
+                {expandedPicks.has(`${candidate.event_id}-${index}`) && (
+                  <div className="mt-3 rounded-lg border border-white/10 bg-white/[0.025] p-4">
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-400">
+                      RDG MODEL REASON
+                    </p>
+
+                    {candidate.market_type === "passing_prop" ? (
+                      <div className="mt-3 space-y-2 text-xs leading-5 text-slate-300">
+                        <p>
+                          • RDG projects <span className="font-bold text-white">{candidate.projected_margin.toFixed(1)} passing yards</span> versus the displayed line of <span className="font-bold text-white">{candidate.line.toFixed(1)}</span>, a <span className="font-bold text-emerald-300">{candidate.projected_margin - candidate.line >= 0 ? "+" : ""}{(candidate.projected_margin - candidate.line).toFixed(1)}-yard</span> model difference.
+                        </p>
+                        <p>
+                          • The frozen V2 residual calibration gives this {candidate.selection} a <span className="font-bold text-white">{(candidate.model_probability || 0).toFixed(1)}% model-implied probability</span>.
+                        </p>
+                        <p>
+                          • The no-vig sportsbook estimate is <span className="font-bold text-white">{candidate.market_probability !== null && candidate.market_probability !== undefined ? `${candidate.market_probability.toFixed(1)}%` : "unavailable"}</span>, producing a <span className="font-bold text-emerald-300">+{candidate.difference.toFixed(1)} percentage-point</span> model/market difference.
+                        </p>
+                        {candidate.sportsbook_name && candidate.odds && (
+                          <p>
+                            • Displayed price: <span className="font-bold text-white">{candidate.sportsbook_name.toUpperCase()} {Number(candidate.odds) > 0 ? "+" : ""}{candidate.odds}</span> at this exact line.
+                          </p>
+                        )}
+                        <p className="pt-1 text-amber-300">
+                          Main risk: passing-yard results are volatile. RDG&apos;s 2025 V2 test MAE was about 59.6 yards, so this is a model review rather than a guaranteed outcome.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="mt-3 space-y-2 text-xs leading-5 text-slate-300">
+                        <p>
+                          • RDG projects <span className="font-bold text-white">{candidate.projected_winner} by {candidate.projected_margin.toFixed(1)}</span>.
+                        </p>
+                        <p>
+                          • RDG differs from the current spread market by <span className="font-bold text-emerald-300">{candidate.difference.toFixed(1)} points</span>, which is why this side passed the builder&apos;s model filter.
+                        </p>
+                        <p>
+                          • The historical <span className="font-bold text-white">{candidate.historical_bucket}</span> projected-margin bucket went <span className="font-bold text-white">{candidate.historical_correct}/{candidate.historical_sample} ({candidate.historical_accuracy}%)</span> on straight-up projected winners.
+                        </p>
+                        <p className="pt-1 text-amber-300">
+                          Main risk: that historical percentage is straight-up model performance, not the historical ATS win rate or probability of this spread covering.
+                        </p>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             )
