@@ -2307,7 +2307,7 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
         return null;
       }
 
-      // Keep experimental totals in a tighter, normal sportsbook range.
+      // Keep calibrated totals in a tighter, normal sportsbook range.
       if (price < -180 || price > 130) return null;
 
       // The backend already requires an 8 percentage-point discrepancy.
@@ -2324,7 +2324,7 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
         model_probability: modelProbability,
         market_probability: marketProbability,
         edge,
-        signal: "Experimental Total Review",
+        signal: "Calibrated Total Review",
         starter: "Game Total",
         market_type: "total",
         total_line: total.market_total,
@@ -2403,7 +2403,7 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
 
   /*
     Mixed pools:
-    Moneylines remain the foundation. Experimental totals can replace a leg
+    Moneylines remain the foundation. Calibrated totals can replace a leg
     when they pass the stricter totals filter above.
   */
   const balancedMixed = [
@@ -2442,20 +2442,17 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
   return (
     <div>
       <p className="text-xs font-bold uppercase tracking-[0.25em] text-green-400">
-        RDG MLB MODEL • MONEYLINE + EXPERIMENTAL TOTALS
+        RDG MLB MODEL • MONEYLINE + CALIBRATED TOTALS
       </p>
 
       <h2 className="mt-3 text-3xl font-bold">Live MLB Analysis</h2>
 
       <p className="mt-2 text-sm text-slate-400">
-        RDG projected winners plus qualifying Hard Rock game totals. Totals are
-        still experimental and are held to a stricter filter.
+        RDG projected winners plus qualifying Hard Rock game totals. Total-score projections are backtest-calibrated and betting signals remain conservatively filtered.
       </p>
 
       <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-300">
-        Moneyline probabilities use the calibrated team model. Game-total
-        probabilities are experimental: the historical test measured run
-        projection error, not sportsbook Over/Under win rate or profitability.
+        Moneyline probabilities use the calibrated team model. Game-total projections were calibrated on 2023–2024 data and evaluated on 2025. Historical sportsbook total lines/prices were not available, so Over/Under betting accuracy, EV, and profitability are not validated.
       </div>
 
       <section className="mt-8 grid gap-4 md:grid-cols-4">
@@ -2498,7 +2495,7 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
             <>
               <div className="mt-12 border-t border-white/10 pt-10">
                 <p className="text-xs font-bold uppercase tracking-[0.25em] text-sky-400">
-                  EXPERIMENTAL TOTALS
+                  CALIBRATED TOTALS
                 </p>
                 <h2 className="mt-3 text-2xl font-bold">Qualified Over / Under Reviews</h2>
               </div>
@@ -2628,7 +2625,7 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
           </section>
 
           <div className="mt-5 rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 text-xs text-slate-400">
-            Experimental totals are not treated as validated betting edges.
+            Calibrated totals are not treated as validated betting edges.
             They are displayed separately and only enter larger mixed-market
             cards when they clear the stricter totals filter. RDG does not use
             more than one leg from the same MLB game.
