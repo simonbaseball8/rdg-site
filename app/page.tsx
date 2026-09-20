@@ -2509,7 +2509,7 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
                     <div className="flex items-start justify-between gap-4">
                       <div>
                         <p className="text-xs font-black uppercase tracking-wider text-sky-400">
-                          EXPERIMENTAL TOTAL REVIEW
+                          CALIBRATED TOTAL REVIEW
                         </p>
                         <p className="mt-2 text-xl font-black">
                           GAME TOTAL — {candidate.display_bet} RUNS {candidate.odds || ""}
