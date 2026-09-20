@@ -2177,18 +2177,29 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
 
   const reviews = ranked.filter((game) => game.rdg?.signal !== "Pass");
 
-  const candidates: MLBBetCandidate[] = ranked
-    .map((game) => {
-      const lean = game.rdg?.moneyline_lean || game.rdg?.projected_winner;
-      if (!lean || game.rdg?.signal === "Pass") return null;
+  /*
+    IMPORTANT:
+    The review board above is VALUE-oriented and can legitimately lean toward an underdog
+    when RDG thinks the market has priced that underdog too low.
 
-      const isHome = lean === game.home_team;
-      const isAway = lean === game.away_team;
+    The parlay builder below is intentionally DIFFERENT. It is likelihood-oriented:
+    use RDG's projected winner, require the model to agree that the selected team is more
+    likely to win, and keep the sportsbook price in a normal parlay range.
+  */
+  const parlayCandidates: MLBBetCandidate[] = games
+    .map((game) => {
+      const team = game.rdg?.projected_winner;
+      if (!team) return null;
+
+      const isHome = team === game.home_team;
+      const isAway = team === game.away_team;
       if (!isHome && !isAway) return null;
 
-      const modelProbability = isHome
-        ? game.rdg.model_home_probability
-        : game.rdg.model_away_probability;
+      const modelProbability = Number(
+        isHome
+          ? game.rdg?.model_home_probability
+          : game.rdg?.model_away_probability
+      );
 
       const marketProbability = isHome
         ? game.hard_rock?.moneyline?.no_vig_home_probability
@@ -2202,99 +2213,99 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
         ? game.starting_pitchers?.home?.name
         : game.starting_pitchers?.away?.name;
 
+      const price = americanOddsNumber(odds ?? null);
+      if (
+        !Number.isFinite(modelProbability) ||
+        typeof marketProbability !== "number" ||
+        price === null
+      ) {
+        return null;
+      }
+
+      // Keep the normal MLB parlay pool away from extreme prices.
+      if (price < -350 || price > 150) return null;
+
+      const selectedEdge = modelProbability - marketProbability;
+
       return {
         event_id: game.event_id,
         matchup: `${game.away_team} @ ${game.home_team}`,
-        team: lean,
+        team,
         odds: odds ?? null,
-        display_bet: `${lean} ML`,
-        model_probability: Number(modelProbability ?? 0),
-        market_probability:
-          typeof marketProbability === "number" ? marketProbability : null,
-        edge: Number(game.rdg?.model_market_edge ?? 0),
-        signal: game.rdg?.signal || "Pass",
+        display_bet: `${team} ML`,
+        model_probability: modelProbability,
+        market_probability: marketProbability,
+        edge: selectedEdge,
+        signal:
+          modelProbability >= 60
+            ? "High Win Probability"
+            : modelProbability >= 55
+              ? "Model Favorite"
+              : "Projected Winner",
         starter: starter || "TBD",
       } as MLBBetCandidate;
     })
     .filter((candidate): candidate is MLBBetCandidate => candidate !== null)
     .sort((a, b) => {
-      // Rank by a blend of likelihood and model/market discrepancy.
-      // This prevents a large edge on a low-probability underdog from
-      // automatically outranking a more likely selection.
-      const aScore = a.model_probability + a.edge * 0.75;
-      const bScore = b.model_probability + b.edge * 0.75;
-      return bScore - aScore;
+      // For parlays, prioritize absolute win probability first.
+      // Positive model/market value is only a secondary tiebreaker.
+      const probabilityDiff = b.model_probability - a.model_probability;
+      if (Math.abs(probabilityDiff) > 0.25) return probabilityDiff;
+      return b.edge - a.edge;
     });
 
-  // MLB builder pools now separate "likelihood" from "value".
-  // Edge is still useful, but safer cards require a stronger model probability too.
-  const safer = candidates.filter((candidate) => {
+  const safer = parlayCandidates.filter((candidate) => {
+    const price = americanOddsNumber(candidate.odds);
+    return (
+      candidate.model_probability >= 55 &&
+      price !== null &&
+      price >= -300 &&
+      price <= 110
+    );
+  });
+
+  const balanced = parlayCandidates.filter((candidate) => {
     const price = americanOddsNumber(candidate.odds);
     return (
       candidate.model_probability >= 52 &&
-      candidate.edge >= 2.5 &&
       price !== null &&
       price >= -300 &&
-      price <= 125 &&
-      (candidate.signal === "Priority Review" ||
-        candidate.signal === "Strong Review")
+      price <= 125
     );
   });
 
-  const balanced = candidates.filter((candidate) => {
+  const wider = parlayCandidates.filter((candidate) => {
     const price = americanOddsNumber(candidate.odds);
     return (
-      candidate.model_probability >= 48 &&
-      candidate.edge >= 2.5 &&
+      candidate.model_probability >= 51 &&
       price !== null &&
-      price >= -275 &&
-      price <= 150 &&
-      (candidate.signal === "Priority Review" ||
-        candidate.signal === "Strong Review" ||
-        candidate.signal === "Watch")
+      price >= -325 &&
+      price <= 130
     );
   });
 
-  const higherRisk = candidates.filter((candidate) => {
+  const higherRisk = parlayCandidates.filter((candidate) => {
     const price = americanOddsNumber(candidate.odds);
     return (
-      candidate.model_probability >= 45 &&
-      candidate.edge >= 2.5 &&
+      candidate.model_probability >= 50.5 &&
       price !== null &&
-      price >= -250 &&
-      price <= 200 &&
-      (candidate.signal === "Priority Review" ||
-        candidate.signal === "Strong Review" ||
-        candidate.signal === "Watch")
-    );
-  });
-
-  const longShot = candidates.filter((candidate) => {
-    const price = americanOddsNumber(candidate.odds);
-    return (
-      candidate.model_probability >= 40 &&
-      candidate.edge >= 2.5 &&
-      price !== null &&
-      price >= -250 &&
-      price <= 300 &&
-      (candidate.signal === "Priority Review" ||
-        candidate.signal === "Strong Review" ||
-        candidate.signal === "Watch")
+      price >= -325 &&
+      price <= 150
     );
   });
 
   const bestStraight = safer[0] ?? balanced[0] ?? null;
   const twoLeg = diversifiedSelection(safer, 2, 0, 1);
   const threeLeg = diversifiedSelection(balanced, 3, 1, 2);
-  const fourLeg = diversifiedSelection(balanced, 4, 2, 3);
+  const fourLeg = diversifiedSelection(wider, 4, 2, 3);
   const fiveLeg = diversifiedSelection(higherRisk, 5, 0, 2);
   const sixLeg = diversifiedSelection(higherRisk, 6, 1, 3);
-  const eightLeg = diversifiedSelection(longShot, 8, 3, 5);
+  const eightLeg = diversifiedSelection(higherRisk, 8, 3, 5);
 
   return (
     <div>
       <p className="text-xs font-bold uppercase tracking-[0.25em] text-green-400">
-        RDG MLB MODEL • v1.1 CALIBRATED
+        RDG MLB MODEL • v1.2 PREGAME
       </p>
 
       <h2 className="mt-3 text-3xl font-bold">Live MLB Analysis</h2>
@@ -2304,7 +2315,7 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
       </p>
 
       <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-300">
-        The 2025 held-out result applies to the calibrated team model. The live pitcher adjustment is still experimental. Model probabilities are not guarantees or evidence of profitability.
+        Review cards are value-oriented. Parlay cards are likelihood-oriented and use RDG&apos;s projected winner instead of automatically selecting the side with the largest market discrepancy.
       </div>
 
       <section className="mt-8 grid gap-4 md:grid-cols-4">
@@ -2345,64 +2356,64 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
 
           <div className="mt-14 border-t border-white/10 pt-10">
             <p className="text-xs font-bold uppercase tracking-[0.25em] text-green-400">
-              RDG MLB BET BUILDER
+              RDG MLB PARLAY BUILDER
             </p>
             <h2 className="mt-3 text-3xl font-bold">
-              Today&apos;s MLB Model Selections
+              Today&apos;s MLB Projected Winners
             </h2>
             <p className="mt-2 max-w-3xl text-sm text-slate-400">
-              Built from current Hard Rock moneylines, RDG model probability, and model/market edge. Safer cards now require both a reasonable projected win probability and a qualifying edge; RDG will not add weaker games just to fill a card.
+              These cards prioritize RDG win probability and model/market agreement. They are not built by chasing the largest underdog edge.
             </p>
           </div>
 
           <section className="mt-8 grid gap-5 lg:grid-cols-2">
             <MLBBuilderCard
               title="BEST STRAIGHT"
-              subtitle="52%+ Model Probability • Price ≤ +125"
+              subtitle="55%+ RDG WIN PROBABILITY • NORMAL PRICE RANGE"
               candidates={bestStraight ? [bestStraight] : []}
               required={1}
             />
             <MLBBuilderCard
               title="TOP RDG PARLAY"
-              subtitle="52%+ Model Probability • Price ≤ +125"
+              subtitle="55%+ RDG WIN PROBABILITY • MAX +110"
               featured
               candidates={twoLeg}
               required={2}
             />
             <MLBBuilderCard
               title="BALANCED 3-LEG"
-              subtitle="48%+ Model Probability • Price ≤ +150"
+              subtitle="52%+ RDG WIN PROBABILITY • MAX +125"
               candidates={threeLeg}
               required={3}
             />
             <MLBBuilderCard
               title="WIDER 4-LEG"
-              subtitle="48%+ Model Probability • Price ≤ +150"
+              subtitle="51%+ RDG WIN PROBABILITY • MAX +130"
               candidates={fourLeg}
               required={4}
             />
             <MLBBuilderCard
               title="5-LEG • HIGH RISK"
-              subtitle="45%+ Model Probability • Price ≤ +200"
+              subtitle="50.5%+ RDG WIN PROBABILITY • MAX +150"
               candidates={fiveLeg}
               required={5}
             />
             <MLBBuilderCard
               title="6-LEG • HIGH RISK"
-              subtitle="45%+ Model Probability • Price ≤ +200"
+              subtitle="50.5%+ RDG WIN PROBABILITY • MAX +150"
               candidates={sixLeg}
               required={6}
             />
             <MLBBuilderCard
               title="8-LEG • LONG SHOT"
-              subtitle="40%+ Model Probability • Price ≤ +300"
+              subtitle="50.5%+ RDG WIN PROBABILITY • MAX +150"
               candidates={eightLeg}
               required={8}
             />
           </section>
 
           <div className="mt-5 rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 text-xs text-slate-400">
-            MLB builder cards now separate projected likelihood from model/market value. A large edge alone does not make a low-probability underdog a safer selection. Higher-risk and long-shot cards intentionally allow lower model probabilities. The live starting-pitcher adjustment remains experimental.
+            The MLB review board and parlay builder serve different purposes. Review signals identify model-versus-market disagreements; the parlay builder prioritizes teams RDG actually projects to win. If there are not enough qualifying projected winners, RDG leaves the card incomplete rather than forcing underdogs into it.
           </div>
 
           <div className="mt-12 border-t border-white/10 pt-10">
