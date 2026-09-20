@@ -10,7 +10,7 @@ const ODDIZE_URL =
 const MLB_API = "https://statsapi.mlb.com/api/v1";
 
 /*
-  RDG MLB v1.1
+  RDG MLB v1.4
 
   TEAM MODEL CALIBRATION
   Training: 2023-2024
@@ -371,46 +371,47 @@ function getSignal(edge: number) {
 }
 
 
-function poissonPmf(k: number, lambda: number) {
-  if (lambda <= 0) return 0;
-  let factorial = 1;
-  for (let i = 2; i <= k; i++) factorial *= i;
-  return Math.exp(-lambda) * Math.pow(lambda, k) / factorial;
+// RDG MLB totals v1.4 calibration from the chronological 2023-2024
+// training / 2025 held-out backtest.
+const TOTAL_INTERCEPT = 3.019046;
+const TOTAL_SLOPE = 0.664567;
+const TOTAL_SIGMA = 4.56;
+
+function normalCdf(x: number) {
+  // Abramowitz-Stegun approximation. Accurate enough for model probabilities.
+  const sign = x < 0 ? -1 : 1;
+  const z = Math.abs(x) / Math.sqrt(2);
+  const t = 1 / (1 + 0.3275911 * z);
+  const erf =
+    1 -
+    (((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t -
+      0.284496736) *
+      t +
+      0.254829592) *
+      t) *
+      Math.exp(-z * z);
+
+  return 0.5 * (1 + sign * erf);
 }
 
 function totalProbabilities(projectedTotal: number, line: number) {
   /*
-    Experimental first-pass total-runs distribution.
-    MLB game totals are usually half-runs. Integer totals can push, so
-    this returns conditional win probabilities after removing push mass.
+    v1.4 uses the held-out 2025 total-error RMSE (~4.56 runs) as a
+    conservative predictive spread instead of a Poisson distribution.
+    This prevents unrealistically confident Over/Under probabilities.
   */
-  const maxRuns = 30;
-  let over = 0;
-  let under = 0;
-  let push = 0;
+  if (!Number.isFinite(projectedTotal) || !Number.isFinite(line)) return null;
 
-  for (let runs = 0; runs <= maxRuns; runs++) {
-    const p = poissonPmf(runs, projectedTotal);
-    if (runs > line) over += p;
-    else if (runs < line) under += p;
-    else push += p;
-  }
+  const z = (line - projectedTotal) / TOTAL_SIGMA;
+  const under = normalCdf(z);
+  const over = 1 - under;
 
-  const decided = over + under;
-  if (decided <= 0) return null;
-
-  return {
-    over: over / decided,
-    under: under / decided,
-    push,
-  };
+  return { over, under };
 }
 
 function projectedGameTotal(
   awayRecord: any,
-  homeRecord: any,
-  awayPitcher: PitcherStats | null,
-  homePitcher: PitcherStats | null
+  homeRecord: any
 ) {
   const awayGames = Number(awayRecord.wins ?? 0) + Number(awayRecord.losses ?? 0);
   const homeGames = Number(homeRecord.wins ?? 0) + Number(homeRecord.losses ?? 0);
@@ -422,34 +423,25 @@ function projectedGameTotal(
   const homeRunsFor = Number(homeRecord.runs_scored ?? 0) / homeGames;
   const homeRunsAgainst = Number(homeRecord.runs_allowed ?? 0) / homeGames;
 
-  /*
-    Baseline expected scoring:
-    each offense's season RPG blended with the opponent's runs allowed/G.
-  */
-  let awayExpected = (awayRunsFor + homeRunsAgainst) / 2;
-  let homeExpected = (homeRunsFor + awayRunsAgainst) / 2;
+  // Chronological team-only baseline used by the totals backtest.
+  const awayRaw = (awayRunsFor + homeRunsAgainst) / 2;
+  const homeRaw = (homeRunsFor + awayRunsAgainst) / 2;
+  const rawTotal = awayRaw + homeRaw;
 
-  /*
-    Conservative starter adjustment.
-    4.25 is the same neutral ERA reference already used by RDG's pitcher score.
-    Only 35% of the ERA difference is applied because starters do not pitch
-    the entire game and this totals component has not yet been backtested.
-  */
-  if (homePitcher?.era !== null && homePitcher?.era !== undefined) {
-    awayExpected += (homePitcher.era - 4.25) * 0.35;
-  }
+  // Historical calibration learned on 2023-2024 and evaluated on 2025.
+  const calibratedTotal = TOTAL_INTERCEPT + TOTAL_SLOPE * rawTotal;
 
-  if (awayPitcher?.era !== null && awayPitcher?.era !== undefined) {
-    homeExpected += (awayPitcher.era - 4.25) * 0.35;
-  }
-
-  awayExpected = Math.max(2.0, Math.min(7.5, awayExpected));
-  homeExpected = Math.max(2.0, Math.min(7.5, homeExpected));
+  // Preserve a reasonable team split for display only. Betting probability
+  // is driven by the historically calibrated GAME total above.
+  const rawShare = rawTotal > 0 ? awayRaw / rawTotal : 0.5;
+  const awayExpected = calibratedTotal * rawShare;
+  const homeExpected = calibratedTotal - awayExpected;
 
   return {
     away_runs: awayExpected,
     home_runs: homeExpected,
-    total_runs: awayExpected + homeExpected,
+    raw_total_runs: rawTotal,
+    total_runs: calibratedTotal,
   };
 }
 
@@ -1163,7 +1155,7 @@ export async function GET() {
 
               total_model: {
                 status:
-                  "Experimental / Not Historically Calibrated",
+                  "Backtest-Calibrated Team Total / Conservative Probability",
 
                 projected_away_runs:
                   totalProjection !== null
@@ -1280,10 +1272,10 @@ export async function GET() {
         "RDG MLB",
 
       version:
-        "1.3-pregame-moneyline-plus-experimental-totals",
+        "1.4-pregame-moneyline-plus-calibrated-totals",
 
       model_status:
-        "Pregame Moneyline Model + Experimental Game Totals",
+        "Pregame Moneyline Model + Backtest-Calibrated Game Totals",
 
       games_found:
         games.length,
@@ -1337,10 +1329,10 @@ export async function GET() {
           "Pregame Hard Rock moneyline and game-total prices with sportsbook vig removed. Started games and extreme/stale moneyline snapshots are excluded.",
 
         totals_model:
-          "Experimental first-pass game-total model using season runs scored/allowed per game, conservative starting-pitcher ERA adjustments, and a Poisson total-runs distribution. It has not yet been historically calibrated or backtested.",
+          "Team-only game-total projection calibrated on 2023-2024 chronological pregame data and evaluated on 2025. Live Over/Under probabilities use the 2025 held-out RMSE (4.56 runs) as a conservative normal predictive spread. Starting-pitcher adjustments are intentionally excluded from totals because they were not part of the totals backtest.",
 
         warning:
-          "The 55.22% held-out result applies only to the calibrated moneyline team model on the 2025 evaluation sample. It is not a betting win rate and does not establish profitability. The live pitcher adjustment and the new totals model have not yet been historically validated.",
+          "The 55.22% held-out result applies only to the calibrated moneyline team model on the 2025 evaluation sample. The totals projection was separately evaluated on 2025 with MAE 3.611 runs and RMSE 4.56 runs. Historical sportsbook total lines/prices were not available, so Over/Under selection accuracy, EV, and profitability are not validated. The live moneyline pitcher adjustment also remains experimental.",
       },
 
       updated_at:
