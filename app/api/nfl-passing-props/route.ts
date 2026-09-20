@@ -11,12 +11,31 @@ const CURRENT_STATS_URL =
 const PRIOR_STATS_URL =
   `https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_${PRIOR_SEASON}.csv`;
 
-const SGO_URL =
-  "https://api.sportsgameodds.com/v2/events";
+const SGO_URL = "https://api.sportsgameodds.com/v2/events";
 
 type Row = Record<string, string>;
 
-function num(value: any): number {
+type PlayerGame = {
+  season: number;
+  week: number;
+  player_id: string;
+  player_name: string;
+  team: string;
+  attempts: number;
+  completions: number;
+  yards: number;
+  touchdowns: number;
+  interceptions: number;
+};
+
+type PlayerHistory = {
+  player_name: string;
+  player_id: string;
+  current: PlayerGame[];
+  prior: PlayerGame[];
+};
+
+function num(value: unknown): number {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
 }
@@ -101,7 +120,7 @@ async function fetchCSV(url: string): Promise<Row[]> {
 
   if (!response.ok) {
     throw new Error(
-      `nflverse ${response.status} for ${url}`
+      `nflverse returned ${response.status} for ${url}`
     );
   }
 
@@ -111,7 +130,7 @@ async function fetchCSV(url: string): Promise<Row[]> {
 function passingGames(
   rows: Row[],
   season: number
-) {
+): PlayerGame[] {
   return rows
     .filter(
       (row) =>
@@ -144,9 +163,7 @@ function passingGames(
     }));
 }
 
-function average(
-  values: number[]
-): number | null {
+function average(values: number[]): number | null {
   if (!values.length) return null;
 
   return (
@@ -156,22 +173,22 @@ function average(
 }
 
 function weightedAverage(
-  values: {
+  values: Array<{
     value: number;
     weight: number;
-  }[]
+  }>
 ): number | null {
   const valid = values.filter(
-    (x) =>
-      Number.isFinite(x.value) &&
-      Number.isFinite(x.weight) &&
-      x.weight > 0
+    (item) =>
+      Number.isFinite(item.value) &&
+      Number.isFinite(item.weight) &&
+      item.weight > 0
   );
 
   if (!valid.length) return null;
 
   const totalWeight = valid.reduce(
-    (sum, x) => sum + x.weight,
+    (sum, item) => sum + item.weight,
     0
   );
 
@@ -179,25 +196,18 @@ function weightedAverage(
 
   return (
     valid.reduce(
-      (sum, x) => sum + x.value * x.weight,
+      (sum, item) =>
+        sum + item.value * item.weight,
       0
     ) / totalWeight
   );
 }
 
 function buildPlayerHistory(
-  currentGames: any[],
-  priorGames: any[]
-) {
-  const map = new Map<
-    string,
-    {
-      player_name: string;
-      player_id: string;
-      current: any[];
-      prior: any[];
-    }
-  >();
+  currentGames: PlayerGame[],
+  priorGames: PlayerGame[]
+): Map<string, PlayerHistory> {
+  const map = new Map<string, PlayerHistory>();
 
   for (const game of [
     ...priorGames,
@@ -238,127 +248,111 @@ function buildPlayerHistory(
   return map;
 }
 
-function projectPassingYards(player: {
-  current: any[];
-  prior: any[];
-}) {
+function projectPassingYards(
+  player: PlayerHistory
+) {
   const current = player.current;
   const prior = player.prior;
 
-  const currentYards = current.map(
-    (game) => game.yards
+  const currentAvg = average(
+    current.map((game) => game.yards)
   );
 
-  const priorYards = prior.map(
-    (game) => game.yards
+  const priorAvg = average(
+    prior.map((game) => game.yards)
   );
 
-  const currentAttempts = current.map(
-    (game) => game.attempts
+  const currentAttemptAvg = average(
+    current.map((game) => game.attempts)
   );
 
-  const priorAttempts = prior.map(
-    (game) => game.attempts
+  const priorAttemptAvg = average(
+    prior.map((game) => game.attempts)
   );
 
-  const currentAvg = average(currentYards);
-  const priorAvg = average(priorYards);
+  const recentCurrentAvg = average(
+    current
+      .slice(-3)
+      .map((game) => game.yards)
+  );
 
-  const currentAttemptAvg =
-    average(currentAttempts);
-
-  const priorAttemptAvg =
-    average(priorAttempts);
-
-  const recentCurrent = current
-    .slice(-3)
-    .map((game) => game.yards);
-
-  const recentPrior = prior
-    .slice(-5)
-    .map((game) => game.yards);
-
-  const recentCurrentAvg =
-    average(recentCurrent);
-
-  const recentPriorAvg =
-    average(recentPrior);
-
-  /*
-    Early-season shrinkage:
-
-    With only 1-2 current games, we do NOT
-    allow the new season average to completely
-    dominate the projection.
-
-    Current-season weight gradually increases
-    as the player accumulates games.
-  */
+  const recentPriorAvg = average(
+    prior
+      .slice(-5)
+      .map((game) => game.yards)
+  );
 
   const currentGames = current.length;
   const priorGames = prior.length;
 
   let currentWeight = 0;
 
-  if (currentGames === 1) currentWeight = 0.20;
-  else if (currentGames === 2) currentWeight = 0.35;
-  else if (currentGames === 3) currentWeight = 0.50;
-  else if (currentGames === 4) currentWeight = 0.60;
-  else if (currentGames >= 5) currentWeight = 0.70;
+  if (currentGames === 1) {
+    currentWeight = 0.2;
+  } else if (currentGames === 2) {
+    currentWeight = 0.35;
+  } else if (currentGames === 3) {
+    currentWeight = 0.5;
+  } else if (currentGames === 4) {
+    currentWeight = 0.6;
+  } else if (currentGames >= 5) {
+    currentWeight = 0.7;
+  }
 
   if (!priorGames) {
     currentWeight = 1;
   }
 
   const priorWeight =
-    priorGames > 0 ? 1 - currentWeight : 0;
+    priorGames > 0
+      ? 1 - currentWeight
+      : 0;
 
-  const seasonBaseline = weightedAverage([
-    ...(currentAvg !== null
-      ? [
-          {
-            value: currentAvg,
-            weight: currentWeight,
-          },
-        ]
-      : []),
+  const seasonValues: Array<{
+    value: number;
+    weight: number;
+  }> = [];
 
-    ...(priorAvg !== null
-      ? [
-          {
-            value: priorAvg,
-            weight: priorWeight,
-          },
-        ]
-      : []),
-  ]);
+  if (currentAvg !== null) {
+    seasonValues.push({
+      value: currentAvg,
+      weight: currentWeight,
+    });
+  }
 
-  /*
-    Recent form is deliberately a smaller
-    adjustment than the season baseline.
-  */
+  if (priorAvg !== null) {
+    seasonValues.push({
+      value: priorAvg,
+      weight: priorWeight,
+    });
+  }
 
-  const recentBaseline = weightedAverage([
-    ...(recentCurrentAvg !== null
-      ? [
-          {
-            value: recentCurrentAvg,
-            weight:
-              currentGames >= 3 ? 0.65 : 0.40,
-          },
-        ]
-      : []),
+  const seasonBaseline =
+    weightedAverage(seasonValues);
 
-    ...(recentPriorAvg !== null
-      ? [
-          {
-            value: recentPriorAvg,
-            weight:
-              currentGames >= 3 ? 0.35 : 0.60,
-          },
-        ]
-      : []),
-  ]);
+  const recentValues: Array<{
+    value: number;
+    weight: number;
+  }> = [];
+
+  if (recentCurrentAvg !== null) {
+    recentValues.push({
+      value: recentCurrentAvg,
+      weight:
+        currentGames >= 3 ? 0.65 : 0.4,
+    });
+  }
+
+  if (recentPriorAvg !== null) {
+    recentValues.push({
+      value: recentPriorAvg,
+      weight:
+        currentGames >= 3 ? 0.35 : 0.6,
+    });
+  }
+
+  const recentBaseline =
+    weightedAverage(recentValues);
 
   let projection =
     seasonBaseline ??
@@ -374,12 +368,6 @@ function projectPassingYards(player: {
       recentBaseline * 0.25;
   }
 
-  /*
-    Attempt-volume adjustment.
-
-    This is intentionally small.
-  */
-
   if (
     projection !== null &&
     currentAttemptAvg !== null &&
@@ -387,7 +375,8 @@ function projectPassingYards(player: {
     priorAttemptAvg >= 20
   ) {
     const ratio =
-      currentAttemptAvg / priorAttemptAvg;
+      currentAttemptAvg /
+      priorAttemptAvg;
 
     const cappedRatio = Math.min(
       1.15,
@@ -395,7 +384,8 @@ function projectPassingYards(player: {
     );
 
     projection *=
-      1 + (cappedRatio - 1) * 0.25;
+      1 +
+      (cappedRatio - 1) * 0.25;
   }
 
   if (projection === null) {
@@ -435,7 +425,7 @@ function projectPassingYards(player: {
   };
 }
 
-function getEventStart(event: any) {
+function getEventStart(event: any): string | null {
   return (
     event?.status?.startsAt ??
     event?.startsAt ??
@@ -445,7 +435,7 @@ function getEventStart(event: any) {
   );
 }
 
-function isPregame(event: any) {
+function isPregame(event: any): boolean {
   if (event?.status?.started === true) {
     return false;
   }
@@ -471,11 +461,11 @@ function isPregame(event: any) {
   return timestamp > Date.now();
 }
 
-function extractPassingProps(event: any) {
-  const odds =
+function extractPassingProps(event: any): any[] {
+  const odds: any[] =
     event?.odds &&
     typeof event.odds === "object"
-      ? Object.values(event.odds)
+      ? (Object.values(event.odds) as any[])
       : [];
 
   return odds.filter((odd: any) => {
@@ -488,37 +478,53 @@ function extractPassingProps(event: any) {
   });
 }
 
-function sportsbookLines(odd: any) {
+function sportsbookLines(odd: any): any[] {
   const books =
     odd?.byBookmaker &&
     typeof odd.byBookmaker === "object"
       ? odd.byBookmaker
       : {};
 
-  return Object.entries(books)
-    .map(([book, data]: [string, any]) => ({
-      sportsbook: book,
+  const entries = Object.entries(
+    books
+  ) as Array<[string, any]>;
 
-      side: odd.sideID,
+  return entries
+    .map(([book, data]) => {
+      const rawLine =
+        data?.overUnder;
 
-      line:
-        data?.overUnder !== undefined
-          ? num(data.overUnder)
-          : null,
+      const line =
+        rawLine !== undefined &&
+        rawLine !== null
+          ? Number(rawLine)
+          : null;
 
-      odds:
-        data?.odds ?? null,
+      return {
+        sportsbook: book,
 
-      available:
-        data?.available === true,
+        side:
+          odd?.sideID ?? null,
 
-      updated_at:
-        data?.lastUpdatedAt ?? null,
-    }))
+        line:
+          line !== null &&
+          Number.isFinite(line)
+            ? line
+            : null,
+
+        odds:
+          data?.odds ?? null,
+
+        available:
+          data?.available === true,
+
+        updated_at:
+          data?.lastUpdatedAt ?? null,
+      };
+    })
     .filter(
-      (line) =>
-        line.line !== null &&
-        Number.isFinite(line.line)
+      (item) =>
+        item.line !== null
     );
 }
 
@@ -544,6 +550,7 @@ export async function GET() {
       oddsResponse,
     ] = await Promise.all([
       fetchCSV(CURRENT_STATS_URL),
+
       fetchCSV(PRIOR_STATS_URL),
 
       fetch(
@@ -568,156 +575,220 @@ export async function GET() {
       return NextResponse.json(
         {
           success: false,
-          provider: "SportsGameOdds",
-          status: oddsResponse.status,
+          provider:
+            "SportsGameOdds",
+          status:
+            oddsResponse.status,
           error: body,
         },
-        { status: oddsResponse.status }
+        {
+          status:
+            oddsResponse.status,
+        }
       );
     }
 
-    const oddsData =
+    const oddsData: any =
       await oddsResponse.json();
 
-    const events = Array.isArray(
-      oddsData?.data
-    )
-      ? oddsData.data
-      : Array.isArray(oddsData?.events)
-        ? oddsData.events
-        : [];
+    const events: any[] =
+      Array.isArray(oddsData?.data)
+        ? oddsData.data
+        : Array.isArray(
+              oddsData?.events
+            )
+          ? oddsData.events
+          : [];
 
-    const currentGames = passingGames(
-      currentRows,
-      CURRENT_SEASON
-    );
+    const currentGames =
+      passingGames(
+        currentRows,
+        CURRENT_SEASON
+      );
 
-    const priorGames = passingGames(
-      priorRows,
-      PRIOR_SEASON
-    );
+    const priorGames =
+      passingGames(
+        priorRows,
+        PRIOR_SEASON
+      );
 
-    const history = buildPlayerHistory(
-      currentGames,
-      priorGames
-    );
+    const history =
+      buildPlayerHistory(
+        currentGames,
+        priorGames
+      );
 
     const props: any[] = [];
+
     let matchedPlayers = 0;
     let unmatchedPlayers = 0;
+    let pregameEvents = 0;
 
     for (const event of events) {
-      if (!isPregame(event)) continue;
+      if (!isPregame(event)) {
+        continue;
+      }
 
-      const passingProps =
+      pregameEvents++;
+
+      const passingProps: any[] =
         extractPassingProps(event);
 
-      const grouped = new Map<
-        string,
-        any[]
-      >();
+      const grouped =
+        new Map<string, any[]>();
 
       for (const odd of passingProps) {
         const playerID =
-          String(odd.playerID ?? "");
+          String(
+            odd?.playerID ?? ""
+          );
 
-        if (!playerID) continue;
-
-        if (!grouped.has(playerID)) {
-          grouped.set(playerID, []);
+        if (!playerID) {
+          continue;
         }
 
-        grouped.get(playerID)!.push(odd);
+        if (!grouped.has(playerID)) {
+          grouped.set(
+            playerID,
+            []
+          );
+        }
+
+        grouped
+          .get(playerID)!
+          .push(odd);
       }
 
       for (const [
         playerID,
         playerOdds,
       ] of grouped.entries()) {
-        const sample = playerOdds[0];
+        const sample: any =
+          playerOdds[0];
+
+        const marketName =
+          String(
+            sample?.marketName ??
+              ""
+          );
 
         const providerName =
-          sample?.marketName
-            ?.replace(
+          marketName
+            .replace(
               / Passing Yards Over\/Under/i,
               ""
             )
-            ?.trim() ||
-          playerNameFromId(playerID);
+            .replace(
+              / Passing Yards/i,
+              ""
+            )
+            .trim() ||
+          playerNameFromId(
+            playerID
+          );
 
         const key =
-          normalizeName(providerName);
+          normalizeName(
+            providerName
+          );
 
         const player =
           history.get(key);
 
         if (!player) {
           unmatchedPlayers++;
-
           continue;
         }
 
         const projection =
-          projectPassingYards(player);
+          projectPassingYards(
+            player
+          );
 
-        if (!projection) continue;
+        if (!projection) {
+          continue;
+        }
 
         matchedPlayers++;
 
-        const allBookLines =
+        const allBookLines: any[] =
           playerOdds.flatMap(
-            sportsbookLines
+            (odd: any) =>
+              sportsbookLines(
+                odd
+              )
           );
 
         const availableLines =
           allBookLines.filter(
-            (line) => line.available
+            (line: any) =>
+              line.available ===
+              true
           );
 
-        /*
-          Build one representative market line
-          from currently available sportsbooks.
-
-          We use the median line rather than
-          cherry-picking the easiest book.
-        */
-
-        const uniqueAvailableLines =
-          Array.from(
-            new Set(
-              availableLines.map(
-                (line) => line.line
-              )
+        const numericLines =
+          availableLines
+            .map(
+              (line: any) =>
+                Number(
+                  line.line
+                )
             )
-          ).sort((a, b) => a - b);
+            .filter(
+              (line: number) =>
+                Number.isFinite(
+                  line
+                )
+            );
+
+        const uniqueLines =
+          Array.from(
+            new Set<number>(
+              numericLines
+            )
+          ).sort(
+            (a, b) => a - b
+          );
 
         let consensusLine:
           | number
           | null = null;
 
-        if (uniqueAvailableLines.length) {
-          const middle = Math.floor(
-            uniqueAvailableLines.length / 2
-          );
+        if (
+          uniqueLines.length
+        ) {
+          const middle =
+            Math.floor(
+              uniqueLines.length /
+                2
+            );
 
           if (
-            uniqueAvailableLines.length % 2 ===
+            uniqueLines.length %
+              2 ===
             1
           ) {
             consensusLine =
-              uniqueAvailableLines[middle];
+              uniqueLines[
+                middle
+              ];
           } else {
             consensusLine =
               (
-                uniqueAvailableLines[
+                uniqueLines[
                   middle - 1
                 ] +
-                uniqueAvailableLines[middle]
+                uniqueLines[
+                  middle
+                ]
               ) / 2;
           }
         }
 
-        if (consensusLine === null) {
+        if (
+          consensusLine ===
+          null
+        ) {
           continue;
         }
 
@@ -725,36 +796,50 @@ export async function GET() {
           projection.projection -
           consensusLine;
 
-        let lean = "PASS";
+        let lean:
+          | "OVER"
+          | "UNDER"
+          | "PASS" =
+          "PASS";
 
-        if (difference >= 8) {
+        if (
+          difference >= 8
+        ) {
           lean = "OVER";
-        } else if (difference <= -8) {
+        } else if (
+          difference <= -8
+        ) {
           lean = "UNDER";
         }
 
-        let review = "PASS";
-
         const absDifference =
-          Math.abs(difference);
+          Math.abs(
+            difference
+          );
 
-        if (absDifference >= 20) {
-          review = "STRONG REVIEW";
-        } else if (absDifference >= 12) {
+        let review =
+          "PASS";
+
+        if (
+          absDifference >= 20
+        ) {
+          review =
+            "STRONG REVIEW";
+        } else if (
+          absDifference >= 12
+        ) {
           review = "REVIEW";
-        } else if (absDifference >= 8) {
+        } else if (
+          absDifference >= 8
+        ) {
           review = "WATCH";
         }
 
-        /*
-          Early-season sample guardrail.
-          No "strong" designation based only
-          on tiny current-season samples.
-        */
-
         if (
-          projection.current_games < 3 &&
-          review === "STRONG REVIEW"
+          projection.current_games <
+            3 &&
+          review ===
+            "STRONG REVIEW"
         ) {
           review = "REVIEW";
         }
@@ -766,40 +851,54 @@ export async function GET() {
             null,
 
           start_time:
-            getEventStart(event),
+            getEventStart(
+              event
+            ),
 
           matchup: {
             away:
-              event?.teams?.away?.names
+              event?.teams
+                ?.away?.names
                 ?.short ??
-              event?.teams?.away?.names
+              event?.teams
+                ?.away?.names
                 ?.long ??
               null,
 
             home:
-              event?.teams?.home?.names
+              event?.teams
+                ?.home?.names
                 ?.short ??
-              event?.teams?.home?.names
+              event?.teams
+                ?.home?.names
                 ?.long ??
               null,
           },
 
-          player_id: playerID,
+          player_id:
+            playerID,
 
           player_name:
             player.player_name ||
             providerName,
 
-          market: "PASSING YARDS",
+          market:
+            "PASSING YARDS",
 
           consensus_line:
-            round(consensusLine, 1),
+            round(
+              consensusLine,
+              1
+            ),
 
           rdg_projection:
             projection.projection,
 
           model_vs_line:
-            round(difference, 1),
+            round(
+              difference,
+              1
+            ),
 
           lean,
 
@@ -839,19 +938,24 @@ export async function GET() {
 
     props.sort(
       (a, b) =>
-        Math.abs(b.model_vs_line) -
-        Math.abs(a.model_vs_line)
+        Math.abs(
+          b.model_vs_line
+        ) -
+        Math.abs(
+          a.model_vs_line
+        )
     );
 
     return NextResponse.json({
       success: true,
 
       version:
-        "1.0-rdg-passing-yards-projection",
+        "1.1-rdg-passing-yards-projection",
 
       sport: "NFL",
 
-      market: "passing_yards",
+      market:
+        "passing_yards",
 
       model_status:
         "Projection Model / Probability Not Yet Calibrated",
@@ -863,10 +967,10 @@ export async function GET() {
         prior_season:
           PRIOR_SEASON,
 
-        current_data:
-          "nflverse weekly player statistics",
+        stats_source:
+          "nflverse",
 
-        market_data:
+        market_source:
           "SportsGameOdds",
 
         projection:
@@ -888,6 +992,9 @@ export async function GET() {
       sportsbook_events_found:
         events.length,
 
+      pregame_events_found:
+        pregameEvents,
+
       matched_prop_players:
         matchedPlayers,
 
@@ -896,7 +1003,9 @@ export async function GET() {
 
       qualifying_reviews:
         props.filter(
-          (prop) => prop.review !== "PASS"
+          (prop) =>
+            prop.review !==
+            "PASS"
         ).length,
 
       props,
