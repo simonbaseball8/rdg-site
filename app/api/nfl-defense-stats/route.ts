@@ -16,10 +16,10 @@ type Defense = {
   season: number;
   games: Set<string>;
 
-  passPlays: number;
+  passAttempts: number;
   passYards: number;
 
-  rushPlays: number;
+  rushAttempts: number;
   rushYards: number;
 
   sacks: number;
@@ -30,11 +30,15 @@ type Defense = {
   totalYards: number;
 };
 
-function txt(v: any) {
+/* -------------------------------------------------- */
+/* HELPERS                                            */
+/* -------------------------------------------------- */
+
+function txt(v: any): string {
   return String(v ?? "").trim();
 }
 
-function n(v: any) {
+function num(v: any): number {
   const x = Number(v);
   return Number.isFinite(x) ? x : 0;
 }
@@ -50,7 +54,7 @@ function clamp(v: number, min: number, max: number) {
   return Math.max(min, Math.min(max, v));
 }
 
-function team(v: any) {
+function normalizeTeam(v: any): string {
   const t = txt(v).toUpperCase();
 
   const aliases: Record<string, string> = {
@@ -82,31 +86,33 @@ function parseCSV(input: string): Row[] {
   let quoted = false;
 
   for (let i = 0; i < input.length; i++) {
-    const c = input[i];
+    const char = input[i];
 
-    if (c === '"') {
+    if (char === '"') {
       if (quoted && input[i + 1] === '"') {
         value += '"';
         i++;
       } else {
         quoted = !quoted;
       }
-    } else if (c === "," && !quoted) {
+    } else if (char === "," && !quoted) {
       row.push(value);
       value = "";
-    } else if ((c === "\n" || c === "\r") && !quoted) {
-      if (c === "\r" && input[i + 1] === "\n") i++;
+    } else if ((char === "\n" || char === "\r") && !quoted) {
+      if (char === "\r" && input[i + 1] === "\n") {
+        i++;
+      }
 
       row.push(value);
 
-      if (row.some((x) => x.length)) {
+      if (row.some((x) => x.length > 0)) {
         rows.push(row);
       }
 
       row = [];
       value = "";
     } else {
-      value += c;
+      value += char;
     }
   }
 
@@ -117,21 +123,21 @@ function parseCSV(input: string): Row[] {
 
   if (!rows.length) return [];
 
-  const headers = rows[0];
+  const headers = rows[0].map((h) => h.trim());
 
   return rows.slice(1).map((values) => {
-    const out: Row = {};
+    const obj: Row = {};
 
-    headers.forEach((header, i) => {
-      out[header] = values[i] ?? "";
+    headers.forEach((header, index) => {
+      obj[header] = values[index] ?? "";
     });
 
-    return out;
+    return obj;
   });
 }
 
 /* -------------------------------------------------- */
-/* LOAD PBP                                           */
+/* LOAD NFLVERSE PBP                                  */
 /* -------------------------------------------------- */
 
 async function loadPBP(season: number) {
@@ -145,31 +151,26 @@ async function loadPBP(season: number) {
     );
   }
 
-  /*
-    GitHub normally decompresses gzip automatically through fetch.
-    If the response is still compressed in your Vercel environment,
-    we'll see that immediately from the route error/result.
-  */
-
   const body = await response.text();
 
   return parseCSV(body);
 }
 
 /* -------------------------------------------------- */
-/* AGGREGATION                                        */
+/* EMPTY DEFENSE                                      */
 /* -------------------------------------------------- */
 
-function emptyDefense(teamName: string, season: number): Defense {
+function emptyDefense(team: string, season: number): Defense {
   return {
-    team: teamName,
+    team,
     season,
-    games: new Set(),
 
-    passPlays: 0,
+    games: new Set<string>(),
+
+    passAttempts: 0,
     passYards: 0,
 
-    rushPlays: 0,
+    rushAttempts: 0,
     rushYards: 0,
 
     sacks: 0,
@@ -181,72 +182,126 @@ function emptyDefense(teamName: string, season: number): Defense {
   };
 }
 
+/* -------------------------------------------------- */
+/* AGGREGATE DEFENSE                                  */
+/* -------------------------------------------------- */
+
 function aggregateDefense(rows: Row[], season: number) {
   const defenses = new Map<string, Defense>();
 
-  function get(defTeam: string) {
-    if (!defenses.has(defTeam)) {
-      defenses.set(defTeam, emptyDefense(defTeam, season));
+  function getDefense(team: string) {
+    if (!defenses.has(team)) {
+      defenses.set(team, emptyDefense(team, season));
     }
 
-    return defenses.get(defTeam)!;
+    return defenses.get(team)!;
   }
 
   for (const row of rows) {
-    if (n(row.season) !== season) continue;
+    /*
+      IMPORTANT:
 
-    if (txt(row.season_type).toUpperCase() !== "REG") continue;
+      Each nflverse PBP file is already season-specific.
 
-    const defTeam = team(row.defteam);
+      We therefore DO NOT filter using row.season.
+    */
+
+    const seasonType = txt(row.season_type).toUpperCase();
+
+    if (seasonType && seasonType !== "REG") {
+      continue;
+    }
+
+    const defensiveTeam = normalizeTeam(row.defteam);
     const gameID = txt(row.game_id);
 
-    if (!defTeam || !gameID) continue;
+    if (!defensiveTeam || !gameID) {
+      continue;
+    }
 
-    const defense = get(defTeam);
+    const defense = getDefense(defensiveTeam);
 
     defense.games.add(gameID);
 
-    const pass = n(row.pass_attempt) === 1;
-    const rush = n(row.rush_attempt) === 1;
-    const sack = n(row.sack) === 1;
+    const playType = txt(row.play_type).toLowerCase();
+
+    const sack =
+      num(row.sack) === 1;
+
+    const interception =
+      num(row.interception) === 1;
+
+    const fumbleLost =
+      num(row.fumble_lost) === 1;
 
     /*
-      nflfastR passing_yards / rushing_yards are play-level
-      yardage variables.
+      PASS PLAYS
 
-      Sacks are kept separate from normal pass attempts here.
+      We use official play_type rather than relying only
+      on pass_attempt flags.
+
+      Sacks are NOT counted as pass attempts for YPA,
+      but they are tracked separately.
     */
 
-    if (pass) {
-      defense.passPlays++;
-      defense.passYards += n(row.passing_yards);
+    if (playType === "pass" && !sack) {
+      defense.passAttempts += 1;
 
-      defense.totalPlays++;
-      defense.totalYards += n(row.passing_yards);
+      const yards =
+        num(row.passing_yards) ||
+        num(row.yards_gained);
+
+      defense.passYards += yards;
+
+      defense.totalPlays += 1;
+      defense.totalYards += yards;
     }
 
-    if (rush) {
-      defense.rushPlays++;
-      defense.rushYards += n(row.rushing_yards);
+    /*
+      RUSH PLAYS
+    */
 
-      defense.totalPlays++;
-      defense.totalYards += n(row.rushing_yards);
+    if (playType === "run") {
+      defense.rushAttempts += 1;
+
+      const yards =
+        num(row.rushing_yards) ||
+        num(row.yards_gained);
+
+      defense.rushYards += yards;
+
+      defense.totalPlays += 1;
+      defense.totalYards += yards;
     }
+
+    /*
+      SACKS
+    */
 
     if (sack) {
-      defense.sacks++;
+      defense.sacks += 1;
+
+      /*
+        Sacks count as offensive plays for overall
+        yards/play, but not normal pass attempts.
+      */
+
+      defense.totalPlays += 1;
+
+      defense.totalYards +=
+        num(row.yards_gained);
     }
 
     /*
-      Defensive takeaways.
+      TAKEAWAYS
     */
 
-    if (n(row.interception) === 1) {
-      defense.interceptions++;
+    if (interception) {
+      defense.interceptions += 1;
     }
 
-    if (n(row.fumble_lost) === 1) {
-      defense.fumblesLost++;
+    if (fumbleLost) {
+      defense.fumblesLost += 1;
     }
   }
 
@@ -254,64 +309,96 @@ function aggregateDefense(rows: Row[], season: number) {
 }
 
 /* -------------------------------------------------- */
-/* METRICS                                            */
+/* TEAM METRICS                                       */
 /* -------------------------------------------------- */
 
-function metrics(d: Defense | null) {
-  if (!d) return null;
+function getMetrics(defense: Defense | null) {
+  if (!defense) return null;
 
-  const games = d.games.size;
+  const games = defense.games.size;
 
   if (!games) return null;
 
   const passYPG =
-    d.passYards / games;
-
-  const rushYPG =
-    d.rushYards / games;
+    defense.passYards / games;
 
   const passYPA =
-    d.passPlays > 0
-      ? d.passYards / d.passPlays
+    defense.passAttempts > 0
+      ? defense.passYards / defense.passAttempts
       : null;
 
+  const rushYPG =
+    defense.rushYards / games;
+
   const rushYPC =
-    d.rushPlays > 0
-      ? d.rushYards / d.rushPlays
+    defense.rushAttempts > 0
+      ? defense.rushYards / defense.rushAttempts
       : null;
 
   const sacksPG =
-    d.sacks / games;
+    defense.sacks / games;
 
   const takeaways =
-    d.interceptions +
-    d.fumblesLost;
+    defense.interceptions +
+    defense.fumblesLost;
 
   const takeawaysPG =
     takeaways / games;
 
   const yardsPerPlay =
-    d.totalPlays > 0
-      ? d.totalYards / d.totalPlays
+    defense.totalPlays > 0
+      ? defense.totalYards / defense.totalPlays
       : null;
 
   return {
     games,
 
-    pass_yards_allowed_per_game: passYPG,
-    pass_yards_per_attempt_allowed: passYPA,
+    pass_attempts_faced:
+      defense.passAttempts,
 
-    rush_yards_allowed_per_game: rushYPG,
-    rush_yards_per_carry_allowed: rushYPC,
+    pass_yards_allowed:
+      defense.passYards,
 
-    sacks_per_game: sacksPG,
+    pass_yards_allowed_per_game:
+      passYPG,
 
-    interceptions: d.interceptions,
-    fumbles_lost_forced: d.fumblesLost,
+    pass_yards_per_attempt_allowed:
+      passYPA,
 
-    takeaways_per_game: takeawaysPG,
+    rush_attempts_faced:
+      defense.rushAttempts,
 
-    yards_per_play_allowed: yardsPerPlay,
+    rush_yards_allowed:
+      defense.rushYards,
+
+    rush_yards_allowed_per_game:
+      rushYPG,
+
+    rush_yards_per_carry_allowed:
+      rushYPC,
+
+    sacks:
+      defense.sacks,
+
+    sacks_per_game:
+      sacksPG,
+
+    interceptions:
+      defense.interceptions,
+
+    fumbles_lost_forced:
+      defense.fumblesLost,
+
+    takeaways,
+
+    takeaways_per_game:
+      takeawaysPG,
+
+    total_defensive_plays:
+      defense.totalPlays,
+
+    yards_per_play_allowed:
+      yardsPerPlay,
   };
 }
 
@@ -319,243 +406,301 @@ function metrics(d: Defense | null) {
 /* LEAGUE AVERAGES                                    */
 /* -------------------------------------------------- */
 
-function avg(values: Array<number | null>) {
-  const good = values.filter(
-    (x): x is number =>
-      x !== null &&
-      Number.isFinite(x)
+function average(values: Array<number | null>) {
+  const valid = values.filter(
+    (value): value is number =>
+      value !== null &&
+      Number.isFinite(value)
   );
 
-  if (!good.length) return null;
+  if (!valid.length) return null;
 
   return (
-    good.reduce((a, b) => a + b, 0) /
-    good.length
+    valid.reduce((sum, value) => sum + value, 0) /
+    valid.length
   );
 }
 
-function leagueAverage(
+function getLeagueAverages(
   defenses: Map<string, Defense>
 ) {
-  const all = Array.from(defenses.values())
-    .map(metrics)
+  const metrics = Array.from(defenses.values())
+    .map((defense) => getMetrics(defense))
     .filter(Boolean) as NonNullable<
-    ReturnType<typeof metrics>
+    ReturnType<typeof getMetrics>
   >[];
 
   return {
     pass_yards_allowed_per_game:
-      avg(
-        all.map(
-          (x) =>
-            x.pass_yards_allowed_per_game
+      average(
+        metrics.map(
+          (m) => m.pass_yards_allowed_per_game
         )
       ),
 
     pass_yards_per_attempt_allowed:
-      avg(
-        all.map(
-          (x) =>
-            x.pass_yards_per_attempt_allowed
+      average(
+        metrics.map(
+          (m) => m.pass_yards_per_attempt_allowed
         )
       ),
 
     rush_yards_allowed_per_game:
-      avg(
-        all.map(
-          (x) =>
-            x.rush_yards_allowed_per_game
+      average(
+        metrics.map(
+          (m) => m.rush_yards_allowed_per_game
         )
       ),
 
     rush_yards_per_carry_allowed:
-      avg(
-        all.map(
-          (x) =>
-            x.rush_yards_per_carry_allowed
+      average(
+        metrics.map(
+          (m) => m.rush_yards_per_carry_allowed
         )
       ),
 
     sacks_per_game:
-      avg(
-        all.map(
-          (x) =>
-            x.sacks_per_game
+      average(
+        metrics.map(
+          (m) => m.sacks_per_game
         )
       ),
 
     takeaways_per_game:
-      avg(
-        all.map(
-          (x) =>
-            x.takeaways_per_game
+      average(
+        metrics.map(
+          (m) => m.takeaways_per_game
         )
       ),
 
     yards_per_play_allowed:
-      avg(
-        all.map(
-          (x) =>
-            x.yards_per_play_allowed
+      average(
+        metrics.map(
+          (m) => m.yards_per_play_allowed
         )
       ),
   };
 }
 
 /* -------------------------------------------------- */
-/* RATINGS                                            */
+/* RATING HELPERS                                     */
 /* -------------------------------------------------- */
 
-function lowerBetter(
+function lowerIsBetter(
   value: number | null,
-  league: number | null
+  leagueAverage: number | null
 ) {
   if (
     value === null ||
-    league === null ||
+    leagueAverage === null ||
     value <= 0 ||
-    league <= 0
+    leagueAverage <= 0
   ) {
     return null;
   }
 
   return clamp(
-    (league / value) * 100,
+    (leagueAverage / value) * 100,
     60,
     140
   );
 }
 
-function higherBetter(
+function higherIsBetter(
   value: number | null,
-  league: number | null
+  leagueAverage: number | null
 ) {
   if (
     value === null ||
-    league === null ||
-    league <= 0
+    leagueAverage === null ||
+    leagueAverage <= 0
   ) {
     return null;
   }
 
   return clamp(
-    (value / league) * 100,
+    (value / leagueAverage) * 100,
     60,
     140
   );
 }
 
-function ratings(
-  d: Defense | null,
-  league: ReturnType<typeof leagueAverage>
+function weightedAverage(
+  parts: Array<{
+    value: number | null;
+    weight: number;
+  }>
 ) {
-  const m = metrics(d);
-
-  if (!m) return null;
-
-  const passYards = lowerBetter(
-    m.pass_yards_allowed_per_game,
-    league.pass_yards_allowed_per_game
-  );
-
-  const passEfficiency = lowerBetter(
-    m.pass_yards_per_attempt_allowed,
-    league.pass_yards_per_attempt_allowed
-  );
-
-  const rushYards = lowerBetter(
-    m.rush_yards_allowed_per_game,
-    league.rush_yards_allowed_per_game
-  );
-
-  const rushEfficiency = lowerBetter(
-    m.rush_yards_per_carry_allowed,
-    league.rush_yards_per_carry_allowed
-  );
-
-  const sacks = higherBetter(
-    m.sacks_per_game,
-    league.sacks_per_game
-  );
-
-  const takeaways = higherBetter(
-    m.takeaways_per_game,
-    league.takeaways_per_game
-  );
-
-  const ypp = lowerBetter(
-    m.yards_per_play_allowed,
-    league.yards_per_play_allowed
-  );
-
-  const passParts = [
-    { value: passEfficiency, weight: 0.50 },
-    { value: passYards, weight: 0.30 },
-    { value: sacks, weight: 0.20 },
-  ].filter(
-    (x): x is { value: number; weight: number } =>
-      x.value !== null
-  );
-
-  const rushParts = [
-    { value: rushEfficiency, weight: 0.65 },
-    { value: rushYards, weight: 0.35 },
-  ].filter(
-    (x): x is { value: number; weight: number } =>
-      x.value !== null
-  );
-
-  const overallParts = [
-    { value: passEfficiency, weight: 0.25 },
-    { value: rushEfficiency, weight: 0.20 },
-    { value: ypp, weight: 0.25 },
-    { value: sacks, weight: 0.15 },
-    { value: takeaways, weight: 0.15 },
-  ].filter(
-    (x): x is { value: number; weight: number } =>
-      x.value !== null
-  );
-
-  function weighted(
-    parts: Array<{
+  const valid = parts.filter(
+    (
+      part
+    ): part is {
       value: number;
       weight: number;
-    }>
-  ) {
-    if (!parts.length) return null;
+    } => part.value !== null
+  );
 
-    const totalWeight =
-      parts.reduce(
-        (s, x) => s + x.weight,
-        0
-      );
+  if (!valid.length) return null;
 
-    return (
-      parts.reduce(
-        (s, x) =>
-          s +
-          x.value *
-            (x.weight / totalWeight),
-        0
-      )
+  const totalWeight =
+    valid.reduce(
+      (sum, part) => sum + part.weight,
+      0
     );
-  }
+
+  return valid.reduce(
+    (sum, part) =>
+      sum +
+      part.value *
+        (part.weight / totalWeight),
+    0
+  );
+}
+
+/* -------------------------------------------------- */
+/* DEFENSE RATINGS                                    */
+/* -------------------------------------------------- */
+
+function getRatings(
+  defense: Defense | null,
+  league: ReturnType<typeof getLeagueAverages>
+) {
+  const metrics = getMetrics(defense);
+
+  if (!metrics) return null;
+
+  const passYardsRating =
+    lowerIsBetter(
+      metrics.pass_yards_allowed_per_game,
+      league.pass_yards_allowed_per_game
+    );
+
+  const passEfficiencyRating =
+    lowerIsBetter(
+      metrics.pass_yards_per_attempt_allowed,
+      league.pass_yards_per_attempt_allowed
+    );
+
+  const rushYardsRating =
+    lowerIsBetter(
+      metrics.rush_yards_allowed_per_game,
+      league.rush_yards_allowed_per_game
+    );
+
+  const rushEfficiencyRating =
+    lowerIsBetter(
+      metrics.rush_yards_per_carry_allowed,
+      league.rush_yards_per_carry_allowed
+    );
+
+  const sackRating =
+    higherIsBetter(
+      metrics.sacks_per_game,
+      league.sacks_per_game
+    );
+
+  const takeawayRating =
+    higherIsBetter(
+      metrics.takeaways_per_game,
+      league.takeaways_per_game
+    );
+
+  const yardsPerPlayRating =
+    lowerIsBetter(
+      metrics.yards_per_play_allowed,
+      league.yards_per_play_allowed
+    );
+
+  const passDefense =
+    weightedAverage([
+      {
+        value: passEfficiencyRating,
+        weight: 0.5,
+      },
+      {
+        value: passYardsRating,
+        weight: 0.3,
+      },
+      {
+        value: sackRating,
+        weight: 0.2,
+      },
+    ]);
+
+  const rushDefense =
+    weightedAverage([
+      {
+        value: rushEfficiencyRating,
+        weight: 0.65,
+      },
+      {
+        value: rushYardsRating,
+        weight: 0.35,
+      },
+    ]);
+
+  const overallDefense =
+    weightedAverage([
+      {
+        value: passEfficiencyRating,
+        weight: 0.25,
+      },
+      {
+        value: rushEfficiencyRating,
+        weight: 0.2,
+      },
+      {
+        value: yardsPerPlayRating,
+        weight: 0.25,
+      },
+      {
+        value: sackRating,
+        weight: 0.15,
+      },
+      {
+        value: takeawayRating,
+        weight: 0.15,
+      },
+    ]);
 
   return {
-    pass: weighted(passParts),
-    rush: weighted(rushParts),
-    overall: weighted(overallParts),
+    pass: passDefense,
+    rush: rushDefense,
+    overall: overallDefense,
+
+    components: {
+      pass_yards:
+        passYardsRating,
+
+      pass_efficiency:
+        passEfficiencyRating,
+
+      rush_yards:
+        rushYardsRating,
+
+      rush_efficiency:
+        rushEfficiencyRating,
+
+      sacks:
+        sackRating,
+
+      takeaways:
+        takeawayRating,
+
+      yards_per_play:
+        yardsPerPlayRating,
+    },
   };
 }
 
 /* -------------------------------------------------- */
-/* EARLY-SEASON STABILIZATION                         */
+/* STABILIZATION                                      */
 /* -------------------------------------------------- */
 
 function blend(
   current: number | null,
   prior: number | null,
-  games: number
+  currentGames: number
 ) {
   if (current === null && prior === null) {
     return null;
@@ -565,77 +710,125 @@ function blend(
   if (prior === null) return current;
 
   const currentWeight =
-    games / (games + 4);
+    currentGames /
+    (currentGames + 4);
+
+  const priorWeight =
+    1 - currentWeight;
 
   return (
     current * currentWeight +
-    prior * (1 - currentWeight)
+    prior * priorWeight
   );
 }
 
-function label(value: number | null) {
-  if (value === null) return "NO_DATA";
+function ratingLabel(value: number | null) {
+  if (value === null) {
+    return "NO_DATA";
+  }
 
-  if (value >= 115) return "ELITE";
-  if (value >= 105) return "STRONG";
+  if (value >= 115) {
+    return "ELITE";
+  }
 
-  if (value <= 85) return "WEAK";
-  if (value <= 95) return "BELOW_AVERAGE";
+  if (value >= 105) {
+    return "STRONG";
+  }
+
+  if (value <= 85) {
+    return "WEAK";
+  }
+
+  if (value <= 95) {
+    return "BELOW_AVERAGE";
+  }
 
   return "AVERAGE";
 }
 
 /* -------------------------------------------------- */
-/* OUTPUT FORMAT                                      */
+/* CLEAN OUTPUT                                       */
 /* -------------------------------------------------- */
 
-function cleanMetrics(
-  d: Defense | null
-) {
-  const m = metrics(d);
+function cleanMetrics(defense: Defense | null) {
+  const metrics = getMetrics(defense);
 
-  if (!m) return null;
+  if (!metrics) return null;
 
   return {
-    games: m.games,
+    games:
+      metrics.games,
+
+    pass_attempts_faced:
+      metrics.pass_attempts_faced,
+
+    pass_yards_allowed:
+      round(
+        metrics.pass_yards_allowed,
+        0
+      ),
 
     pass_yards_allowed_per_game:
       round(
-        m.pass_yards_allowed_per_game
+        metrics.pass_yards_allowed_per_game
       ),
 
     pass_yards_per_attempt_allowed:
       round(
-        m.pass_yards_per_attempt_allowed,
+        metrics.pass_yards_per_attempt_allowed,
         2
+      ),
+
+    rush_attempts_faced:
+      metrics.rush_attempts_faced,
+
+    rush_yards_allowed:
+      round(
+        metrics.rush_yards_allowed,
+        0
       ),
 
     rush_yards_allowed_per_game:
       round(
-        m.rush_yards_allowed_per_game
+        metrics.rush_yards_allowed_per_game
       ),
 
     rush_yards_per_carry_allowed:
       round(
-        m.rush_yards_per_carry_allowed,
+        metrics.rush_yards_per_carry_allowed,
         2
       ),
+
+    sacks:
+      metrics.sacks,
 
     sacks_per_game:
       round(
-        m.sacks_per_game,
+        metrics.sacks_per_game,
         2
       ),
+
+    interceptions:
+      metrics.interceptions,
+
+    fumbles_lost_forced:
+      metrics.fumbles_lost_forced,
+
+    takeaways:
+      metrics.takeaways,
 
     takeaways_per_game:
       round(
-        m.takeaways_per_game,
+        metrics.takeaways_per_game,
         2
       ),
 
+    total_defensive_plays:
+      metrics.total_defensive_plays,
+
     yards_per_play_allowed:
       round(
-        m.yards_per_play_allowed,
+        metrics.yards_per_play_allowed,
         2
       ),
   };
@@ -647,91 +840,121 @@ function cleanMetrics(
 
 export async function GET() {
   try {
-    const [
-      currentRows,
-      priorRows,
-    ] = await Promise.all([
-      loadPBP(CURRENT_SEASON),
-      loadPBP(PRIOR_SEASON),
-    ]);
+    const [currentRows, priorRows] =
+      await Promise.all([
+        loadPBP(CURRENT_SEASON),
+        loadPBP(PRIOR_SEASON),
+      ]);
 
-    const current =
+    const currentDefense =
       aggregateDefense(
         currentRows,
         CURRENT_SEASON
       );
 
-    const prior =
+    const priorDefense =
       aggregateDefense(
         priorRows,
         PRIOR_SEASON
       );
 
     const currentLeague =
-      leagueAverage(current);
+      getLeagueAverages(
+        currentDefense
+      );
 
     const priorLeague =
-      leagueAverage(prior);
+      getLeagueAverages(
+        priorDefense
+      );
 
-    const teams = Array.from(
+    const allTeams = Array.from(
       new Set([
-        ...current.keys(),
-        ...prior.keys(),
-      ])
-    )
-      .sort()
-      .map((teamName) => {
-        const currentDefense =
-          current.get(teamName) ?? null;
+        ...Array.from(
+          currentDefense.keys()
+        ),
 
-        const priorDefense =
-          prior.get(teamName) ?? null;
+        ...Array.from(
+          priorDefense.keys()
+        ),
+      ])
+    ).sort();
+
+    const teams = allTeams.map(
+      (teamName) => {
+        const current =
+          currentDefense.get(
+            teamName
+          ) ?? null;
+
+        const prior =
+          priorDefense.get(
+            teamName
+          ) ?? null;
 
         const currentMetrics =
-          metrics(currentDefense);
+          getMetrics(current);
 
         const currentRatings =
-          ratings(
-            currentDefense,
+          getRatings(
+            current,
             currentLeague
           );
 
         const priorRatings =
-          ratings(
-            priorDefense,
+          getRatings(
+            prior,
             priorLeague
           );
 
         const games =
           currentMetrics?.games ?? 0;
 
-        const pass = blend(
-          currentRatings?.pass ?? null,
-          priorRatings?.pass ?? null,
-          games
-        );
-
-        const rush = blend(
-          currentRatings?.rush ?? null,
-          priorRatings?.rush ?? null,
-          games
-        );
-
-        const overall = blend(
-          currentRatings?.overall ?? null,
-          priorRatings?.overall ?? null,
-          games
-        );
-
         const currentWeight =
           games > 0
-            ? games / (games + 4)
+            ? games /
+              (games + 4)
             : 0;
 
-        return {
-          team: teamName,
+        const passRating =
+          blend(
+            currentRatings?.pass ??
+              null,
 
-          current_games: games,
+            priorRatings?.pass ??
+              null,
+
+            games
+          );
+
+        const rushRating =
+          blend(
+            currentRatings?.rush ??
+              null,
+
+            priorRatings?.rush ??
+              null,
+
+            games
+          );
+
+        const overallRating =
+          blend(
+            currentRatings?.overall ??
+              null,
+
+            priorRatings?.overall ??
+              null,
+
+            games
+          );
+
+        return {
+          team:
+            teamName,
+
+          current_games:
+            games,
 
           stabilization: {
             current_2026_weight_pct:
@@ -748,44 +971,59 @@ export async function GET() {
 
           ratings: {
             overall_defense:
-              round(overall),
+              round(
+                overallRating
+              ),
 
             overall_label:
-              label(overall),
+              ratingLabel(
+                overallRating
+              ),
 
             pass_defense:
-              round(pass),
+              round(
+                passRating
+              ),
 
             pass_label:
-              label(pass),
+              ratingLabel(
+                passRating
+              ),
 
             rush_defense:
-              round(rush),
+              round(
+                rushRating
+              ),
 
             rush_label:
-              label(rush),
+              ratingLabel(
+                rushRating
+              ),
           },
 
           current_2026:
             cleanMetrics(
-              currentDefense
+              current
             ),
 
           prior_2025:
             cleanMetrics(
-              priorDefense
+              prior
             ),
 
           model_adjustment_active:
             false,
         };
-      });
+      }
+    );
 
     teams.sort(
       (a, b) =>
-        (b.ratings.overall_defense ??
+        (b.ratings
+          .overall_defense ??
           -999) -
-        (a.ratings.overall_defense ??
+        (a.ratings
+          .overall_defense ??
           -999)
     );
 
@@ -793,7 +1031,7 @@ export async function GET() {
       success: true,
 
       version:
-        "1.1-pbp-defense",
+        "1.2-pbp-defense-fixed",
 
       seasons: {
         current:
@@ -814,14 +1052,14 @@ export async function GET() {
           "better defense",
 
         pass_defense_inputs: [
-          "passing yards allowed",
-          "yards per pass attempt",
-          "sacks",
+          "passing yards allowed per game",
+          "yards allowed per pass attempt",
+          "sacks per game",
         ],
 
         rush_defense_inputs: [
-          "rushing yards allowed",
-          "yards per carry",
+          "rushing yards allowed per game",
+          "yards allowed per carry",
         ],
 
         overall_inputs: [
@@ -853,9 +1091,13 @@ export async function GET() {
             ).map(
               ([key, value]) => [
                 key,
+
                 value === null
                   ? null
-                  : round(value, 2),
+                  : round(
+                      value,
+                      2
+                    ),
               ]
             )
           ),
@@ -867,20 +1109,30 @@ export async function GET() {
             ).map(
               ([key, value]) => [
                 key,
+
                 value === null
                   ? null
-                  : round(value, 2),
+                  : round(
+                      value,
+                      2
+                    ),
               ]
             )
           ),
       },
 
-      pbp_rows: {
-        current_2026:
+      diagnostics: {
+        current_pbp_rows:
           currentRows.length,
 
-        prior_2025:
+        prior_pbp_rows:
           priorRows.length,
+
+        current_defensive_teams:
+          currentDefense.size,
+
+        prior_defensive_teams:
+          priorDefense.size,
       },
 
       teams_found:
@@ -890,7 +1142,7 @@ export async function GET() {
 
       validation_status: {
         defense_data_connected:
-          true,
+          teams.length > 0,
 
         passing_v2_backtest_complete:
           false,
@@ -899,18 +1151,18 @@ export async function GET() {
           false,
 
         message:
-          "Defensive ratings remain descriptive until they are tested against the frozen RDG Passing V2 model.",
+          "Defense is connected, but it will not alter RDG projections until held-out backtesting shows an improvement over frozen Passing V2.",
       },
 
       next_step:
-        "Backtest pass-defense features against frozen Passing V2.",
+        "Backtest individual defensive features against frozen Passing V2 before activating defense in live projections.",
 
       generated_at:
         new Date().toISOString(),
     });
   } catch (error: any) {
     console.error(
-      "NFL defense stats v1.1 error:",
+      "NFL defense stats error:",
       error
     );
 
@@ -919,7 +1171,7 @@ export async function GET() {
         success: false,
 
         version:
-          "1.1-pbp-defense",
+          "1.2-pbp-defense-fixed",
 
         error:
           error?.message ||
