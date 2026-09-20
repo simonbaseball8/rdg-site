@@ -305,6 +305,8 @@ type NHLBetCandidate = {
 
 type BetCandidate = {
   event_id: string;
+  correlation_key: string;
+  market_type: "spread" | "passing_prop";
   matchup: string;
   team: string;
   line: number;
@@ -318,6 +320,11 @@ type BetCandidate = {
   historical_correct: number;
   historical_bucket: string;
   score: number;
+  player_name?: string;
+  selection?: "OVER" | "UNDER";
+  model_probability?: number;
+  market_probability?: number | null;
+  review?: string;
 };
 
 function diversifiedSelection<T>(items: T[], count: number, offset: number, stride: number) {
@@ -727,6 +734,11 @@ const [cfbError, setCfbError] =
         return {
           event_id: game.event_id,
 
+          correlation_key:
+            `${game.away_team}@${game.home_team}`.toUpperCase(),
+
+          market_type: "spread" as const,
+
           matchup:
             `${game.away_team} @ ${game.home_team}`,
 
@@ -784,30 +796,94 @@ const [cfbError, setCfbError] =
           b.score - a.score
       );
 
-  // NFL WEEKLY PARLAY POOLS
-  // Keep the strict tiers, but allow each larger parlay to use the widest
-  // qualified weekly pool before declaring that there are not enough legs.
-  // No candidate below RDG's minimum 2-point model/market difference is added.
-  const saferCandidates =
-    candidates.filter(
-      (candidate) =>
-        candidate.difference >= 3.5 &&
-        candidate.historical_accuracy >= 55 &&
-        candidate.historical_sample >= 30
+  // NFL MIXED PARLAY POOLS
+  // Passing props can mix with spreads after passing the RDG review filters.
+  // Default correlation guardrail: maximum one leg from the same NFL game.
+  const passingPropCandidates: BetCandidate[] =
+    (nflPassingProps?.props || [])
+      .filter((prop) =>
+        prop.review !== "PASS" &&
+        prop.model_vs_market_probability !== null &&
+        prop.model_vs_market_probability >= 2
+      )
+      .map((prop) => {
+        const away = prop.matchup.away || "AWAY";
+        const home = prop.matchup.home || "HOME";
+        const edge = prop.model_vs_market_probability || 0;
+
+        let score = edge * 10;
+        if (prop.review === "STRONG REVIEW") score += 20;
+        else if (prop.review === "REVIEW") score += 10;
+        else if (prop.review === "WATCH") score += 4;
+        if (prop.model_probability >= 60) score += 8;
+        else if (prop.model_probability >= 55) score += 4;
+
+        return {
+          event_id: `prop-${prop.event_id}-${prop.player_id}`,
+          correlation_key: `${away}@${home}`.toUpperCase(),
+          market_type: "passing_prop" as const,
+          matchup: `${away} @ ${home}`,
+          team: "",
+          line: prop.market_line,
+          odds: null,
+          display_bet: `${prop.player_name} ${prop.selection} ${prop.market_line}`,
+          projected_winner: "",
+          projected_margin: prop.rdg_projection,
+          difference: Number(edge.toFixed(2)),
+          historical_accuracy: prop.model_probability,
+          historical_sample: 517,
+          historical_correct: 0,
+          historical_bucket: "V2 residual calibration",
+          score: Number(score.toFixed(2)),
+          player_name: prop.player_name,
+          selection: prop.selection,
+          model_probability: prop.model_probability,
+          market_probability: prop.market_no_vig_probability,
+          review: prop.review,
+        };
+      })
+      .sort((a, b) => b.score - a.score);
+
+  const spreadSaferCandidates =
+    candidates.filter((candidate) =>
+      candidate.difference >= 3.5 &&
+      candidate.historical_accuracy >= 55 &&
+      candidate.historical_sample >= 30
     );
 
-  const balancedCandidates =
-    candidates.filter(
-      (candidate) =>
-        candidate.difference >= 3 &&
-        candidate.historical_sample >= 30
+  const spreadBalancedCandidates =
+    candidates.filter((candidate) =>
+      candidate.difference >= 3 &&
+      candidate.historical_sample >= 30
     );
 
-  const higherRiskCandidates =
-    candidates.filter(
-      (candidate) =>
-        candidate.difference >= 2
-    );
+  const spreadHigherRiskCandidates =
+    candidates.filter((candidate) => candidate.difference >= 2);
+
+  const propSaferCandidates = passingPropCandidates.filter((candidate) =>
+    (candidate.model_probability || 0) >= 58 &&
+    candidate.difference >= 8 &&
+    candidate.review === "STRONG REVIEW"
+  );
+
+  const propBalancedCandidates = passingPropCandidates.filter((candidate) =>
+    (candidate.model_probability || 0) >= 55 &&
+    candidate.difference >= 5 &&
+    (candidate.review === "STRONG REVIEW" || candidate.review === "REVIEW")
+  );
+
+  const propHigherRiskCandidates = passingPropCandidates.filter((candidate) =>
+    candidate.difference >= 2
+  );
+
+  const saferCandidates = [...spreadSaferCandidates, ...propSaferCandidates]
+    .sort((a, b) => b.score - a.score);
+
+  const balancedCandidates = [...spreadBalancedCandidates, ...propBalancedCandidates]
+    .sort((a, b) => b.score - a.score);
+
+  const higherRiskCandidates = [...spreadHigherRiskCandidates, ...propHigherRiskCandidates]
+    .sort((a, b) => b.score - a.score);
 
   const bestStraight =
     saferCandidates.length > 0
@@ -816,38 +892,30 @@ const [cfbError, setCfbError] =
       ? balancedCandidates[0]
       : null;
 
-  // Greedy usage balancing: stronger candidates still rank first, but when
-  // building multiple cards RDG favors qualified games that have appeared
-  // fewer times already. This reduces the same game dominating every parlay.
   const nflCandidateUsage = new Map<string, number>();
 
   function buildWeeklyNFLParlay(
     pool: BetCandidate[],
     count: number
   ) {
-    const uniqueByEvent = Array.from(
+    // One leg per game by default. This prevents an ordinary parlay from
+    // accidentally stacking correlated spreads and player props.
+    const uniqueByGame = Array.from(
       new Map(
-        pool.map((candidate) => [
-          candidate.event_id,
-          candidate,
-        ])
+        [...pool]
+          .sort((a, b) => b.score - a.score)
+          .map((candidate) => [candidate.correlation_key, candidate])
       ).values()
     );
 
-    const selected = [...uniqueByEvent]
+    const selected = [...uniqueByGame]
       .sort((a, b) => {
-        const aUsage =
-          nflCandidateUsage.get(a.event_id) || 0;
-        const bUsage =
-          nflCandidateUsage.get(b.event_id) || 0;
-
-        if (aUsage !== bUsage) {
-          return aUsage - bUsage;
-        }
-
+        const aUsage = nflCandidateUsage.get(a.event_id) || 0;
+        const bUsage = nflCandidateUsage.get(b.event_id) || 0;
+        if (aUsage !== bUsage) return aUsage - bUsage;
         return b.score - a.score;
       })
-      .slice(0, Math.min(count, uniqueByEvent.length));
+      .slice(0, Math.min(count, uniqueByGame.length));
 
     selected.forEach((candidate) => {
       nflCandidateUsage.set(
@@ -859,42 +927,18 @@ const [cfbError, setCfbError] =
     return selected;
   }
 
-  // Build smaller/stricter cards first, then progressively widen the pool.
-  // If a tier cannot fill the requested leg count, it stays incomplete.
-  const saferTwoLeg = buildWeeklyNFLParlay(
-    saferCandidates,
-    2
-  );
+  const saferTwoLeg = buildWeeklyNFLParlay(saferCandidates, 2);
 
   const balancedThreePool =
     balancedCandidates.length >= 3
       ? balancedCandidates
       : higherRiskCandidates;
 
-  const balancedThreeLeg = buildWeeklyNFLParlay(
-    balancedThreePool,
-    3
-  );
-
-  const higherRiskFourLeg = buildWeeklyNFLParlay(
-    higherRiskCandidates,
-    4
-  );
-
-  const fiveLeg = buildWeeklyNFLParlay(
-    higherRiskCandidates,
-    5
-  );
-
-  const sixLeg = buildWeeklyNFLParlay(
-    higherRiskCandidates,
-    6
-  );
-
-  const eightLeg = buildWeeklyNFLParlay(
-    higherRiskCandidates,
-    8
-  );
+  const balancedThreeLeg = buildWeeklyNFLParlay(balancedThreePool, 3);
+  const higherRiskFourLeg = buildWeeklyNFLParlay(higherRiskCandidates, 4);
+  const fiveLeg = buildWeeklyNFLParlay(higherRiskCandidates, 5);
+  const sixLeg = buildWeeklyNFLParlay(higherRiskCandidates, 6);
+  const eightLeg = buildWeeklyNFLParlay(higherRiskCandidates, 8);
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_50%_18%,rgba(16,185,129,0.07),transparent_28%),linear-gradient(180deg,#020a07_0%,#020806_42%,#010403_100%)] text-white">
@@ -1258,14 +1302,9 @@ const [cfbError, setCfbError] =
                 </h2>
 
                 <p className="mt-2 max-w-3xl text-sm text-slate-400">
-                  Built from all remaining
-                  games in the current NFL
-                  week using RDG projections
-                  and current Hard Rock Bet
-                  spreads. Games drop out
-                  after kickoff, and RDG will
-                  not force weaker bets into
-                  a parlay.
+                  Built from qualified NFL spreads and calibrated passing-yard props.
+                  RDG allows only one leg per game by default to reduce accidental
+                  correlation, and it will not force weaker selections into a parlay.
                 </p>
               </div>
 
@@ -1704,7 +1743,13 @@ function BuilderCard({
                     )}
 
                     <div className="mt-1 flex items-center gap-3">
-                      <TeamLogo sport="NFL" team={candidate.team} />
+                      {candidate.market_type === "spread" ? (
+                        <TeamLogo sport="NFL" team={candidate.team} />
+                      ) : (
+                        <span className="rounded-md border border-cyan-400/30 bg-cyan-400/10 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-cyan-300">
+                          PROP
+                        </span>
+                      )}
                       <p className="text-lg font-bold">{candidate.display_bet}</p>
                     </div>
 
@@ -1717,10 +1762,7 @@ function BuilderCard({
 
                   <div className="text-right">
                     <p className="font-bold text-green-400">
-                      {candidate.difference.toFixed(
-                        1
-                      )}{" "}
-                      pts
+                      {candidate.difference.toFixed(1)}{candidate.market_type === "passing_prop" ? "%" : " pts"}
                     </p>
 
                     <p className="mt-1 text-[10px] uppercase text-slate-500">
@@ -1729,42 +1771,39 @@ function BuilderCard({
                   </div>
                 </div>
 
-                <div className="mt-4 grid grid-cols-2 gap-3">
-                  <MiniStat
-                    title="RDG PROJECTION"
-                    value={`${candidate.projected_winner} by ${candidate.projected_margin.toFixed(
-                      1
-                    )}`}
-                  />
-
-                  <MiniStat
-                    title="HARD ROCK ODDS"
-                    value={
-                      candidate.odds ||
-                      "—"
-                    }
-                  />
-                </div>
-
-                <p className="mt-3 text-xs text-slate-500">
-                  Historical{" "}
-                  {
-                    candidate.historical_bucket
-                  }{" "}
-                  bucket:{" "}
-                  {
-                    candidate.historical_correct
-                  }
-                  /
-                  {
-                    candidate.historical_sample
-                  }{" "}
-                  (
-                  {
-                    candidate.historical_accuracy
-                  }
-                  %) straight-up.
-                </p>
+                {candidate.market_type === "passing_prop" ? (
+                  <>
+                    <div className="mt-4 grid grid-cols-2 gap-3">
+                      <MiniStat
+                        title="RDG PROJECTION"
+                        value={`${candidate.projected_margin.toFixed(1)} yds`}
+                      />
+                      <MiniStat
+                        title="MODEL PROB."
+                        value={`${(candidate.model_probability || 0).toFixed(1)}%`}
+                      />
+                    </div>
+                    <p className="mt-3 text-xs text-slate-500">
+                      Passing-yard probability is model-implied from the frozen V2 residual calibration; it is not a historical sportsbook prop win rate.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <div className="mt-4 grid grid-cols-2 gap-3">
+                      <MiniStat
+                        title="RDG PROJECTION"
+                        value={`${candidate.projected_winner} by ${candidate.projected_margin.toFixed(1)}`}
+                      />
+                      <MiniStat
+                        title="HARD ROCK ODDS"
+                        value={candidate.odds || "—"}
+                      />
+                    </div>
+                    <p className="mt-3 text-xs text-slate-500">
+                      Historical {candidate.historical_bucket} bucket: {candidate.historical_correct}/{candidate.historical_sample} ({candidate.historical_accuracy}%) straight-up.
+                    </p>
+                  </>
+                )}
               </div>
             )
           )}
