@@ -2515,7 +2515,7 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
                           EXPERIMENTAL TOTAL REVIEW
                         </p>
                         <p className="mt-2 text-xl font-black">
-                          {candidate.display_bet} {candidate.odds || ""}
+                          GAME TOTAL — {candidate.display_bet} RUNS {candidate.odds || ""}
                         </p>
                         <p className="mt-1 text-xs text-slate-500">
                           {candidate.matchup}
@@ -2714,16 +2714,22 @@ function MLBBuilderCard({
                     </p>
                   )}
                   <div className="mt-1 flex items-center gap-3">
-                    {candidate.market_type === "moneyline" ? (
+                    {candidate.market_type === "moneyline" && (
                       <TeamLogo sport="MLB" team={candidate.team} />
-                    ) : (
-                      <span className="flex h-8 w-8 items-center justify-center rounded-full border border-sky-500/30 bg-sky-500/10 text-[10px] font-black text-sky-400">
-                        O/U
-                      </span>
                     )}
-                    <p className="text-lg font-bold">
-                      {candidate.display_bet} {candidate.odds || ""}
-                    </p>
+                    <div>
+                      {candidate.market_type === "total" && (
+                        <p className="text-[10px] font-black uppercase tracking-wider text-sky-400">
+                          GAME TOTAL
+                        </p>
+                      )}
+                      <p className="text-lg font-bold">
+                        {candidate.market_type === "total"
+                          ? `${candidate.display_bet} RUNS`
+                          : candidate.display_bet}{" "}
+                        {candidate.odds || ""}
+                      </p>
+                    </div>
                   </div>
                   <p className="mt-1 text-xs text-slate-500">
                     {candidate.matchup}
