@@ -3,7 +3,8 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const ODDIZE_URL = "https://oddize.com/api/v1/props/mlb";
+const ODDIZE_URL =
+  "https://oddize.com/api/v1/offer-types";
 
 export async function GET() {
   try {
@@ -34,7 +35,7 @@ export async function GET() {
         {
           success: false,
           status: response.status,
-          error: text.slice(0, 1000),
+          error: text.slice(0, 2000),
         },
         { status: response.status }
       );
@@ -49,48 +50,28 @@ export async function GET() {
         {
           success: false,
           error: "Oddize returned non-JSON data.",
-          raw: text.slice(0, 1000),
+          raw: text.slice(0, 2000),
         },
         { status: 500 }
       );
     }
 
-    /*
-      For this diagnostic we intentionally return the
-      complete Oddize response.
-
-      We need to see the exact:
-      - player field
-      - market field
-      - line
-      - Over / Under structure
-      - American odds
-      - sportsbook structure
-      - event ID
-
-      Once confirmed, we'll normalize it and remove
-      the large raw response.
-    */
-
     return NextResponse.json({
       success: true,
 
-      sport: "MLB",
+      purpose:
+        "Find the exact Oddize prop_type codes for MLB player props.",
 
-      source: "Oddize league-wide MLB props",
+      looking_for: [
+        "Pitcher Strikeouts",
+        "Batter Hits",
+        "Total Bases",
+        "Home Runs",
+        "RBIs",
+        "Runs",
+      ],
 
-      credits: {
-        cost:
-          response.headers.get("x-credits-cost") ||
-          "unknown",
-
-        remaining:
-          response.headers.get(
-            "x-credits-remaining"
-          ) || "unknown",
-      },
-
-      oddize_response: data,
+      offer_types: data,
     });
   } catch (error) {
     return NextResponse.json(
@@ -100,7 +81,7 @@ export async function GET() {
         error:
           error instanceof Error
             ? error.message
-            : "Unknown MLB props error",
+            : "Unknown Oddize error",
       },
       { status: 500 }
     );
