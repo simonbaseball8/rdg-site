@@ -839,6 +839,7 @@ export async function getRdgNflAnalysis() {
     oddsResponse,
     stats25Response,
     stats26Response,
+    scheduleResponse,
   ] = await Promise.all([
     fetch(
       "https://oddize.com/api/v1/odds/latest?sport=nfl&books=hrb",
@@ -863,6 +864,13 @@ export async function getRdgNflAnalysis() {
         cache: "no-store",
       }
     ),
+
+    fetch(
+      "https://raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv",
+      {
+        cache: "no-store",
+      }
+    ),
   ]);
 
   if (!oddsResponse.ok) {
@@ -873,10 +881,11 @@ export async function getRdgNflAnalysis() {
 
   if (
     !stats25Response.ok ||
-    !stats26Response.ok
+    !stats26Response.ok ||
+    !scheduleResponse.ok
   ) {
     throw new Error(
-      `NFL stats request failed. 2025: ${stats25Response.status}, 2026: ${stats26Response.status}`
+      `NFL data request failed. 2025 stats: ${stats25Response.status}, 2026 stats: ${stats26Response.status}, schedule: ${scheduleResponse.status}`
     );
   }
 
@@ -897,12 +906,53 @@ export async function getRdgNflAnalysis() {
       )
     );
 
-  const games = (
-    oddsData.events ?? []
-  )
-    .map((event: any) => {
-      const odds =
-        event.odds ?? [];
+  const scheduleRows = parseCsv(
+    await scheduleResponse.text()
+  ).filter(
+    (row) =>
+      num(row.season) === 2026 &&
+      (row.game_type ?? "").trim().toUpperCase() === "REG"
+  );
+
+  const todayDate = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+
+  const upcomingSchedule = scheduleRows
+    .filter((row) => (row.gameday ?? "") >= todayDate)
+    .sort((a, b) => {
+      const dateCompare = (a.gameday ?? "").localeCompare(b.gameday ?? "");
+      return dateCompare !== 0 ? dateCompare : num(a.week) - num(b.week);
+    });
+
+  const nextWeek =
+    upcomingSchedule.length > 0
+      ? num(upcomingSchedule[0].week)
+      : Math.max(1, ...scheduleRows.map((row) => num(row.week)));
+
+  const slate = scheduleRows.filter(
+    (row) => num(row.week) === nextWeek
+  );
+
+  const oddizeEvents = oddsData.events ?? [];
+
+  function findOddizeEvent(awayTeam: string, homeTeam: string) {
+    return oddizeEvents.find(
+      (event: any) =>
+        normalizeTeam(event.team1) === normalizeTeam(awayTeam) &&
+        normalizeTeam(event.team2) === normalizeTeam(homeTeam)
+    );
+  }
+
+  const games = slate
+    .map((schedule: Row) => {
+      const awayTeam = normalizeTeam(schedule.away_team);
+      const homeTeam = normalizeTeam(schedule.home_team);
+      const event = findOddizeEvent(awayTeam, homeTeam);
+      const odds = event?.odds ?? [];
 
       const moneyline = odds
         .filter(
@@ -940,8 +990,8 @@ export async function getRdgNflAnalysis() {
         projectedMargin(
           historical,
           current,
-          event.team1,
-          event.team2
+          awayTeam,
+          homeTeam
         );
 
       const bucket =
@@ -951,8 +1001,8 @@ export async function getRdgNflAnalysis() {
 
       const market =
         analyzeMarket(
-          event.team1,
-          event.team2,
+          awayTeam,
+          homeTeam,
           model.projectedMargin,
           spread,
           moneyline
@@ -966,16 +1016,25 @@ export async function getRdgNflAnalysis() {
 
       return {
         event_id:
-          event.event_id,
+          event?.event_id ??
+          schedule.game_id ??
+          `${schedule.season}_${schedule.week}_${awayTeam}_${homeTeam}`,
 
         start_date:
-          event.start_date,
+          event?.start_date ??
+          `${schedule.gameday}T${schedule.gametime || "12:00"}:00-04:00`,
 
         away_team:
-          event.team1,
+          awayTeam,
 
         home_team:
-          event.team2,
+          homeTeam,
+
+        schedule_week:
+          num(schedule.week),
+
+        odds_available:
+          Boolean(event),
 
         moneyline,
         spread,
@@ -993,9 +1052,9 @@ export async function getRdgNflAnalysis() {
 
           projected_winner:
             model.projectedMargin > 0
-              ? event.team2
+              ? homeTeam
               : model.projectedMargin < 0
-              ? event.team1
+              ? awayTeam
               : "EVEN",
 
           projected_margin:
@@ -1064,7 +1123,7 @@ export async function getRdgNflAnalysis() {
     model:
       "RDG NFL Live",
 
-    version: "1.1-full-oddize-slate",
+    version: "1.2-nflverse-schedule-master",
 
     model_status:
       "Backtested",
@@ -1079,7 +1138,7 @@ export async function getRdgNflAnalysis() {
         10.29,
 
       note:
-        "Backtest results describe historical out-of-sample performance and are not probabilities for individual future games. Live board retains every NFL event returned by Oddize, including events with temporarily unavailable markets.",
+        "Backtest results describe historical out-of-sample performance and are not probabilities for individual future games. nflverse is the schedule master for the current regular-season week; Oddize Hard Rock markets are attached when available.",
     },
 
     calibration: {
@@ -1089,6 +1148,12 @@ export async function getRdgNflAnalysis() {
       slope:
         CALIBRATION_SLOPE,
     },
+
+    schedule_source:
+      "nflverse nfldata games.csv",
+
+    schedule_week:
+      nextWeek,
 
     games_found:
       games.length,
