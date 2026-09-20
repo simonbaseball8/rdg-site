@@ -93,6 +93,33 @@ type NFLAnalysis = {
   updated_at: string;
   games: NFLGame[];
 };
+type NFLPassingProp = {
+  event_id: string;
+  start_time: string | null;
+  matchup: { away: string | null; home: string | null };
+  player_id: string;
+  player_name: string;
+  market: string;
+  selection: "OVER" | "UNDER";
+  market_line: number;
+  rdg_projection: number;
+  model_vs_line_yards: number;
+  model_probability: number;
+  market_no_vig_probability: number | null;
+  model_vs_market_probability: number | null;
+  review: string;
+};
+
+type NFLPassingPropsAnalysis = {
+  success: boolean;
+  version: string;
+  market: string;
+  model_status: string;
+  qualifying_reviews: number;
+  props: NFLPassingProp[];
+  updated_at: string;
+};
+
 type CFBGame = {
   event_id: string;
   start_date: string;
@@ -378,6 +405,12 @@ export default function Home() {
 
   const [nflError, setNflError] =
     useState("");
+  const [nflPassingProps, setNflPassingProps] =
+    useState<NFLPassingPropsAnalysis | null>(null);
+  const [nflPassingPropsLoading, setNflPassingPropsLoading] =
+    useState(true);
+  const [nflPassingPropsError, setNflPassingPropsError] =
+    useState("");
 const [activeSport, setActiveSport] =
   useState<"NFL" | "CFB" | "MLB" | "NHL">("NFL");
 
@@ -452,6 +485,24 @@ const [cfbError, setCfbError] =
       }
     }
 
+    async function loadNFLPassingProps() {
+      try {
+        const response = await fetch("/api/nfl-passing-props", { cache: "no-store" });
+        if (!response.ok) {
+          throw new Error(`NFL passing props failed: ${response.status}`);
+        }
+        const data = await response.json();
+        setNflPassingProps(data);
+      } catch (err) {
+        console.error(err);
+        setNflPassingPropsError(
+          err instanceof Error ? err.message : "NFL passing props failed"
+        );
+      } finally {
+        setNflPassingPropsLoading(false);
+      }
+    }
+
         async function loadCFB() {
       try {
         const response = await fetch(
@@ -512,6 +563,7 @@ const [cfbError, setCfbError] =
 
     loadParlays();
     loadNFL();
+    loadNFLPassingProps();
     loadCFB();
     loadMLB();
     loadNHL();
@@ -1182,6 +1234,12 @@ const [cfbError, setCfbError] =
 
         <NFLFeaturedReviews games={reviewGames} />
 
+        <NFLPassingPropsSection
+          data={nflPassingProps}
+          loading={nflPassingPropsLoading}
+          error={nflPassingPropsError}
+        />
+
         {/* BET BUILDER */}
 
         {!nflLoading &&
@@ -1725,6 +1783,120 @@ function BuilderCard({
           </p>
         )}
     </article>
+  );
+}
+
+function NFLPassingPropsSection({
+  data,
+  loading,
+  error,
+}: {
+  data: NFLPassingPropsAnalysis | null;
+  loading: boolean;
+  error: string;
+}) {
+  const props = (data?.props || []).filter((prop) => prop.review !== "PASS");
+
+  return (
+    <section className="mt-14 border-t border-white/10 pt-10">
+      <p className="text-xs font-bold uppercase tracking-[0.25em] text-emerald-400">
+        NFL PLAYER PROPS • PASSING YARDS
+      </p>
+      <div className="mt-3 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-3xl font-bold">RDG Passing Yard Reviews</h2>
+          <p className="mt-2 max-w-3xl text-sm text-slate-400">
+            Frozen RDG V2 projections compared with current sportsbook passing-yard lines.
+          </p>
+        </div>
+        {data && (
+          <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-400">
+            {props.length} CURRENT REVIEWS
+          </span>
+        )}
+      </div>
+
+      <div className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-4 text-xs leading-5 text-slate-400">
+        Model probability is calibrated from historical RDG projection errors. Model vs Market compares that estimate with no-vig sportsbook probability. These are model estimates, not historical prop-bet win rates or guaranteed edges.
+      </div>
+
+      {loading && (
+        <div className="mt-6 rounded-xl border border-white/10 bg-white/[0.03] p-6">
+          Loading NFL passing props...
+        </div>
+      )}
+
+      {error && (
+        <div className="mt-6 rounded-xl border border-red-500/30 bg-red-500/10 p-6 text-red-400">
+          Passing props error: {error}
+        </div>
+      )}
+
+      {!loading && !error && props.length === 0 && (
+        <div className="mt-6 rounded-xl border border-white/10 bg-white/[0.03] p-6">
+          <p className="font-bold">No passing-yard props currently pass the RDG review filters.</p>
+        </div>
+      )}
+
+      {!loading && !error && props.length > 0 && (
+        <div className="mt-6 grid gap-5 lg:grid-cols-2">
+          {props.map((prop) => {
+            const edge = prop.model_vs_market_probability;
+            const strong = prop.review === "STRONG REVIEW";
+            return (
+              <article
+                key={`${prop.event_id}-${prop.player_id}`}
+                className={
+                  strong
+                    ? "rounded-2xl border border-emerald-400/50 bg-emerald-500/[0.08] p-6 shadow-[0_0_28px_rgba(16,185,129,0.08)]"
+                    : "rounded-2xl border border-white/10 bg-white/[0.035] p-6"
+                }
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-widest text-emerald-400">
+                      {prop.review}
+                    </p>
+                    <h3 className="mt-2 text-xl font-black">{prop.player_name}</h3>
+                    <p className="mt-1 text-lg font-bold text-white">
+                      {prop.selection} {prop.market_line.toFixed(1)}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {prop.matchup.away || "—"} @ {prop.matchup.home || "—"}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-2xl font-black text-emerald-400">
+                      {edge !== null ? `${edge >= 0 ? "+" : ""}${edge.toFixed(1)}%` : "—"}
+                    </p>
+                    <p className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      Model vs Market
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <MiniStat title="RDG PROJECTION" value={prop.rdg_projection.toFixed(1)} />
+                  <MiniStat title="MODEL PROB." value={`${prop.model_probability.toFixed(1)}%`} />
+                  <MiniStat
+                    title="MARKET PROB."
+                    value={
+                      prop.market_no_vig_probability !== null
+                        ? `${prop.market_no_vig_probability.toFixed(1)}%`
+                        : "—"
+                    }
+                  />
+                  <MiniStat
+                    title="VS LINE"
+                    value={`${prop.model_vs_line_yards >= 0 ? "+" : ""}${prop.model_vs_line_yards.toFixed(1)} yds`}
+                  />
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </section>
   );
 }
 
