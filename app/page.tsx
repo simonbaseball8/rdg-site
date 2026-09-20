@@ -2154,6 +2154,12 @@ function NHLBuilderCard({ title, subtitle, candidates, required }: { title: stri
   return <article className="rounded-2xl border border-emerald-500/25 bg-[linear-gradient(145deg,rgba(16,185,129,0.07),rgba(255,255,255,0.025))] p-6 shadow-[0_16px_40px_rgba(0,0,0,0.18)] transition hover:border-emerald-400/45"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-widest text-green-400">{subtitle}</p><h3 className="mt-2 text-xl font-bold">{title}</h3></div><span className={qualified ? "rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-bold text-green-400" : "rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-400"}>{qualified ? "QUALIFIED" : "NOT ENOUGH LEGS"}</span></div>{candidates.length === 0 ? <div className="mt-6 rounded-lg border border-white/10 bg-black/20 p-4"><p className="font-bold">No qualifying selection</p><p className="mt-2 text-xs text-slate-500">RDG will not force preseason or weaker games into this card.</p></div> : <div className="mt-6 space-y-3">{candidates.map((c,i)=><div key={c.event_id} className="rounded-lg border border-white/10 bg-black/20 p-4"><p className="text-[10px] font-bold uppercase text-slate-500">{required > 1 ? `LEG ${i+1}` : c.signal}</p><div className="mt-1 flex justify-between gap-4"><div><div className="flex items-center gap-3"><TeamLogo sport="NHL" team={c.team} /><p className="text-lg font-bold">{c.display_bet}</p></div><p className="text-xs text-slate-500">{c.matchup}</p></div><div className="text-right"><p className="font-bold text-green-400">{c.edge.toFixed(1)}%</p><p className="text-[10px] uppercase text-slate-500">Model vs Market</p></div></div><p className="mt-3 text-xs text-slate-500">Model {c.model_probability.toFixed(1)}% • Hard Rock {c.odds || "—"}</p></div>)}</div>}</article>;
 }
 
+function americanOddsNumber(odds: string | null) {
+  if (!odds) return null;
+  const value = Number(String(odds).replace("+", ""));
+  return Number.isFinite(value) ? value : null;
+}
+
 function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading: boolean; error: string }) {
   const games = (mlb?.games || []).filter((game) => game && game.rdg);
   const priority: Record<string, number> = {
@@ -2222,40 +2228,60 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
 
   // MLB builder pools now separate "likelihood" from "value".
   // Edge is still useful, but safer cards require a stronger model probability too.
-  const safer = candidates.filter(
-    (candidate) =>
+  const safer = candidates.filter((candidate) => {
+    const price = americanOddsNumber(candidate.odds);
+    return (
       candidate.model_probability >= 52 &&
       candidate.edge >= 2.5 &&
+      price !== null &&
+      price >= -300 &&
+      price <= 125 &&
       (candidate.signal === "Priority Review" ||
         candidate.signal === "Strong Review")
-  );
+    );
+  });
 
-  const balanced = candidates.filter(
-    (candidate) =>
+  const balanced = candidates.filter((candidate) => {
+    const price = americanOddsNumber(candidate.odds);
+    return (
       candidate.model_probability >= 48 &&
       candidate.edge >= 2.5 &&
+      price !== null &&
+      price >= -275 &&
+      price <= 150 &&
       (candidate.signal === "Priority Review" ||
         candidate.signal === "Strong Review" ||
         candidate.signal === "Watch")
-  );
+    );
+  });
 
-  const higherRisk = candidates.filter(
-    (candidate) =>
-      candidate.model_probability >= 42 &&
+  const higherRisk = candidates.filter((candidate) => {
+    const price = americanOddsNumber(candidate.odds);
+    return (
+      candidate.model_probability >= 45 &&
       candidate.edge >= 2.5 &&
+      price !== null &&
+      price >= -250 &&
+      price <= 200 &&
       (candidate.signal === "Priority Review" ||
         candidate.signal === "Strong Review" ||
         candidate.signal === "Watch")
-  );
+    );
+  });
 
-  const longShot = candidates.filter(
-    (candidate) =>
-      candidate.model_probability >= 35 &&
+  const longShot = candidates.filter((candidate) => {
+    const price = americanOddsNumber(candidate.odds);
+    return (
+      candidate.model_probability >= 40 &&
       candidate.edge >= 2.5 &&
+      price !== null &&
+      price >= -250 &&
+      price <= 300 &&
       (candidate.signal === "Priority Review" ||
         candidate.signal === "Strong Review" ||
         candidate.signal === "Watch")
-  );
+    );
+  });
 
   const bestStraight = safer[0] ?? balanced[0] ?? null;
   const twoLeg = diversifiedSelection(safer, 2, 0, 1);
@@ -2332,44 +2358,44 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
           <section className="mt-8 grid gap-5 lg:grid-cols-2">
             <MLBBuilderCard
               title="BEST STRAIGHT"
-              subtitle="52%+ Model Probability + Edge"
+              subtitle="52%+ Model Probability • Price ≤ +125"
               candidates={bestStraight ? [bestStraight] : []}
               required={1}
             />
             <MLBBuilderCard
               title="TOP RDG PARLAY"
-              subtitle="52%+ Model Probability • Priority + Strong"
+              subtitle="52%+ Model Probability • Price ≤ +125"
               featured
               candidates={twoLeg}
               required={2}
             />
             <MLBBuilderCard
               title="BALANCED 3-LEG"
-              subtitle="48%+ Model Probability + Edge"
+              subtitle="48%+ Model Probability • Price ≤ +150"
               candidates={threeLeg}
               required={3}
             />
             <MLBBuilderCard
               title="WIDER 4-LEG"
-              subtitle="48%+ Model Probability • No Low-Probability Long Shots"
+              subtitle="48%+ Model Probability • Price ≤ +150"
               candidates={fourLeg}
               required={4}
             />
             <MLBBuilderCard
               title="5-LEG • HIGH RISK"
-              subtitle="42%+ Model Probability • Higher Risk"
+              subtitle="45%+ Model Probability • Price ≤ +200"
               candidates={fiveLeg}
               required={5}
             />
             <MLBBuilderCard
               title="6-LEG • HIGH RISK"
-              subtitle="42%+ Model Probability • Higher Risk"
+              subtitle="45%+ Model Probability • Price ≤ +200"
               candidates={sixLeg}
               required={6}
             />
             <MLBBuilderCard
               title="8-LEG • LONG SHOT"
-              subtitle="35%+ Model Probability • Long Shot"
+              subtitle="40%+ Model Probability • Price ≤ +300"
               candidates={eightLeg}
               required={8}
             />
