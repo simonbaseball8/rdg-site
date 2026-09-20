@@ -3,26 +3,12 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const ODDIZE_URL =
-  "https://oddize.com/api/v1/offer-types";
+const SPEC_URL = "https://oddize.com/api/v1/openapi.json";
 
 export async function GET() {
   try {
-    const apiKey = process.env.ODDIZE_API_KEY;
-
-    if (!apiKey) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Missing ODDIZE_API_KEY",
-        },
-        { status: 500 }
-      );
-    }
-
-    const response = await fetch(ODDIZE_URL, {
+    const response = await fetch(SPEC_URL, {
       headers: {
-        "X-API-Key": apiKey,
         Accept: "application/json",
       },
       cache: "no-store",
@@ -41,47 +27,84 @@ export async function GET() {
       );
     }
 
-    let data: any;
+    let spec: any;
 
     try {
-      data = JSON.parse(text);
+      spec = JSON.parse(text);
     } catch {
       return NextResponse.json(
         {
           success: false,
-          error: "Oddize returned non-JSON data.",
+          error: "Oddize OpenAPI spec was not valid JSON.",
           raw: text.slice(0, 2000),
         },
         { status: 500 }
       );
     }
 
+    const paths = spec?.paths ?? {};
+
+    const propPaths = Object.entries(paths)
+      .filter(([path]) =>
+        path.toLowerCase().includes("prop")
+      )
+      .map(([path, details]: [string, any]) => {
+        const get = details?.get;
+
+        const parameters =
+          get?.parameters?.map((parameter: any) => ({
+            name: parameter?.name,
+            in: parameter?.in,
+            required: parameter?.required,
+            description: parameter?.description,
+            schema: parameter?.schema,
+          })) ?? [];
+
+        return {
+          path,
+          summary: get?.summary ?? null,
+          description: get?.description ?? null,
+          parameters,
+        };
+      });
+
+    const propTypeInfo: any[] = [];
+
+    for (const item of propPaths) {
+      for (const parameter of item.parameters) {
+        if (
+          String(parameter?.name)
+            .toLowerCase()
+            .includes("prop")
+        ) {
+          propTypeInfo.push({
+            path: item.path,
+            parameter,
+          });
+        }
+      }
+    }
+
     return NextResponse.json({
       success: true,
 
       purpose:
-        "Find the exact Oddize prop_type codes for MLB player props.",
+        "Inspect Oddize OpenAPI specification for exact player prop_type values.",
 
-      looking_for: [
-        "Pitcher Strikeouts",
-        "Batter Hits",
-        "Total Bases",
-        "Home Runs",
-        "RBIs",
-        "Runs",
-      ],
+      prop_paths_found: propPaths.length,
 
-      offer_types: data,
+      prop_type_parameters: propTypeInfo,
+
+      prop_paths: propPaths,
     });
   } catch (error) {
     return NextResponse.json(
       {
         success: false,
-
         error:
           error instanceof Error
             ? error.message
-            : "Unknown Oddize error",
+            : "Unknown Oddize OpenAPI error",
       },
       { status: 500 }
     );
