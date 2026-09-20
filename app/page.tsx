@@ -2212,32 +2212,58 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
     })
     .filter((candidate): candidate is MLBBetCandidate => candidate !== null)
     .sort((a, b) => {
-      const signalDiff = (priority[b.signal] || 0) - (priority[a.signal] || 0);
-      if (signalDiff !== 0) return signalDiff;
-      return b.edge - a.edge;
+      // Rank by a blend of likelihood and model/market discrepancy.
+      // This prevents a large edge on a low-probability underdog from
+      // automatically outranking a more likely selection.
+      const aScore = a.model_probability * 100 + a.edge * 0.75;
+      const bScore = b.model_probability * 100 + b.edge * 0.75;
+      return bScore - aScore;
     });
 
-  // These are review tiers, not guaranteed or historically validated betting probabilities.
-  const stricter = candidates.filter(
+  // MLB builder pools now separate "likelihood" from "value".
+  // Edge is still useful, but safer cards require a stronger model probability too.
+  const safer = candidates.filter(
     (candidate) =>
-      candidate.signal === "Priority Review" ||
-      candidate.signal === "Strong Review"
+      candidate.model_probability >= 0.52 &&
+      candidate.edge >= 0.025 &&
+      (candidate.signal === "Priority Review" ||
+        candidate.signal === "Strong Review")
   );
 
-  const broader = candidates.filter(
+  const balanced = candidates.filter(
     (candidate) =>
-      candidate.signal === "Priority Review" ||
-      candidate.signal === "Strong Review" ||
-      candidate.signal === "Watch"
+      candidate.model_probability >= 0.48 &&
+      candidate.edge >= 0.025 &&
+      (candidate.signal === "Priority Review" ||
+        candidate.signal === "Strong Review" ||
+        candidate.signal === "Watch")
   );
 
-  const bestStraight = stricter[0] ?? broader[0] ?? null;
-  const twoLeg = diversifiedSelection(stricter, 2, 0, 1);
-  const threeLeg = diversifiedSelection(broader, 3, 1, 2);
-  const fourLeg = diversifiedSelection(broader, 4, 2, 3);
-  const fiveLeg = diversifiedSelection(broader, 5, 0, 2);
-  const sixLeg = diversifiedSelection(broader, 6, 1, 3);
-  const eightLeg = diversifiedSelection(broader, 8, 3, 5);
+  const higherRisk = candidates.filter(
+    (candidate) =>
+      candidate.model_probability >= 0.42 &&
+      candidate.edge >= 0.025 &&
+      (candidate.signal === "Priority Review" ||
+        candidate.signal === "Strong Review" ||
+        candidate.signal === "Watch")
+  );
+
+  const longShot = candidates.filter(
+    (candidate) =>
+      candidate.model_probability >= 0.35 &&
+      candidate.edge >= 0.025 &&
+      (candidate.signal === "Priority Review" ||
+        candidate.signal === "Strong Review" ||
+        candidate.signal === "Watch")
+  );
+
+  const bestStraight = safer[0] ?? balanced[0] ?? null;
+  const twoLeg = diversifiedSelection(safer, 2, 0, 1);
+  const threeLeg = diversifiedSelection(balanced, 3, 1, 2);
+  const fourLeg = diversifiedSelection(balanced, 4, 2, 3);
+  const fiveLeg = diversifiedSelection(higherRisk, 5, 0, 2);
+  const sixLeg = diversifiedSelection(higherRisk, 6, 1, 3);
+  const eightLeg = diversifiedSelection(longShot, 8, 3, 5);
 
   return (
     <div>
@@ -2299,58 +2325,58 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
               Today&apos;s MLB Model Selections
             </h2>
             <p className="mt-2 max-w-3xl text-sm text-slate-400">
-              Built from current Hard Rock moneylines and RDG model/market review signals. RDG will not add Pass-rated games just to fill a card.
+              Built from current Hard Rock moneylines, RDG model probability, and model/market edge. Safer cards now require both a reasonable projected win probability and a qualifying edge; RDG will not add weaker games just to fill a card.
             </p>
           </div>
 
           <section className="mt-8 grid gap-5 lg:grid-cols-2">
             <MLBBuilderCard
               title="BEST STRAIGHT"
-              subtitle="Stricter MLB Filter"
+              subtitle="52%+ Model Probability + Edge"
               candidates={bestStraight ? [bestStraight] : []}
               required={1}
             />
             <MLBBuilderCard
               title="TOP RDG PARLAY"
-              subtitle="Strongest Priority + Strong Combination"
+              subtitle="52%+ Model Probability • Priority + Strong"
               featured
               candidates={twoLeg}
               required={2}
             />
             <MLBBuilderCard
               title="BALANCED 3-LEG"
-              subtitle="Review Signals"
+              subtitle="48%+ Model Probability + Edge"
               candidates={threeLeg}
               required={3}
             />
             <MLBBuilderCard
               title="WIDER 4-LEG"
-              subtitle="Includes Watch Reviews"
+              subtitle="48%+ Model Probability • No Low-Probability Long Shots"
               candidates={fourLeg}
               required={4}
             />
             <MLBBuilderCard
               title="5-LEG • HIGH RISK"
-              subtitle="Extended Review Card"
+              subtitle="42%+ Model Probability • Higher Risk"
               candidates={fiveLeg}
               required={5}
             />
             <MLBBuilderCard
               title="6-LEG • HIGH RISK"
-              subtitle="Extended Review Card"
+              subtitle="42%+ Model Probability • Higher Risk"
               candidates={sixLeg}
               required={6}
             />
             <MLBBuilderCard
               title="8-LEG • LONG SHOT"
-              subtitle="Long-Shot Review Card"
+              subtitle="35%+ Model Probability • Long Shot"
               candidates={eightLeg}
               required={8}
             />
           </section>
 
           <div className="mt-5 rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 text-xs text-slate-400">
-            MLB builder selections are model review signals, not guaranteed outcomes. The calibrated team model was evaluated on 2025 data, while the live starting-pitcher adjustment remains experimental.
+            MLB builder cards now separate projected likelihood from model/market value. A large edge alone does not make a low-probability underdog a safer selection. Higher-risk and long-shot cards intentionally allow lower model probabilities. The live starting-pitcher adjustment remains experimental.
           </div>
 
           <div className="mt-12 border-t border-white/10 pt-10">
