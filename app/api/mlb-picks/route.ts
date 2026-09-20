@@ -870,9 +870,7 @@ export async function GET() {
           const totalProjection =
             projectedGameTotal(
               awayRecord,
-              homeRecord,
-              awayPitcherStats,
-              homePitcherStats
+              homeRecord
             );
 
           const totalModel =
