@@ -164,6 +164,20 @@ type MLBGame = {
     moneyline_lean: string;
     model_market_edge: number;
     signal: string;
+    total_model?: {
+      status: string;
+      projected_away_runs: number | null;
+      projected_home_runs: number | null;
+      projected_total_runs: number | null;
+      market_total: number | null;
+      model_over_probability: number | null;
+      model_under_probability: number | null;
+      no_vig_over_probability: number | null;
+      no_vig_under_probability: number | null;
+      lean: "Over" | "Under" | null;
+      edge: number | null;
+      signal: string;
+    };
   };
 };
 
@@ -183,6 +197,9 @@ type MLBBetCandidate = {
   edge: number;
   signal: string;
   starter: string;
+  market_type?: "moneyline" | "total";
+  total_line?: number | null;
+  projected_total?: number | null;
 };
 
 type CFBBetCandidate = {
@@ -2170,23 +2187,25 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
   };
 
   const ranked = [...games].sort((a, b) => {
-    const signalDiff = (priority[b.rdg?.signal || "Pass"] || 0) - (priority[a.rdg?.signal || "Pass"] || 0);
+    const signalDiff =
+      (priority[b.rdg?.signal || "Pass"] || 0) -
+      (priority[a.rdg?.signal || "Pass"] || 0);
+
     if (signalDiff !== 0) return signalDiff;
-    return Number(b.rdg?.model_market_edge || 0) - Number(a.rdg?.model_market_edge || 0);
+
+    return (
+      Number(b.rdg?.model_market_edge || 0) -
+      Number(a.rdg?.model_market_edge || 0)
+    );
   });
 
   const reviews = ranked.filter((game) => game.rdg?.signal !== "Pass");
 
   /*
-    IMPORTANT:
-    The review board above is VALUE-oriented and can legitimately lean toward an underdog
-    when RDG thinks the market has priced that underdog too low.
-
-    The parlay builder below is intentionally DIFFERENT. It is likelihood-oriented:
-    use RDG's projected winner, require the model to agree that the selected team is more
-    likely to win, and keep the sportsbook price in a normal parlay range.
+    MONEYLINE POOL
+    Keep the projected-winner approach that made the MLB parlays more reasonable.
   */
-  const parlayCandidates: MLBBetCandidate[] = games
+  const moneylineCandidates: MLBBetCandidate[] = games
     .map((game) => {
       const team = game.rdg?.projected_winner;
       if (!team) return null;
@@ -2214,6 +2233,7 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
         : game.starting_pitchers?.away?.name;
 
       const price = americanOddsNumber(odds ?? null);
+
       if (
         !Number.isFinite(modelProbability) ||
         typeof marketProbability !== "number" ||
@@ -2222,7 +2242,6 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
         return null;
       }
 
-      // Keep the normal MLB parlay pool away from extreme prices.
       if (price < -350 || price > 150) return null;
 
       const selectedEdge = modelProbability - marketProbability;
@@ -2243,19 +2262,115 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
               ? "Model Favorite"
               : "Projected Winner",
         starter: starter || "TBD",
+        market_type: "moneyline",
       } as MLBBetCandidate;
     })
-    .filter((candidate): candidate is MLBBetCandidate => candidate !== null)
-    .sort((a, b) => {
-      // For parlays, prioritize absolute win probability first.
-      // Positive model/market value is only a secondary tiebreaker.
-      const probabilityDiff = b.model_probability - a.model_probability;
-      if (Math.abs(probabilityDiff) > 0.25) return probabilityDiff;
-      return b.edge - a.edge;
-    });
+    .filter((candidate): candidate is MLBBetCandidate => candidate !== null);
 
-  const safer = parlayCandidates.filter((candidate) => {
+  /*
+    TOTALS POOL
+    Totals are deliberately restricted because the totals backtest validates
+    run projection error, not historical sportsbook Over/Under profitability.
+
+    We only surface the backend's Experimental Review totals, require a normal
+    price, and keep them out of the strictest "safer" pool for now.
+  */
+  const totalCandidates: MLBBetCandidate[] = games
+    .map((game) => {
+      const total = game.rdg?.total_model;
+      if (!total || total.signal !== "Experimental Review") return null;
+      if (!total.lean || total.market_total === null) return null;
+
+      const isOver = total.lean === "Over";
+
+      const odds = isOver
+        ? game.hard_rock?.total?.over_odds
+        : game.hard_rock?.total?.under_odds;
+
+      const modelProbability = Number(
+        isOver
+          ? total.model_over_probability
+          : total.model_under_probability
+      );
+
+      const marketProbability = isOver
+        ? total.no_vig_over_probability
+        : total.no_vig_under_probability;
+
+      const price = americanOddsNumber(odds ?? null);
+
+      if (
+        !Number.isFinite(modelProbability) ||
+        typeof marketProbability !== "number" ||
+        price === null
+      ) {
+        return null;
+      }
+
+      // Keep experimental totals in a tighter, normal sportsbook range.
+      if (price < -180 || price > 130) return null;
+
+      // The backend already requires an 8 percentage-point discrepancy.
+      // Keep the same floor here; do not weaken it in the UI.
+      const edge = modelProbability - marketProbability;
+      if (edge < 8) return null;
+
+      return {
+        event_id: game.event_id,
+        matchup: `${game.away_team} @ ${game.home_team}`,
+        team: `${game.away_team}/${game.home_team}`,
+        odds: odds ?? null,
+        display_bet: `${total.lean} ${total.market_total}`,
+        model_probability: modelProbability,
+        market_probability: marketProbability,
+        edge,
+        signal: "Experimental Total Review",
+        starter: "Game Total",
+        market_type: "total",
+        total_line: total.market_total,
+        projected_total: total.projected_total_runs,
+      } as MLBBetCandidate;
+    })
+    .filter((candidate): candidate is MLBBetCandidate => candidate !== null);
+
+  const byLikelihood = (a: MLBBetCandidate, b: MLBBetCandidate) => {
+    const probabilityDiff = b.model_probability - a.model_probability;
+    if (Math.abs(probabilityDiff) > 0.25) return probabilityDiff;
+    return b.edge - a.edge;
+  };
+
+  moneylineCandidates.sort(byLikelihood);
+  totalCandidates.sort(byLikelihood);
+
+  /*
+    Maximum one leg per MLB game. This prevents a mixed card from stacking
+    a moneyline and total from the same event.
+  */
+  function uniqueEventSelection(
+    pool: MLBBetCandidate[],
+    count: number,
+    offset = 0
+  ) {
+    const selected: MLBBetCandidate[] = [];
+    const usedEvents = new Set<string>();
+
+    if (pool.length === 0) return selected;
+
+    for (let step = 0; step < pool.length * 2 && selected.length < count; step++) {
+      const candidate = pool[(offset + step) % pool.length];
+
+      if (!usedEvents.has(candidate.event_id)) {
+        usedEvents.add(candidate.event_id);
+        selected.push(candidate);
+      }
+    }
+
+    return selected;
+  }
+
+  const saferMoneylines = moneylineCandidates.filter((candidate) => {
     const price = americanOddsNumber(candidate.odds);
+
     return (
       candidate.model_probability >= 55 &&
       price !== null &&
@@ -2264,8 +2379,9 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
     );
   });
 
-  const balanced = parlayCandidates.filter((candidate) => {
+  const balancedMoneylines = moneylineCandidates.filter((candidate) => {
     const price = americanOddsNumber(candidate.odds);
+
     return (
       candidate.model_probability >= 52 &&
       price !== null &&
@@ -2274,8 +2390,9 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
     );
   });
 
-  const wider = parlayCandidates.filter((candidate) => {
+  const widerMoneylines = moneylineCandidates.filter((candidate) => {
     const price = americanOddsNumber(candidate.odds);
+
     return (
       candidate.model_probability >= 51 &&
       price !== null &&
@@ -2284,44 +2401,67 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
     );
   });
 
-  const higherRisk = parlayCandidates.filter((candidate) => {
-    const price = americanOddsNumber(candidate.odds);
-    return (
-      candidate.model_probability >= 50.5 &&
-      price !== null &&
-      price >= -325 &&
-      price <= 150
-    );
-  });
+  /*
+    Mixed pools:
+    Moneylines remain the foundation. Experimental totals can replace a leg
+    when they pass the stricter totals filter above.
+  */
+  const balancedMixed = [
+    ...balancedMoneylines,
+    ...totalCandidates.filter((candidate) => candidate.model_probability >= 55),
+  ].sort(byLikelihood);
 
-  const bestStraight = safer[0] ?? balanced[0] ?? null;
-  const twoLeg = diversifiedSelection(safer, 2, 0, 1);
-  const threeLeg = diversifiedSelection(balanced, 3, 1, 2);
-  const fourLeg = diversifiedSelection(wider, 4, 2, 3);
-  const fiveLeg = diversifiedSelection(higherRisk, 5, 0, 2);
-  const sixLeg = diversifiedSelection(higherRisk, 6, 1, 3);
-  const eightLeg = diversifiedSelection(higherRisk, 8, 3, 5);
+  const widerMixed = [
+    ...widerMoneylines,
+    ...totalCandidates.filter((candidate) => candidate.model_probability >= 53),
+  ].sort(byLikelihood);
+
+  const highRiskMixed = [
+    ...moneylineCandidates.filter((candidate) => {
+      const price = americanOddsNumber(candidate.odds);
+      return (
+        candidate.model_probability >= 50.5 &&
+        price !== null &&
+        price >= -325 &&
+        price <= 150
+      );
+    }),
+    ...totalCandidates.filter((candidate) => candidate.model_probability >= 52),
+  ].sort(byLikelihood);
+
+  const bestStraight = saferMoneylines[0] ?? balancedMoneylines[0] ?? null;
+  const twoLeg = uniqueEventSelection(saferMoneylines, 2, 0);
+
+  // Starting with the 3-leg card, totals can enter the parlay.
+  const threeLeg = uniqueEventSelection(balancedMixed, 3, 0);
+  const fourLeg = uniqueEventSelection(widerMixed, 4, 1);
+  const fiveLeg = uniqueEventSelection(highRiskMixed, 5, 2);
+  const sixLeg = uniqueEventSelection(highRiskMixed, 6, 3);
+  const eightLeg = uniqueEventSelection(highRiskMixed, 8, 4);
 
   return (
     <div>
       <p className="text-xs font-bold uppercase tracking-[0.25em] text-green-400">
-        RDG MLB MODEL • v1.2 PREGAME
+        RDG MLB MODEL • MONEYLINE + EXPERIMENTAL TOTALS
       </p>
 
       <h2 className="mt-3 text-3xl font-bold">Live MLB Analysis</h2>
 
       <p className="mt-2 text-sm text-slate-400">
-        RDG calibrated team probabilities with a conservative experimental starting-pitcher adjustment compared with current Hard Rock Bet moneylines.
+        RDG projected winners plus qualifying Hard Rock game totals. Totals are
+        still experimental and are held to a stricter filter.
       </p>
 
       <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-300">
-        Review cards are value-oriented. Parlay cards are likelihood-oriented and use RDG&apos;s projected winner instead of automatically selecting the side with the largest market discrepancy.
+        Moneyline probabilities use the calibrated team model. Game-total
+        probabilities are experimental: the historical test measured run
+        projection error, not sportsbook Over/Under win rate or profitability.
       </div>
 
       <section className="mt-8 grid gap-4 md:grid-cols-4">
         <Stat title="MLB GAMES" value={mlb ? String(mlb.games_found ?? games.length) : "—"} />
         <Stat title="PRIORITY REVIEWS" value={mlb ? String(mlb.priority_reviews ?? 0) : "—"} />
-        <Stat title="STRONG REVIEWS" value={mlb ? String(mlb.strong_reviews ?? 0) : "—"} />
+        <Stat title="TOTAL REVIEWS" value={String(totalCandidates.length)} />
         <Stat title="WATCH REVIEWS" value={mlb ? String(mlb.watch_reviews ?? 0) : "—"} />
       </section>
 
@@ -2350,70 +2490,148 @@ function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading:
             </section>
           ) : (
             <div className="mt-8 rounded-xl border border-white/10 bg-white/[0.03] p-6">
-              No MLB review signals right now.
+              No MLB moneyline review signals right now.
             </div>
+          )}
+
+          {totalCandidates.length > 0 && (
+            <>
+              <div className="mt-12 border-t border-white/10 pt-10">
+                <p className="text-xs font-bold uppercase tracking-[0.25em] text-sky-400">
+                  EXPERIMENTAL TOTALS
+                </p>
+                <h2 className="mt-3 text-2xl font-bold">Qualified Over / Under Reviews</h2>
+              </div>
+
+              <section className="mt-6 grid gap-4 lg:grid-cols-2">
+                {totalCandidates.map((candidate, index) => (
+                  <div
+                    key={`${candidate.event_id}-total-${index}`}
+                    className="rounded-xl border border-sky-500/25 bg-sky-500/[0.05] p-5"
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <p className="text-xs font-black uppercase tracking-wider text-sky-400">
+                          EXPERIMENTAL TOTAL REVIEW
+                        </p>
+                        <p className="mt-2 text-xl font-black">
+                          {candidate.display_bet} {candidate.odds || ""}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {candidate.matchup}
+                        </p>
+                      </div>
+
+                      <div className="text-right">
+                        <p className="font-black text-sky-400">
+                          {candidate.edge.toFixed(1)} pp
+                        </p>
+                        <p className="text-[10px] uppercase text-slate-500">
+                          Model vs Market
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-3 gap-3">
+                      <MiniStat
+                        title="RDG MODEL"
+                        value={`${candidate.model_probability.toFixed(1)}%`}
+                      />
+                      <MiniStat
+                        title="NO-VIG MARKET"
+                        value={
+                          candidate.market_probability !== null
+                            ? `${candidate.market_probability.toFixed(1)}%`
+                            : "—"
+                        }
+                      />
+                      <MiniStat
+                        title="PROJECTED RUNS"
+                        value={
+                          candidate.projected_total !== null &&
+                          candidate.projected_total !== undefined
+                            ? candidate.projected_total.toFixed(2)
+                            : "—"
+                        }
+                      />
+                    </div>
+                  </div>
+                ))}
+              </section>
+            </>
           )}
 
           <div className="mt-14 border-t border-white/10 pt-10">
             <p className="text-xs font-bold uppercase tracking-[0.25em] text-green-400">
-              RDG MLB PARLAY BUILDER
+              RDG MLB MIXED PARLAY BUILDER
             </p>
             <h2 className="mt-3 text-3xl font-bold">
-              Today&apos;s MLB Projected Winners
+              Today&apos;s MLB Mixed-Market Selections
             </h2>
             <p className="mt-2 max-w-3xl text-sm text-slate-400">
-              These cards prioritize RDG win probability and model/market agreement. They are not built by chasing the largest underdog edge.
+              Moneylines remain the foundation. Qualified experimental game
+              totals can enter 3-leg and larger cards. RDG uses no more than
+              one selection from the same game.
             </p>
           </div>
 
           <section className="mt-8 grid gap-5 lg:grid-cols-2">
             <MLBBuilderCard
               title="BEST STRAIGHT"
-              subtitle="55%+ RDG WIN PROBABILITY • NORMAL PRICE RANGE"
+              subtitle="PROJECTED WINNER • STRICTER MONEYLINE FILTER"
               candidates={bestStraight ? [bestStraight] : []}
               required={1}
             />
+
             <MLBBuilderCard
               title="TOP RDG PARLAY"
-              subtitle="55%+ RDG WIN PROBABILITY • MAX +110"
+              subtitle="2-LEG • STRICTER MONEYLINE FILTER"
               featured
               candidates={twoLeg}
               required={2}
             />
+
             <MLBBuilderCard
               title="BALANCED 3-LEG"
-              subtitle="52%+ RDG WIN PROBABILITY • MAX +125"
+              subtitle="MONEYLINE + QUALIFIED TOTALS"
               candidates={threeLeg}
               required={3}
             />
+
             <MLBBuilderCard
               title="WIDER 4-LEG"
-              subtitle="51%+ RDG WIN PROBABILITY • MAX +130"
+              subtitle="MIXED MLB MARKETS"
               candidates={fourLeg}
               required={4}
             />
+
             <MLBBuilderCard
               title="5-LEG • HIGH RISK"
-              subtitle="50.5%+ RDG WIN PROBABILITY • MAX +150"
+              subtitle="MIXED MLB MARKETS"
               candidates={fiveLeg}
               required={5}
             />
+
             <MLBBuilderCard
               title="6-LEG • HIGH RISK"
-              subtitle="50.5%+ RDG WIN PROBABILITY • MAX +150"
+              subtitle="MIXED MLB MARKETS"
               candidates={sixLeg}
               required={6}
             />
+
             <MLBBuilderCard
               title="8-LEG • LONG SHOT"
-              subtitle="50.5%+ RDG WIN PROBABILITY • MAX +150"
+              subtitle="MIXED MLB MARKETS"
               candidates={eightLeg}
               required={8}
             />
           </section>
 
           <div className="mt-5 rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 text-xs text-slate-400">
-            The MLB review board and parlay builder serve different purposes. Review signals identify model-versus-market disagreements; the parlay builder prioritizes teams RDG actually projects to win. If there are not enough qualifying projected winners, RDG leaves the card incomplete rather than forcing underdogs into it.
+            Experimental totals are not treated as validated betting edges.
+            They are displayed separately and only enter larger mixed-market
+            cards when they clear the stricter totals filter. RDG does not use
+            more than one leg from the same MLB game.
           </div>
 
           <div className="mt-12 border-t border-white/10 pt-10">
@@ -2496,13 +2714,25 @@ function MLBBuilderCard({
                     </p>
                   )}
                   <div className="mt-1 flex items-center gap-3">
-                    <TeamLogo sport="MLB" team={candidate.team} />
+                    {candidate.market_type === "moneyline" ? (
+                      <TeamLogo sport="MLB" team={candidate.team} />
+                    ) : (
+                      <span className="flex h-8 w-8 items-center justify-center rounded-full border border-sky-500/30 bg-sky-500/10 text-[10px] font-black text-sky-400">
+                        O/U
+                      </span>
+                    )}
                     <p className="text-lg font-bold">
                       {candidate.display_bet} {candidate.odds || ""}
                     </p>
                   </div>
                   <p className="mt-1 text-xs text-slate-500">
-                    {candidate.matchup} • Starter: {candidate.starter}
+                    {candidate.matchup}
+                    {candidate.market_type === "moneyline"
+                      ? ` • Starter: ${candidate.starter}`
+                      : candidate.projected_total !== null &&
+                          candidate.projected_total !== undefined
+                        ? ` • RDG projected total: ${candidate.projected_total.toFixed(2)}`
+                        : ""}
                   </p>
                 </div>
 
@@ -2532,7 +2762,10 @@ function MLBBuilderCard({
               </div>
 
               <p className="mt-3 text-xs text-slate-500">
-                {candidate.signal}. Live pitcher adjustment is experimental.
+                {candidate.signal}.{" "}
+                {candidate.market_type === "total"
+                  ? "Total model is experimental and not yet validated against historical sportsbook total lines."
+                  : "Live pitcher adjustment is experimental."}
               </p>
             </div>
           ))}
