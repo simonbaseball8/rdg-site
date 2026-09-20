@@ -1865,45 +1865,85 @@ function BuilderCard({
                 </button>
 
                 {expandedPicks.has(`${candidate.event_id}-${index}`) && (
-                  <div className="mt-3 rounded-lg border border-white/10 bg-white/[0.025] p-4">
-                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-400">
-                      RDG MODEL REASON
-                    </p>
-
+                  <div className="mt-3">
                     {candidate.market_type === "passing_prop" ? (
-                      <div className="mt-3 space-y-2 text-xs leading-5 text-slate-300">
-                        <p>
-                          • RDG projects <span className="font-bold text-white">{candidate.projected_margin.toFixed(1)} passing yards</span> versus the displayed line of <span className="font-bold text-white">{candidate.line.toFixed(1)}</span>, a <span className="font-bold text-emerald-300">{candidate.projected_margin - candidate.line >= 0 ? "+" : ""}{(candidate.projected_margin - candidate.line).toFixed(1)}-yard</span> model difference.
-                        </p>
-                        <p>
-                          • The frozen V2 residual calibration gives this {candidate.selection} a <span className="font-bold text-white">{(candidate.model_probability || 0).toFixed(1)}% model-implied probability</span>.
-                        </p>
-                        <p>
-                          • The no-vig sportsbook estimate is <span className="font-bold text-white">{candidate.market_probability !== null && candidate.market_probability !== undefined ? `${candidate.market_probability.toFixed(1)}%` : "unavailable"}</span>, producing a <span className="font-bold text-emerald-300">+{candidate.difference.toFixed(1)} percentage-point</span> model/market difference.
-                        </p>
-                        {candidate.sportsbook_name && candidate.odds && (
-                          <p>
-                            • Displayed price: <span className="font-bold text-white">{candidate.sportsbook_name.toUpperCase()} {Number(candidate.odds) > 0 ? "+" : ""}{candidate.odds}</span> at this exact line.
-                          </p>
-                        )}
-                        <p className="pt-1 text-amber-300">
-                          Main risk: passing-yard results are volatile. RDG&apos;s 2025 V2 test MAE was about 59.6 yards, so this is a model review rather than a guaranteed outcome.
-                        </p>
-                      </div>
+                      <>
+                        <div className="grid gap-3 lg:grid-cols-2">
+                          <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/[0.06] p-4">
+                            <p className="text-sm font-black uppercase tracking-[0.12em] text-emerald-300">
+                              ✓ Why RDG Thinks This Is a Good Pick
+                            </p>
+                            <div className="mt-3 space-y-2 text-sm leading-6 text-slate-200">
+                              <p>✓ RDG projects <b className="text-white">{candidate.projected_margin.toFixed(1)} passing yards</b> versus <b className="text-white">{candidate.line.toFixed(1)}</b>, a <b className="text-emerald-300">{candidate.projected_margin - candidate.line >= 0 ? "+" : ""}{(candidate.projected_margin - candidate.line).toFixed(1)}-yard</b> difference.</p>
+                              <p>✓ The {candidate.selection} has a <b className="text-white">{(candidate.model_probability || 0).toFixed(1)}% model-implied probability</b> versus a <b className="text-white">{candidate.market_probability !== null && candidate.market_probability !== undefined ? `${candidate.market_probability.toFixed(1)}%` : "—"}</b> no-vig market estimate.</p>
+                              <p>✓ That creates a <b className="text-emerald-300">+{candidate.difference.toFixed(1)} percentage-point</b> model-versus-market difference.</p>
+                              <p>✓ The selection passed RDG&apos;s current <b className="text-white">{candidate.review || "model review"}</b> filter rather than being added simply to fill a parlay.</p>
+                            </div>
+                          </div>
+
+                          <div className="rounded-xl border border-red-500/40 bg-red-500/[0.06] p-4">
+                            <p className="text-sm font-black uppercase tracking-[0.12em] text-red-400">
+                              ⚠ Potential Cons / Risks
+                            </p>
+                            <div className="mt-3 space-y-2 text-sm leading-6 text-red-200">
+                              <p>⚠ Passing-yard results are volatile. RDG&apos;s 2025 V2 test MAE was about <b>59.6 yards</b>.</p>
+                              <p>⚠ Game script can change passing volume. An early lead can reduce attempts, while pressure or turnovers can disrupt drives.</p>
+                              <p>⚠ Injuries or limitations to the QB, offensive line, or key receivers can materially change the projection.</p>
+                              <p>⚠ RDG does <b>not currently have a live injury/expected-lineup feed connected to this explanation</b>, so verify current player availability before relying on an injury-specific conclusion.</p>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="mt-3 grid gap-3 md:grid-cols-3">
+                          <div className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
+                            <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">Key Numbers</p>
+                            <div className="mt-3 space-y-2 text-sm">
+                              <div className="flex justify-between gap-4"><span className="text-slate-400">Projection</span><b>{candidate.projected_margin.toFixed(1)} yds</b></div>
+                              <div className="flex justify-between gap-4"><span className="text-slate-400">Line</span><b>{candidate.line.toFixed(1)}</b></div>
+                              <div className="flex justify-between gap-4"><span className="text-slate-400">Difference</span><b className="text-emerald-300">{candidate.projected_margin - candidate.line >= 0 ? "+" : ""}{(candidate.projected_margin - candidate.line).toFixed(1)} yds</b></div>
+                              <div className="flex justify-between gap-4"><span className="text-slate-400">Model Prob.</span><b>{(candidate.model_probability || 0).toFixed(1)}%</b></div>
+                              <div className="flex justify-between gap-4"><span className="text-slate-400">Market Prob.</span><b>{candidate.market_probability !== null && candidate.market_probability !== undefined ? `${candidate.market_probability.toFixed(1)}%` : "—"}</b></div>
+                            </div>
+                          </div>
+
+                          <div className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
+                            <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">Context</p>
+                            <div className="mt-3 space-y-2 text-sm">
+                              <div className="flex justify-between gap-4"><span className="text-slate-400">Player</span><b className="text-right">{candidate.team}</b></div>
+                              <div className="flex justify-between gap-4"><span className="text-slate-400">Game</span><b>{candidate.matchup}</b></div>
+                              <div className="flex justify-between gap-4"><span className="text-slate-400">Sportsbook</span><b>{candidate.sportsbook_name ? candidate.sportsbook_name.toUpperCase() : "Available book"}</b></div>
+                              <div className="flex justify-between gap-4"><span className="text-slate-400">Odds</span><b>{candidate.odds ? `${Number(candidate.odds) > 0 ? "+" : ""}${candidate.odds}` : "—"}</b></div>
+                              <div className="flex justify-between gap-4"><span className="text-slate-400">Model</span><b>RDG NFL V2</b></div>
+                            </div>
+                          </div>
+
+                          <div className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
+                            <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">Bottom Line</p>
+                            <p className="mt-3 text-sm leading-6 text-slate-300">
+                              RDG&apos;s numbers favor <b className="text-white">{candidate.team} {candidate.selection} {candidate.line.toFixed(1)}</b>. The model&apos;s estimated advantage is <b className="text-emerald-300">+{candidate.difference.toFixed(1)} percentage points</b> versus the no-vig market estimate. Check late injury and lineup news because those factors are not yet automatically included.
+                            </p>
+                          </div>
+                        </div>
+                      </>
                     ) : (
-                      <div className="mt-3 space-y-2 text-xs leading-5 text-slate-300">
-                        <p>
-                          • RDG projects <span className="font-bold text-white">{candidate.projected_winner} by {candidate.projected_margin.toFixed(1)}</span>.
-                        </p>
-                        <p>
-                          • RDG differs from the current spread market by <span className="font-bold text-emerald-300">{candidate.difference.toFixed(1)} points</span>, which is why this side passed the builder&apos;s model filter.
-                        </p>
-                        <p>
-                          • The historical <span className="font-bold text-white">{candidate.historical_bucket}</span> projected-margin bucket went <span className="font-bold text-white">{candidate.historical_correct}/{candidate.historical_sample} ({candidate.historical_accuracy}%)</span> on straight-up projected winners.
-                        </p>
-                        <p className="pt-1 text-amber-300">
-                          Main risk: that historical percentage is straight-up model performance, not the historical ATS win rate or probability of this spread covering.
-                        </p>
+                      <div className="grid gap-3 lg:grid-cols-2">
+                        <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/[0.06] p-4">
+                          <p className="text-sm font-black uppercase tracking-[0.12em] text-emerald-300">✓ Why RDG Likes This Side</p>
+                          <div className="mt-3 space-y-2 text-sm leading-6 text-slate-200">
+                            <p>✓ RDG projects <b className="text-white">{candidate.projected_winner} by {candidate.projected_margin.toFixed(1)}</b>.</p>
+                            <p>✓ The model differs from the current spread market by <b className="text-emerald-300">{candidate.difference.toFixed(1)} points</b>.</p>
+                            <p>✓ The historical <b>{candidate.historical_bucket}</b> projected-margin bucket went <b>{candidate.historical_correct}/{candidate.historical_sample} ({candidate.historical_accuracy}%)</b> on straight-up projected winners.</p>
+                          </div>
+                        </div>
+
+                        <div className="rounded-xl border border-red-500/40 bg-red-500/[0.06] p-4">
+                          <p className="text-sm font-black uppercase tracking-[0.12em] text-red-400">⚠ Potential Cons / Risks</p>
+                          <div className="mt-3 space-y-2 text-sm leading-6 text-red-200">
+                            <p>⚠ The historical percentage shown is straight-up model performance, not ATS cover probability.</p>
+                            <p>⚠ Injuries, inactive starters, weather, and late line movement can materially change the matchup.</p>
+                            <p>⚠ RDG does not currently inject live injury status into this explanation, so current availability should be checked separately.</p>
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>
