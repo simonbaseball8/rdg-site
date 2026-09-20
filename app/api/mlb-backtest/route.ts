@@ -29,6 +29,8 @@ type ModelGame = {
   strengthDifference: number;
   homeWon: boolean;
   actualMargin: number;
+  baselineProjectedTotal: number;
+  actualTotal: number;
 };
 
 async function fetchJson(url: string) {
@@ -79,6 +81,35 @@ function teamStrength(state: TeamState) {
     runDiffPerGame * 0.8;
 
   return winComponent + runComponent;
+}
+
+function baselineProjectedTotal(
+  awayState: TeamState,
+  homeState: TeamState
+) {
+  if (awayState.games === 0 || homeState.games === 0) {
+    return 0;
+  }
+
+  const awayRunsFor =
+    awayState.runsScored / awayState.games;
+
+  const awayRunsAgainst =
+    awayState.runsAllowed / awayState.games;
+
+  const homeRunsFor =
+    homeState.runsScored / homeState.games;
+
+  const homeRunsAgainst =
+    homeState.runsAllowed / homeState.games;
+
+  const awayExpected =
+    (awayRunsFor + homeRunsAgainst) / 2;
+
+  const homeExpected =
+    (homeRunsFor + awayRunsAgainst) / 2;
+
+  return awayExpected + homeExpected;
 }
 
 function logistic(value: number) {
@@ -283,6 +314,16 @@ async function loadSeason(
         actualMargin:
           game.homeScore -
           game.awayScore,
+
+        baselineProjectedTotal:
+          baselineProjectedTotal(
+            awayState,
+            homeState
+          ),
+
+        actualTotal:
+          game.awayScore +
+          game.homeScore,
       });
     }
 
@@ -562,6 +603,160 @@ function evaluate(
   };
 }
 
+function fitTotalRegression(
+  games: ModelGame[]
+) {
+  const n = games.length;
+
+  const meanX =
+    games.reduce(
+      (sum, game) =>
+        sum + game.baselineProjectedTotal,
+      0
+    ) / n;
+
+  const meanY =
+    games.reduce(
+      (sum, game) =>
+        sum + game.actualTotal,
+      0
+    ) / n;
+
+  let numerator = 0;
+  let denominator = 0;
+
+  for (const game of games) {
+    const dx =
+      game.baselineProjectedTotal - meanX;
+
+    numerator +=
+      dx * (game.actualTotal - meanY);
+
+    denominator +=
+      dx * dx;
+  }
+
+  const slope =
+    denominator > 0
+      ? numerator / denominator
+      : 1;
+
+  const intercept =
+    meanY - slope * meanX;
+
+  return {
+    intercept,
+    slope,
+  };
+}
+
+function evaluateTotals(
+  games: ModelGame[],
+  intercept: number,
+  slope: number
+) {
+  let absoluteError = 0;
+  let squaredError = 0;
+  let signedError = 0;
+
+  const buckets = {
+    "projected-under-8": {
+      games: 0,
+      actualTotal: 0,
+    },
+    "projected-8-to-9": {
+      games: 0,
+      actualTotal: 0,
+    },
+    "projected-over-9": {
+      games: 0,
+      actualTotal: 0,
+    },
+  };
+
+  for (const game of games) {
+    const projected =
+      intercept +
+      slope *
+        game.baselineProjectedTotal;
+
+    const error =
+      projected - game.actualTotal;
+
+    absoluteError +=
+      Math.abs(error);
+
+    squaredError +=
+      error * error;
+
+    signedError +=
+      error;
+
+    const bucket =
+      projected < 8
+        ? "projected-under-8"
+        : projected <= 9
+          ? "projected-8-to-9"
+          : "projected-over-9";
+
+    buckets[bucket].games += 1;
+    buckets[bucket].actualTotal +=
+      game.actualTotal;
+  }
+
+  const bucketResults =
+    Object.fromEntries(
+      Object.entries(buckets).map(
+        ([name, result]) => [
+          name,
+          {
+            games: result.games,
+            average_actual_total:
+              result.games > 0
+                ? Number(
+                    (
+                      result.actualTotal /
+                      result.games
+                    ).toFixed(3)
+                  )
+                : null,
+          },
+        ]
+      )
+    );
+
+  return {
+    games: games.length,
+
+    mae:
+      Number(
+        (
+          absoluteError /
+          games.length
+        ).toFixed(3)
+      ),
+
+    rmse:
+      Number(
+        Math.sqrt(
+          squaredError /
+            games.length
+        ).toFixed(3)
+      ),
+
+    mean_error:
+      Number(
+        (
+          signedError /
+          games.length
+        ).toFixed(3)
+      ),
+
+    projected_total_buckets:
+      bucketResults,
+  };
+}
+
 export async function GET() {
   try {
     /*
@@ -624,6 +819,40 @@ export async function GET() {
       );
 
     /*
+      Separate TEAM-ONLY totals calibration.
+
+      This uses only each team's pregame runs scored/allowed
+      averages. Starting-pitcher statistics are intentionally
+      excluded here to avoid full-season pitcher-stat leakage.
+    */
+
+    const fittedTotals =
+      fitTotalRegression(
+        trainingGames
+      );
+
+    const totalsTraining =
+      evaluateTotals(
+        trainingGames,
+        fittedTotals.intercept,
+        fittedTotals.slope
+      );
+
+    const totalsEvaluation =
+      evaluateTotals(
+        evaluationGames,
+        fittedTotals.intercept,
+        fittedTotals.slope
+      );
+
+    const rawTotalsEvaluation =
+      evaluateTotals(
+        evaluationGames,
+        0,
+        1
+      );
+
+    /*
       Translate fitted home advantage
       into probability for two equally
       rated teams.
@@ -674,7 +903,7 @@ export async function GET() {
         "RDG MLB",
 
       version:
-        "1.1-calibration-test",
+        "1.2-moneyline-and-totals-calibration",
 
       status:
         "Completed",
@@ -702,7 +931,10 @@ export async function GET() {
           "Starting-pitcher season statistics are intentionally excluded from this first calibration because final full-season pitcher stats would leak future information into earlier games.",
 
         market_note:
-          "This endpoint evaluates winner prediction and probability calibration only. It does not test historical Hard Rock prices, ATS/run-line performance, ROI, or profitability.",
+          "Historical sportsbook total lines and prices are not available in this endpoint, so the totals section evaluates run projection accuracy only. It does not establish Over/Under betting accuracy, edge, ROI, or profitability.",
+
+        totals_note:
+          "The totals calibration uses only chronological pregame team runs scored/allowed per game. Starting-pitcher adjustments are excluded from the historical totals calibration to avoid future leakage from full-season pitcher statistics.",
       },
 
       samples: {
@@ -749,6 +981,36 @@ export async function GET() {
       old_v1_same_2025_sample:
         oldModelEvaluation,
 
+      totals_calibration: {
+        formula:
+          "calibratedProjectedTotal = intercept + slope * baselineProjectedTotal",
+
+        baseline:
+          "away expected runs = average(away pregame runs scored/game, home pregame runs allowed/game); home expected runs = average(home pregame runs scored/game, away pregame runs allowed/game)",
+
+        fitted_intercept:
+          Number(
+            fittedTotals.intercept.toFixed(6)
+          ),
+
+        fitted_slope:
+          Number(
+            fittedTotals.slope.toFixed(6)
+          ),
+
+        training_results:
+          totalsTraining,
+
+        evaluation_2025:
+          totalsEvaluation,
+
+        raw_uncalibrated_2025:
+          rawTotalsEvaluation,
+
+        warning:
+          "This validates team-based run-total projection error only. It does not validate sportsbook Over/Under selections because historical market totals and prices are not included.",
+      },
+
       interpretation: {
         winner_accuracy:
           "Percentage of games where the side above 50% won.",
@@ -760,7 +1022,7 @@ export async function GET() {
           "Probability accuracy metric that penalizes overconfidence. Lower is better.",
 
         next_step:
-          "Use the held-out 2025 results to decide whether the fitted intercept and slope should replace the heuristic probability conversion in the live MLB model.",
+          "Use the held-out 2025 moneyline and totals results to calibrate the live models. Before treating totals as betting signals, historical sportsbook total lines/prices should also be tested.",
       },
     });
   } catch (error) {
