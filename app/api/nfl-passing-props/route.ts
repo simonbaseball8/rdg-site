@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 900;
+
+const CACHE_SECONDS = 900;
 
 const CURRENT_SEASON = 2026;
 const PRIOR_SEASON = 2025;
@@ -253,7 +256,7 @@ async function fetchCSV(
 ): Promise<Row[]> {
   const response =
     await fetch(url, {
-      cache: "no-store",
+      next: { revalidate: 3600 },
     });
 
   if (!response.ok) {
@@ -1432,8 +1435,10 @@ export async function GET() {
                 apiKey,
             },
 
-            cache:
-              "no-store",
+            next: {
+              revalidate:
+                CACHE_SECONDS,
+            },
           }
         ),
       ]);
@@ -1904,7 +1909,18 @@ export async function GET() {
       success: true,
 
       version:
-        "3.0-rdg-passing-probability",
+        "3.1-rdg-passing-probability-cached",
+
+      cache_policy: {
+        sportsbook_cache_seconds:
+          CACHE_SECONDS,
+
+        nflverse_cache_seconds:
+          3600,
+
+        note:
+          "SportsGameOdds responses are cached for 15 minutes to reduce provider requests and rate-limit risk.",
+      },
 
       sport:
         "NFL",
@@ -2013,6 +2029,11 @@ export async function GET() {
 
       updated_at:
         new Date().toISOString(),
+    }, {
+      headers: {
+        "Cache-Control":
+          "public, s-maxage=900, stale-while-revalidate=1800",
+      },
     });
   } catch (error) {
     return NextResponse.json(
