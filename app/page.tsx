@@ -336,6 +336,102 @@ type BetCandidate = {
   sportsbook_name?: string | null;
 };
 
+type NFLContextBundle = {
+  defense: any | null;
+  injuries: any | null;
+  importance: any | null;
+};
+
+function normalizeNFLTeam(value: unknown) {
+  const team = String(value ?? "").trim().toUpperCase();
+  const aliases: Record<string, string> = {
+    JAC: "JAX", SD: "LAC", SDG: "LAC", OAK: "LV", RAI: "LV",
+    STL: "LAR", LA: "LAR", RAM: "LAR", KAN: "KC", CLT: "IND",
+    CRD: "ARI", WSH: "WAS",
+  };
+  return aliases[team] || team;
+}
+
+function firstArray(source: any, keys: string[]) {
+  for (const key of keys) {
+    if (Array.isArray(source?.[key])) return source[key];
+  }
+  return [];
+}
+
+function firstNumber(source: any, paths: string[][]): number | null {
+  for (const path of paths) {
+    let value = source;
+    for (const key of path) value = value?.[key];
+    const number = Number(value);
+    if (Number.isFinite(number)) return number;
+  }
+  return null;
+}
+
+function getNFLContext(candidate: BetCandidate, context: NFLContextBundle) {
+  const importanceRows = firstArray(context.importance, ["players", "injuries", "records", "results"]);
+  const injuryRows = firstArray(context.injuries, ["injuries", "players", "records", "results"]);
+  const defenseRows = firstArray(context.defense, ["teams", "defenses", "records", "results"]);
+
+  const playerKey = String(candidate.player_name || "").trim().toLowerCase();
+  const playerImportance = importanceRows.find((row: any) =>
+    String(row?.player_name || row?.display_name || row?.name || "").trim().toLowerCase() === playerKey
+  );
+
+  let playerTeam = normalizeNFLTeam(
+    candidate.team || playerImportance?.team || playerImportance?.current_team || playerImportance?.nfl_team
+  );
+
+  const matchupTeams = candidate.matchup
+    .split("@")
+    .map((team) => normalizeNFLTeam(team));
+
+  if (!playerTeam && candidate.market_type === "passing_prop" && playerImportance) {
+    playerTeam = normalizeNFLTeam(playerImportance?.team);
+  }
+
+  const opponent = matchupTeams.find((team) => team && team !== playerTeam) || "";
+
+  const opponentDefense = defenseRows.find((row: any) =>
+    normalizeNFLTeam(row?.team || row?.team_abbr || row?.abbr || row?.defteam) === opponent
+  );
+
+  const defenseRating = firstNumber(opponentDefense, [
+    ["stabilized", "overall_rating"], ["stabilized", "pass_defense_rating"],
+    ["overall_rating"], ["pass_defense_rating"], ["rating"],
+  ]);
+  const passYPA = firstNumber(opponentDefense, [
+    ["stabilized", "pass_yards_per_attempt_allowed"], ["current", "pass_yards_per_attempt_allowed"],
+    ["pass_yards_per_attempt_allowed"], ["pass_ypa_allowed"],
+  ]);
+  const passYPG = firstNumber(opponentDefense, [
+    ["stabilized", "pass_yards_allowed_per_game"], ["current", "pass_yards_allowed_per_game"],
+    ["pass_yards_allowed_per_game"], ["pass_ypg_allowed"],
+  ]);
+
+  const matchupSet = new Set(matchupTeams.filter(Boolean));
+  const relevantInjuries = injuryRows.filter((row: any) => {
+    const team = normalizeNFLTeam(row?.team || row?.team_abbr || row?.abbr);
+    const status = String(row?.game_status || row?.report_status || row?.status || "").toUpperCase();
+    return matchupSet.has(team) && ["OUT", "DOUBTFUL", "QUESTIONABLE"].includes(status);
+  });
+
+  const playerInjury = relevantInjuries.find((row: any) =>
+    String(row?.player_name || row?.display_name || row?.name || "").trim().toLowerCase() === playerKey
+  );
+
+  return { playerTeam, opponent, opponentDefense, defenseRating, passYPA, passYPG, relevantInjuries, playerInjury };
+}
+
+function injurySummary(row: any) {
+  const name = row?.player_name || row?.display_name || row?.name || "Player";
+  const status = String(row?.game_status || row?.report_status || row?.status || "NO DESIGNATION").toUpperCase();
+  const injury = row?.injury || row?.report_primary_injury || row?.primary_injury || "unspecified injury";
+  const team = normalizeNFLTeam(row?.team || row?.team_abbr || row?.abbr);
+  return `${team ? `${team} • ` : ""}${name} — ${status} (${injury})`;
+}
+
 function diversifiedSelection<T>(items: T[], count: number, offset: number, stride: number) {
   if (count <= 0 || items.length === 0) return [];
 
@@ -427,6 +523,7 @@ export default function Home() {
     useState(true);
   const [nflPassingPropsError, setNflPassingPropsError] =
     useState("");
+  const [nflContext, setNflContext] = useState<NFLContextBundle>({ defense: null, injuries: null, importance: null });
 const [activeSport, setActiveSport] =
   useState<"NFL" | "CFB" | "MLB" | "NHL">("NFL");
 
@@ -519,6 +616,26 @@ const [cfbError, setCfbError] =
       }
     }
 
+    async function loadNFLContext() {
+      try {
+        const [defenseResponse, injuriesResponse, importanceResponse] = await Promise.all([
+          fetch("/api/nfl-defense-stats", { cache: "no-store" }),
+          fetch("/api/nfl-injuries", { cache: "no-store" }),
+          fetch("/api/nfl-player-importance", { cache: "no-store" }),
+        ]);
+
+        const [defense, injuries, importance] = await Promise.all([
+          defenseResponse.ok ? defenseResponse.json() : null,
+          injuriesResponse.ok ? injuriesResponse.json() : null,
+          importanceResponse.ok ? importanceResponse.json() : null,
+        ]);
+
+        setNflContext({ defense, injuries, importance });
+      } catch (err) {
+        console.error("NFL context load failed", err);
+      }
+    }
+
         async function loadCFB() {
       try {
         const response = await fetch(
@@ -580,6 +697,7 @@ const [cfbError, setCfbError] =
     loadParlays();
     loadNFL();
     loadNFLPassingProps();
+    loadNFLContext();
     loadCFB();
     loadMLB();
     loadNHL();
@@ -1348,14 +1466,14 @@ const [cfbError, setCfbError] =
                       ? [bestStraight]
                       : []
                   }
-                  required={1}
+                  required={1} nflContext={nflContext}
                 />
 
                 <BuilderCard
                   title="TOP RDG PARLAY"
                   subtitle="Strongest Stricter-Filter Combination"
                   candidates={saferTwoLeg}
-                  required={2}
+                  required={2} nflContext={nflContext}
                   featured
                 />
 
@@ -1365,7 +1483,7 @@ const [cfbError, setCfbError] =
                   candidates={
                     balancedThreeLeg
                   }
-                  required={3}
+                  required={3} nflContext={nflContext}
                 />
 
                 <BuilderCard
@@ -1374,12 +1492,12 @@ const [cfbError, setCfbError] =
                   candidates={
                     higherRiskFourLeg
                   }
-                  required={4}
+                  required={4} nflContext={nflContext}
                 />
 
-                <BuilderCard title="5-LEG • HIGH RISK" subtitle="Extended Model Filter" candidates={fiveLeg} required={5} />
-                <BuilderCard title="6-LEG • HIGH RISK" subtitle="Extended Model Filter" candidates={sixLeg} required={6} />
-                <BuilderCard title="8-LEG • LONG SHOT" subtitle="Long-Shot Model Filter" candidates={eightLeg} required={8} />
+                <BuilderCard title="5-LEG • HIGH RISK" subtitle="Extended Model Filter" candidates={fiveLeg} required={5} nflContext={nflContext} />
+                <BuilderCard title="6-LEG • HIGH RISK" subtitle="Extended Model Filter" candidates={sixLeg} required={6} nflContext={nflContext} />
+                <BuilderCard title="8-LEG • LONG SHOT" subtitle="Long-Shot Model Filter" candidates={eightLeg} required={8} nflContext={nflContext} />
               </section>
 
               <div className="mt-5 rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 text-xs text-slate-400">
@@ -1696,12 +1814,14 @@ function BuilderCard({
   candidates,
   required,
   featured = false,
+  nflContext,
 }: {
   title: string;
   subtitle: string;
   candidates: BetCandidate[];
   required: number;
   featured?: boolean;
+  nflContext: NFLContextBundle;
 }) {
   const qualified =
     candidates.length >= required;
@@ -1885,12 +2005,40 @@ function BuilderCard({
                             <p className="text-sm font-black uppercase tracking-[0.12em] text-red-400">
                               ⚠ Potential Cons / Risks
                             </p>
-                            <div className="mt-3 space-y-2 text-sm leading-6 text-red-200">
-                              <p>⚠ Passing-yard results are volatile. RDG&apos;s 2025 V2 test MAE was about <b>59.6 yards</b>.</p>
-                              <p>⚠ Game script can change passing volume. An early lead can reduce attempts, while pressure or turnovers can disrupt drives.</p>
-                              <p>⚠ Injuries or limitations to the QB, offensive line, or key receivers can materially change the projection.</p>
-                              <p>⚠ RDG does <b>not currently have a live injury/expected-lineup feed connected to this explanation</b>, so verify current player availability before relying on an injury-specific conclusion.</p>
-                            </div>
+                            {(() => {
+                              const ctx = getNFLContext(candidate, nflContext);
+                              return (
+                                <div className="mt-3 space-y-2 text-sm leading-6 text-red-200">
+                                  <p>⚠ Passing-yard results are volatile. RDG&apos;s 2025 V2 test MAE was about <b>59.6 yards</b>.</p>
+                                  <p>⚠ Game script can change passing volume. An early lead can reduce attempts, while pressure or turnovers can disrupt drives.</p>
+                                  {ctx.opponentDefense ? (
+                                    <p>
+                                      🛡️ <b>Opponent defense ({ctx.opponent || "—"}):</b>{" "}
+                                      {ctx.defenseRating !== null ? `RDG defense rating ${ctx.defenseRating.toFixed(1)}` : "defensive stats connected"}
+                                      {ctx.passYPA !== null ? ` • ${ctx.passYPA.toFixed(2)} pass YPA allowed` : ""}
+                                      {ctx.passYPG !== null ? ` • ${ctx.passYPG.toFixed(1)} pass yards/game allowed` : ""}.
+                                    </p>
+                                  ) : (
+                                    <p>🛡️ Defense feed is connected, but no matching opponent defensive row was returned for this selection.</p>
+                                  )}
+                                  {ctx.playerInjury ? (
+                                    <p>🚑 <b>Player injury:</b> {injurySummary(ctx.playerInjury)}.</p>
+                                  ) : null}
+                                  {ctx.relevantInjuries.length > 0 ? (
+                                    <>
+                                      <p>🚑 <b>Current matchup injuries:</b></p>
+                                      {ctx.relevantInjuries.slice(0, 5).map((injury: any, injuryIndex: number) => (
+                                        <p key={`${candidate.event_id}-injury-${injuryIndex}`}>• {injurySummary(injury)}</p>
+                                      ))}
+                                      {ctx.relevantInjuries.length > 5 && <p>• +{ctx.relevantInjuries.length - 5} additional flagged injuries</p>}
+                                    </>
+                                  ) : (
+                                    <p>🚑 Injury feed is connected; no OUT, DOUBTFUL, or QUESTIONABLE players were returned for this matchup.</p>
+                                  )}
+                                  <p className="text-red-300/80">⚠ Defense and injury data are shown as live matchup context. They are <b>not yet applied as validated numerical adjustments</b> to the frozen Passing V2 projection.</p>
+                                </div>
+                              );
+                            })()}
                           </div>
                         </div>
 
@@ -1920,7 +2068,7 @@ function BuilderCard({
                           <div className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
                             <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">Bottom Line</p>
                             <p className="mt-3 text-sm leading-6 text-slate-300">
-                              RDG&apos;s numbers favor <b className="text-white">{candidate.team} {candidate.selection} {candidate.line.toFixed(1)}</b>. The model&apos;s estimated advantage is <b className="text-emerald-300">+{candidate.difference.toFixed(1)} percentage points</b> versus the no-vig market estimate. Check late injury and lineup news because those factors are not yet automatically included.
+                              RDG&apos;s numbers favor <b className="text-white">{candidate.player_name} {candidate.selection} {candidate.line.toFixed(1)}</b>. The model&apos;s estimated difference is <b className="text-emerald-300">+{candidate.difference.toFixed(1)} percentage points</b> versus the no-vig market estimate. Live defense and injury context is displayed above, but those factors are not yet applied as validated numerical adjustments to Passing V2.
                             </p>
                           </div>
                         </div>
@@ -1938,11 +2086,32 @@ function BuilderCard({
 
                         <div className="rounded-xl border border-red-500/40 bg-red-500/[0.06] p-4">
                           <p className="text-sm font-black uppercase tracking-[0.12em] text-red-400">⚠ Potential Cons / Risks</p>
-                          <div className="mt-3 space-y-2 text-sm leading-6 text-red-200">
-                            <p>⚠ The historical percentage shown is straight-up model performance, not ATS cover probability.</p>
-                            <p>⚠ Injuries, inactive starters, weather, and late line movement can materially change the matchup.</p>
-                            <p>⚠ RDG does not currently inject live injury status into this explanation, so current availability should be checked separately.</p>
-                          </div>
+                          {(() => {
+                            const ctx = getNFLContext(candidate, nflContext);
+                            return (
+                              <div className="mt-3 space-y-2 text-sm leading-6 text-red-200">
+                                <p>⚠ The historical percentage shown is straight-up model performance, not ATS cover probability.</p>
+                                {ctx.opponentDefense ? (
+                                  <p>🛡️ <b>Opponent defense ({ctx.opponent || "—"}):</b> {ctx.defenseRating !== null ? `RDG defense rating ${ctx.defenseRating.toFixed(1)}` : "defensive stats connected"}{ctx.passYPA !== null ? ` • ${ctx.passYPA.toFixed(2)} pass YPA allowed` : ""}.</p>
+                                ) : (
+                                  <p>🛡️ Defense feed is connected, but no matching opponent defensive row was returned for this selection.</p>
+                                )}
+                                {ctx.relevantInjuries.length > 0 ? (
+                                  <>
+                                    <p>🚑 <b>Current matchup injuries:</b></p>
+                                    {ctx.relevantInjuries.slice(0, 5).map((injury: any, injuryIndex: number) => (
+                                      <p key={`${candidate.event_id}-spread-injury-${injuryIndex}`}>• {injurySummary(injury)}</p>
+                                    ))}
+                                    {ctx.relevantInjuries.length > 5 && <p>• +{ctx.relevantInjuries.length - 5} additional flagged injuries</p>}
+                                  </>
+                                ) : (
+                                  <p>🚑 Injury feed is connected; no OUT, DOUBTFUL, or QUESTIONABLE players were returned for this matchup.</p>
+                                )}
+                                <p>⚠ Weather and late line movement can still materially change the matchup.</p>
+                                <p className="text-red-300/80">⚠ Defense and injury data are displayed as matchup context and are not yet validated numerical adjustments to this projection.</p>
+                              </div>
+                            );
+                          })()}
                         </div>
                       </div>
                     )}
