@@ -422,6 +422,8 @@ export default function Home() {
 
   const [nflError, setNflError] =
     useState("");
+  const [lastUpdatedDisplay, setLastUpdatedDisplay] = useState("Updating...");
+  const [showNFLWeekResults, setShowNFLWeekResults] = useState(false);
   const [nflPassingProps, setNflPassingProps] =
     useState<NFLPassingPropsAnalysis | null>(null);
   const [nflPassingPropsLoading, setNflPassingPropsLoading] =
@@ -447,6 +449,17 @@ const [cfbError, setCfbError] =
   const [nhlLoading, setNhlLoading] = useState(true);
   const [nhlError, setNhlError] = useState("");
   useEffect(() => {
+    setLastUpdatedDisplay(
+      new Intl.DateTimeFormat("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        timeZoneName: "short",
+      }).format(new Date())
+    );
+
     async function loadParlays() {
       const { data, error } = await supabase
         .from("parlays")
