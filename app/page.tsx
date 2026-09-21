@@ -422,6 +422,7 @@ export default function Home() {
 
   const [nflError, setNflError] =
     useState("");
+  const [lastUpdatedDisplay, setLastUpdatedDisplay] = useState("Updating...");
   const [nflPassingProps, setNflPassingProps] =
     useState<NFLPassingPropsAnalysis | null>(null);
   const [nflPassingPropsLoading, setNflPassingPropsLoading] =
@@ -447,6 +448,13 @@ const [cfbError, setCfbError] =
   const [nhlLoading, setNhlLoading] = useState(true);
   const [nhlError, setNhlError] = useState("");
   useEffect(() => {
+    setLastUpdatedDisplay(
+      new Intl.DateTimeFormat("en-US", {
+        month: "short", day: "numeric", year: "numeric",
+        hour: "numeric", minute: "2-digit", timeZoneName: "short",
+      }).format(new Date())
+    );
+
     async function loadParlays() {
       const { data, error } = await supabase
         .from("parlays")
@@ -1051,58 +1059,35 @@ const [cfbError, setCfbError] =
   </button>
 </div>
         {activeSport === "NFL" && (
-          <div className="mb-10 overflow-hidden rounded-2xl border border-emerald-500/20 bg-[linear-gradient(135deg,rgba(16,185,129,0.07),rgba(255,255,255,0.015))] shadow-[0_18px_55px_rgba(0,0,0,0.22)]">
-            <div className="flex flex-col gap-5 p-5 sm:p-6 lg:flex-row lg:items-center lg:justify-between">
+          <div className="mb-10 rounded-2xl border border-emerald-500/20 bg-[linear-gradient(135deg,rgba(16,185,129,0.08),rgba(255,255,255,0.015))] p-5 shadow-[0_18px_55px_rgba(0,0,0,0.22)] sm:p-6">
+            <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-emerald-300">
-                    RDG NFL MODEL
-                  </span>
-                  <span className="rounded-full border border-white/10 bg-white/[0.035] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">
-                    Week {nfl?.schedule_week ?? "—"}
-                  </span>
+                  <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-emerald-300">RDG NFL MODEL</span>
+                  <span className="rounded-full border border-white/10 bg-white/[0.035] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">Week {nfl?.schedule_week ?? "—"}</span>
                 </div>
-
-                <h2 className="mt-3 text-2xl font-black tracking-tight text-white sm:text-3xl">
-                  NFL Command Center
+                <h2 className="mt-4 text-3xl font-black uppercase tracking-tight text-white sm:text-4xl lg:text-5xl">
+                  NFL <span className="text-emerald-400">COMMAND CENTER</span>
                 </h2>
                 <p className="mt-2 max-w-2xl text-sm text-slate-400">
                   Live Hard Rock odds, RDG model analysis, defense data, injury reports, and weekly parlay research in one place.
                 </p>
               </div>
 
-              <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap lg:justify-end">
-                <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/[0.08] px-4 py-3">
-                  <p className="text-[9px] font-black uppercase tracking-[0.18em] text-emerald-400">Games</p>
-                  <p className="mt-1 text-lg font-black text-white">{nfl?.games_found ?? "—"}</p>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
+                <div className="flex min-w-[210px] items-center gap-3 rounded-xl border border-emerald-500/20 bg-black/25 px-4 py-3">
+                  <span className="h-3 w-3 shrink-0 rounded-full bg-emerald-400 shadow-[0_0_14px_rgba(52,211,153,0.8)]" />
+                  <div>
+                    <p className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-500">Last Updated</p>
+                    <p className="mt-1 text-xs font-black text-white">{lastUpdatedDisplay}</p>
+                  </div>
                 </div>
-                <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-                  <p className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-500">Stats</p>
-                  <p className="mt-1 text-lg font-black text-white">{nfl ? `${nfl.games_with_stats}/${nfl.games_found}` : "—"}</p>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/[0.08] px-4 py-3"><p className="text-[9px] font-black uppercase tracking-[0.18em] text-emerald-400">Games</p><p className="mt-1 text-lg font-black text-white">{nfl?.games_found ?? "—"}</p></div>
+                  <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3"><p className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-500">Stats</p><p className="mt-1 text-lg font-black text-white">{nfl ? `${nfl.games_with_stats}/${nfl.games_found}` : "—"}</p></div>
+                  <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3"><p className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-500">Strong</p><p className="mt-1 text-lg font-black text-white">{nfl?.strong_reviews ?? "—"}</p></div>
+                  <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3"><p className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-500">Priority</p><p className="mt-1 text-lg font-black text-white">{nfl?.priority_reviews ?? "—"}</p></div>
                 </div>
-                <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-                  <p className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-500">Strong</p>
-                  <p className="mt-1 text-lg font-black text-white">{nfl?.strong_reviews ?? "—"}</p>
-                </div>
-                <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-                  <p className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-500">Priority</p>
-                  <p className="mt-1 text-lg font-black text-white">{nfl?.priority_reviews ?? "—"}</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 border-t border-white/10 sm:grid-cols-4">
-              <div className="border-r border-white/10 px-4 py-3 text-center text-[10px] font-black uppercase tracking-[0.16em] text-emerald-400">
-                ● Live Odds
-              </div>
-              <div className="border-r border-white/10 px-4 py-3 text-center text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">
-                Defense Stats
-              </div>
-              <div className="border-r border-white/10 px-4 py-3 text-center text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">
-                Injury Reports
-              </div>
-              <div className="px-4 py-3 text-center text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">
-                Weekly Parlays
               </div>
             </div>
           </div>
