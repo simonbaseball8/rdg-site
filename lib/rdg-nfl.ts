@@ -921,40 +921,28 @@ export async function getRdgNflAnalysis() {
     day: "2-digit",
   }).format(new Date());
 
-  // Keep the full NFL week active through its final scheduled game.
-  const weeks = Array.from(
-    new Set(scheduleRows.map((row) => num(row.week)))
-  ).sort((a, b) => a - b);
+  // Rolling NFL betting board: today through the next 7 calendar days.
+  const windowStart = todayDate;
+  const windowEndDate = new Date(`${todayDate}T12:00:00-04:00`);
+  windowEndDate.setDate(windowEndDate.getDate() + 7);
 
-  const weekWindows = weeks.map((week) => {
-    const rows = scheduleRows.filter((row) => num(row.week) === week);
-    const dates = rows.map((row) => row.gameday ?? "").filter(Boolean).sort();
+  const windowEnd = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(windowEndDate);
 
-    return {
-      week,
-      start: dates[0] ?? "",
-      end: dates[dates.length - 1] ?? "",
-    };
+  const slate = scheduleRows.filter((row) => {
+    const gameDate = (row.gameday ?? "").trim();
+    return gameDate && gameDate >= windowStart && gameDate <= windowEnd;
   });
 
-  const activeWeek =
-    weekWindows.find(
-      (window) =>
-        window.start &&
-        window.end &&
-        todayDate >= window.start &&
-        todayDate <= window.end
-    ) ??
-    weekWindows.find(
-      (window) => window.start && window.start > todayDate
-    ) ??
-    weekWindows[weekWindows.length - 1];
+  const weeksInWindow = Array.from(
+    new Set(slate.map((row) => num(row.week)))
+  ).sort((a, b) => a - b);
 
-  const nextWeek = activeWeek?.week ?? 1;
-
-  const slate = scheduleRows.filter(
-    (row) => num(row.week) === nextWeek
-  );
+  const nextWeek = weeksInWindow[0] ?? 1;
 
   const oddizeEvents = oddsData.events ?? [];
 
@@ -1144,7 +1132,7 @@ export async function getRdgNflAnalysis() {
     model:
       "RDG NFL Live",
 
-    version: "1.4-full-week-slate",
+    version: "1.5-rolling-7-day-window",
 
     model_status:
       "Backtested",
@@ -1159,7 +1147,7 @@ export async function getRdgNflAnalysis() {
         10.29,
 
       note:
-        "Backtest results describe historical out-of-sample performance and are not probabilities for individual future games. nflverse remains the schedule master. RDG keeps the full current NFL week on the board through the final scheduled game of that week. Live Hard Rock markets are attached from Oddize when available.",
+        "Backtest results describe historical out-of-sample performance and are not probabilities for individual future games. nflverse remains the schedule master. RDG uses a rolling 7-day NFL betting window from today through the next 7 calendar days, allowing adjacent NFL weeks to appear together when applicable. Live Hard Rock markets are attached from Oddize when available.",
     },
 
     calibration: {
@@ -1175,6 +1163,15 @@ export async function getRdgNflAnalysis() {
 
     schedule_week:
       nextWeek,
+
+    schedule_weeks:
+      weeksInWindow,
+
+    betting_window: {
+      start_date: windowStart,
+      end_date: windowEnd,
+      days_forward: 7,
+    },
 
     weekly_schedule_games:
       slate.length,
