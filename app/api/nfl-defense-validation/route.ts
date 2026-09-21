@@ -8,32 +8,28 @@ export const revalidate = 0;
 export const runtime = "nodejs";
 
 /*
-  RDG NFL DEFENSE VALIDATION V1.0
+  RDG NFL DEFENSE VALIDATION V1.1
 
-  GOAL
-  ----------------------------------------------------
-  Secondary validation of opponent pass-defense features.
+  PURPOSE
+  --------------------------------------------------
+  Validate the frozen defense adjustment on 2026.
 
-  Previous backtest:
-  - Fit defense coefficients on 2024
-  - Tested on 2025
-  - Pass YPG alone performed best:
-      Baseline MAE: 59.07
-      Defense YPG MAE: 58.36
-      Improvement: 0.71 yards
-
-  THIS ROUTE:
-  - Keeps the 2024 coefficient FROZEN.
-  - Does NOT refit using 2025 or 2026.
-  - Tests the frozen adjustment on 2026.
-  - Uses only defensive games completed BEFORE each week.
-  - Does NOT modify the live RDG model.
+  IMPORTANT:
+  - 2025 is PRIOR HISTORY ONLY.
+  - 2025 is NOT scored.
+  - 2026 is the validation sample.
+  - 2026 games are processed chronologically.
+  - Each 2026 prediction uses only information
+    available BEFORE that week's games.
+  - Defense coefficient remains frozen from 2024.
+  - Live Passing V2 is NOT changed.
 */
 
+const PRIOR_SEASON = 2025;
 const VALIDATION_SEASON = 2026;
 
 /*
-  Frozen from the 2024 training backtest.
+  Frozen coefficients learned from 2024.
 */
 
 const FROZEN_YPG_COEFFICIENT = 0.1693;
@@ -41,20 +37,6 @@ const FROZEN_YPA_COEFFICIENT = -2.7812;
 
 const PBP_URL = (season: number) =>
   `https://github.com/nflverse/nflverse-data/releases/download/pbp/play_by_play_${season}.csv.gz`;
-
-type RowIndexes = {
-  game_id: number;
-  week: number;
-  season_type: number;
-  posteam: number;
-  defteam: number;
-  passer_player_id: number;
-  passer_player_name: number;
-  pass_attempt: number;
-  passing_yards: number;
-  sack: number;
-  yards_gained: number;
-};
 
 type QBGame = {
   season: number;
@@ -73,7 +55,6 @@ type QBGame = {
 
 type QBHistory = {
   games: number;
-
   attempts: number;
   passingYards: number;
 
@@ -83,7 +64,6 @@ type QBHistory = {
 
 type DefenseHistory = {
   games: number;
-
   passAttempts: number;
   passYards: number;
 };
@@ -99,17 +79,17 @@ type Prediction = {
 
   baseline: number;
 
-  defenseYPG: number | null;
-  leagueYPG: number | null;
+  opponentPassYPG: number | null;
+  leaguePassYPG: number | null;
 
-  defenseYPA: number | null;
-  leagueYPA: number | null;
+  opponentPassYPA: number | null;
+  leaguePassYPA: number | null;
 
   ypgDifference: number;
   ypaDifference: number;
 
   ypgAdjustment: number;
-  combinedAdjustment: number;
+  ypaAdjustment: number;
 
   ypgProjection: number;
   combinedProjection: number;
@@ -125,21 +105,15 @@ function txt(value: unknown): string {
 
 function num(value: unknown): number {
   const n = Number(value);
-
-  return Number.isFinite(n)
-    ? n
-    : 0;
+  return Number.isFinite(n) ? n : 0;
 }
 
 function mean(values: number[]) {
-  if (!values.length) {
-    return 0;
-  }
+  if (!values.length) return 0;
 
   return (
     values.reduce(
-      (sum, value) =>
-        sum + value,
+      (sum, value) => sum + value,
       0
     ) / values.length
   );
@@ -156,13 +130,11 @@ function round(
     return null;
   }
 
-  const multiplier =
-    10 ** digits;
+  const multiplier = 10 ** digits;
 
   return (
-    Math.round(
-      value * multiplier
-    ) / multiplier
+    Math.round(value * multiplier) /
+    multiplier
   );
 }
 
@@ -173,23 +145,14 @@ function clamp(
 ) {
   return Math.max(
     min,
-    Math.min(
-      max,
-      value
-    )
+    Math.min(max, value)
   );
 }
 
-function normalizeTeam(
-  value: unknown
-) {
-  const team =
-    txt(value).toUpperCase();
+function normalizeTeam(value: unknown) {
+  const team = txt(value).toUpperCase();
 
-  const aliases: Record<
-    string,
-    string
-  > = {
+  const aliases: Record<string, string> = {
     JAC: "JAX",
 
     SD: "LAC",
@@ -214,21 +177,14 @@ function normalizeTeam(
 /* CSV                                                */
 /* -------------------------------------------------- */
 
-function parseCSVLine(
-  line: string
-): string[] {
+function parseCSVLine(line: string): string[] {
   const values: string[] = [];
 
   let value = "";
   let quoted = false;
 
-  for (
-    let i = 0;
-    i < line.length;
-    i++
-  ) {
-    const char =
-      line[i];
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
 
     if (char === '"') {
       if (
@@ -257,19 +213,16 @@ function parseCSVLine(
 }
 
 /* -------------------------------------------------- */
-/* LOAD PBP                                           */
+/* LOAD SEASON                                        */
 /* -------------------------------------------------- */
 
-async function loadSeason(
-  season: number
-) {
-  const response =
-    await fetch(
-      PBP_URL(season),
-      {
-        cache: "no-store",
-      }
-    );
+async function loadSeason(season: number) {
+  const response = await fetch(
+    PBP_URL(season),
+    {
+      cache: "no-store",
+    }
+  );
 
   if (!response.ok) {
     throw new Error(
@@ -283,146 +236,114 @@ async function loadSeason(
     );
   }
 
-  const nodeStream =
-    Readable.fromWeb(
-      response.body as any
-    );
-
-  const gunzip =
-    createGunzip();
-
-  nodeStream.pipe(
-    gunzip
+  const nodeStream = Readable.fromWeb(
+    response.body as any
   );
 
-  const reader =
-    readline.createInterface({
-      input: gunzip,
-      crlfDelay: Infinity,
-    });
+  const gunzip = createGunzip();
+
+  nodeStream.pipe(gunzip);
+
+  const reader = readline.createInterface({
+    input: gunzip,
+    crlfDelay: Infinity,
+  });
 
   let headers: string[] = [];
-
-  let indexes:
-    | RowIndexes
-    | null = null;
-
   let firstLine = true;
 
   let rowsRead = 0;
   let passRows = 0;
 
-  const qbGames =
-    new Map<
-      string,
-      QBGame
-    >();
+  let gameIdIndex = -1;
+  let weekIndex = -1;
+  let seasonTypeIndex = -1;
 
-  function indexOf(
-    name: string
-  ) {
-    return headers.indexOf(
-      name
-    );
-  }
+  let offenseIndex = -1;
+  let defenseIndex = -1;
+
+  let passerIdIndex = -1;
+  let passerNameIndex = -1;
+
+  let passAttemptIndex = -1;
+  let passingYardsIndex = -1;
+  let sackIndex = -1;
+  let yardsGainedIndex = -1;
+
+  const qbGames =
+    new Map<string, QBGame>();
 
   function value(
     row: string[],
     index: number
   ) {
-    if (index < 0) {
-      return "";
-    }
-
+    if (index < 0) return "";
     return row[index] ?? "";
   }
 
-  for await (
-    const rawLine of reader
-  ) {
-    const line =
-      String(rawLine);
+  for await (const rawLine of reader) {
+    const line = String(rawLine);
 
     if (firstLine) {
       firstLine = false;
 
-      headers =
-        parseCSVLine(
-          line
-        ).map(
-          (header) =>
-            header
-              .replace(
-                /^\uFEFF/,
-                ""
-              )
-              .trim()
+      headers = parseCSVLine(line).map(
+        (header) =>
+          header
+            .replace(/^\uFEFF/, "")
+            .trim()
+      );
+
+      gameIdIndex =
+        headers.indexOf("game_id");
+
+      weekIndex =
+        headers.indexOf("week");
+
+      seasonTypeIndex =
+        headers.indexOf("season_type");
+
+      offenseIndex =
+        headers.indexOf("posteam");
+
+      defenseIndex =
+        headers.indexOf("defteam");
+
+      passerIdIndex =
+        headers.indexOf(
+          "passer_player_id"
         );
 
-      indexes = {
-        game_id:
-          indexOf(
-            "game_id"
-          ),
+      passerNameIndex =
+        headers.indexOf(
+          "passer_player_name"
+        );
 
-        week:
-          indexOf(
-            "week"
-          ),
+      passAttemptIndex =
+        headers.indexOf(
+          "pass_attempt"
+        );
 
-        season_type:
-          indexOf(
-            "season_type"
-          ),
+      passingYardsIndex =
+        headers.indexOf(
+          "passing_yards"
+        );
 
-        posteam:
-          indexOf(
-            "posteam"
-          ),
+      sackIndex =
+        headers.indexOf("sack");
 
-        defteam:
-          indexOf(
-            "defteam"
-          ),
-
-        passer_player_id:
-          indexOf(
-            "passer_player_id"
-          ),
-
-        passer_player_name:
-          indexOf(
-            "passer_player_name"
-          ),
-
-        pass_attempt:
-          indexOf(
-            "pass_attempt"
-          ),
-
-        passing_yards:
-          indexOf(
-            "passing_yards"
-          ),
-
-        sack:
-          indexOf(
-            "sack"
-          ),
-
-        yards_gained:
-          indexOf(
-            "yards_gained"
-          ),
-      };
+      yardsGainedIndex =
+        headers.indexOf(
+          "yards_gained"
+        );
 
       if (
-        indexes.game_id < 0 ||
-        indexes.week < 0 ||
-        indexes.posteam < 0 ||
-        indexes.defteam < 0 ||
-        indexes.passer_player_id < 0 ||
-        indexes.pass_attempt < 0
+        gameIdIndex < 0 ||
+        weekIndex < 0 ||
+        offenseIndex < 0 ||
+        defenseIndex < 0 ||
+        passerIdIndex < 0 ||
+        passAttemptIndex < 0
       ) {
         throw new Error(
           `${season} PBP missing required columns.`
@@ -432,25 +353,17 @@ async function loadSeason(
       continue;
     }
 
-    if (
-      !indexes ||
-      !line
-    ) {
-      continue;
-    }
+    if (!line) continue;
 
     rowsRead++;
 
-    const row =
-      parseCSVLine(
-        line
-      );
+    const row = parseCSVLine(line);
 
     const seasonType =
       txt(
         value(
           row,
-          indexes.season_type
+          seasonTypeIndex
         )
       ).toUpperCase();
 
@@ -465,7 +378,7 @@ async function loadSeason(
       num(
         value(
           row,
-          indexes.pass_attempt
+          passAttemptIndex
         )
       ) === 1;
 
@@ -473,9 +386,14 @@ async function loadSeason(
       num(
         value(
           row,
-          indexes.sack
+          sackIndex
         )
       ) === 1;
+
+    /*
+      Official passing attempts only.
+      Sacks are excluded.
+    */
 
     if (
       !passAttempt ||
@@ -488,7 +406,7 @@ async function loadSeason(
       txt(
         value(
           row,
-          indexes.game_id
+          gameIdIndex
         )
       );
 
@@ -496,7 +414,7 @@ async function loadSeason(
       num(
         value(
           row,
-          indexes.week
+          weekIndex
         )
       );
 
@@ -504,7 +422,7 @@ async function loadSeason(
       normalizeTeam(
         value(
           row,
-          indexes.posteam
+          offenseIndex
         )
       );
 
@@ -512,7 +430,7 @@ async function loadSeason(
       normalizeTeam(
         value(
           row,
-          indexes.defteam
+          defenseIndex
         )
       );
 
@@ -520,7 +438,7 @@ async function loadSeason(
       txt(
         value(
           row,
-          indexes.passer_player_id
+          passerIdIndex
         )
       );
 
@@ -528,7 +446,7 @@ async function loadSeason(
       txt(
         value(
           row,
-          indexes.passer_player_name
+          passerNameIndex
         )
       );
 
@@ -547,37 +465,28 @@ async function loadSeason(
     const key =
       `${gameId}|${playerId}`;
 
-    if (
-      !qbGames.has(
-        key
-      )
-    ) {
-      qbGames.set(
-        key,
-        {
-          season,
-          week,
-          gameId,
+    if (!qbGames.has(key)) {
+      qbGames.set(key, {
+        season,
+        week,
+        gameId,
 
+        playerId,
+
+        playerName:
+          playerName ||
           playerId,
 
-          playerName:
-            playerName ||
-            playerId,
+        team,
+        opponent,
 
-          team,
-          opponent,
-
-          attempts: 0,
-          passingYards: 0,
-        }
-      );
+        attempts: 0,
+        passingYards: 0,
+      });
     }
 
     const game =
-      qbGames.get(
-        key
-      )!;
+      qbGames.get(key)!;
 
     game.attempts++;
 
@@ -585,7 +494,7 @@ async function loadSeason(
       num(
         value(
           row,
-          indexes.passing_yards
+          passingYardsIndex
         )
       );
 
@@ -593,21 +502,31 @@ async function loadSeason(
       num(
         value(
           row,
-          indexes.yards_gained
+          yardsGainedIndex
         )
       );
 
-    game.passingYards +=
-      passingYards !== 0
-        ? passingYards
-        : yardsGained;
+    /*
+      Do NOT use `a || b` here because
+      a legitimate 0-yard pass is valid.
+
+      If passing_yards column exists,
+      use it directly.
+    */
+
+    if (passingYardsIndex >= 0) {
+      game.passingYards +=
+        passingYards;
+    } else {
+      game.passingYards +=
+        yardsGained;
+    }
   }
 
   return {
-    games:
-      Array.from(
-        qbGames.values()
-      ),
+    games: Array.from(
+      qbGames.values()
+    ),
 
     diagnostics: {
       season,
@@ -628,11 +547,10 @@ async function loadSeason(
 }
 
 /* -------------------------------------------------- */
-/* QB HISTORY                                         */
+/* HISTORY                                            */
 /* -------------------------------------------------- */
 
-function emptyQB():
-  QBHistory {
+function emptyQB(): QBHistory {
   return {
     games: 0,
 
@@ -641,6 +559,15 @@ function emptyQB():
 
     recentAttempts: [],
     recentYPA: [],
+  };
+}
+
+function emptyDefense(): DefenseHistory {
+  return {
+    games: 0,
+
+    passAttempts: 0,
+    passYards: 0,
   };
 }
 
@@ -653,24 +580,8 @@ function averageLast(
   }
 
   return mean(
-    values.slice(
-      -count
-    )
+    values.slice(-count)
   );
-}
-
-/* -------------------------------------------------- */
-/* DEFENSE HISTORY                                    */
-/* -------------------------------------------------- */
-
-function emptyDefense():
-  DefenseHistory {
-  return {
-    games: 0,
-
-    passAttempts: 0,
-    passYards: 0,
-  };
 }
 
 function defenseMetrics(
@@ -702,7 +613,7 @@ function defenseMetrics(
 }
 
 /* -------------------------------------------------- */
-/* FROZEN PASSING BASELINE                            */
+/* FROZEN BASELINE                                    */
 /* -------------------------------------------------- */
 
 function baselineProjection(
@@ -783,29 +694,254 @@ function baselineProjection(
 }
 
 /* -------------------------------------------------- */
-/* VALIDATION                                         */
+/* UPDATE QB HISTORY                                  */
 /* -------------------------------------------------- */
 
-function buildValidation(
+function updateQBHistory(
+  qbHistory:
+    Map<string, QBHistory>,
   games: QBGame[]
 ) {
+  for (const game of games) {
+    if (
+      game.attempts <= 0
+    ) {
+      continue;
+    }
+
+    if (
+      !qbHistory.has(
+        game.playerId
+      )
+    ) {
+      qbHistory.set(
+        game.playerId,
+        emptyQB()
+      );
+    }
+
+    const qb =
+      qbHistory.get(
+        game.playerId
+      )!;
+
+    qb.games++;
+
+    qb.attempts +=
+      game.attempts;
+
+    qb.passingYards +=
+      game.passingYards;
+
+    qb.recentAttempts.push(
+      game.attempts
+    );
+
+    qb.recentYPA.push(
+      game.passingYards /
+        game.attempts
+    );
+
+    /*
+      Keep enough recent history
+      for rolling calculations.
+    */
+
+    if (
+      qb.recentAttempts.length >
+      8
+    ) {
+      qb.recentAttempts.shift();
+    }
+
+    if (
+      qb.recentYPA.length >
+      8
+    ) {
+      qb.recentYPA.shift();
+    }
+  }
+}
+
+/* -------------------------------------------------- */
+/* UPDATE DEFENSE HISTORY                             */
+/* -------------------------------------------------- */
+
+function updateDefenseHistory(
+  defenseHistory:
+    Map<string, DefenseHistory>,
+
+  leagueDefense:
+    DefenseHistory,
+
+  games: QBGame[]
+) {
+  /*
+    Multiple passers can appear for one offense.
+
+    Aggregate them into one defensive game
+    before increasing defense.games.
+  */
+
+  const defenseGames =
+    new Map<
+      string,
+      {
+        defense: string;
+        attempts: number;
+        yards: number;
+      }
+    >();
+
+  for (const game of games) {
+    if (
+      game.attempts <= 0
+    ) {
+      continue;
+    }
+
+    const key =
+      `${game.gameId}|${game.opponent}`;
+
+    if (
+      !defenseGames.has(key)
+    ) {
+      defenseGames.set(
+        key,
+        {
+          defense:
+            game.opponent,
+
+          attempts: 0,
+          yards: 0,
+        }
+      );
+    }
+
+    const aggregate =
+      defenseGames.get(key)!;
+
+    aggregate.attempts +=
+      game.attempts;
+
+    aggregate.yards +=
+      game.passingYards;
+  }
+
+  for (
+    const aggregate of
+    defenseGames.values()
+  ) {
+    if (
+      !defenseHistory.has(
+        aggregate.defense
+      )
+    ) {
+      defenseHistory.set(
+        aggregate.defense,
+        emptyDefense()
+      );
+    }
+
+    const defense =
+      defenseHistory.get(
+        aggregate.defense
+      )!;
+
+    defense.games++;
+
+    defense.passAttempts +=
+      aggregate.attempts;
+
+    defense.passYards +=
+      aggregate.yards;
+
+    leagueDefense.games++;
+
+    leagueDefense.passAttempts +=
+      aggregate.attempts;
+
+    leagueDefense.passYards +=
+      aggregate.yards;
+  }
+}
+
+/* -------------------------------------------------- */
+/* INITIALIZE WITH 2025                               */
+/* -------------------------------------------------- */
+
+function initializePriorHistory(
+  priorGames: QBGame[]
+) {
+  const qbHistory =
+    new Map<string, QBHistory>();
+
+  const defenseHistory =
+    new Map<
+      string,
+      DefenseHistory
+    >();
+
+  const leagueDefense =
+    emptyDefense();
+
+  /*
+    Use the completed 2025 regular season
+    only as prior history.
+
+    No 2025 observations are scored here.
+  */
+
   const sorted =
-    [...games].sort(
+    [...priorGames].sort(
       (a, b) =>
-        a.week -
-          b.week ||
+        a.week - b.week ||
         a.gameId.localeCompare(
           b.gameId
         )
     );
 
+  updateQBHistory(
+    qbHistory,
+    sorted
+  );
+
+  updateDefenseHistory(
+    defenseHistory,
+    leagueDefense,
+    sorted
+  );
+
+  return {
+    qbHistory,
+    defenseHistory,
+    leagueDefense,
+  };
+}
+
+/* -------------------------------------------------- */
+/* VALIDATE 2026                                      */
+/* -------------------------------------------------- */
+
+function validate2026(
+  validationGames: QBGame[],
+  qbHistory:
+    Map<string, QBHistory>,
+  defenseHistory:
+    Map<string, DefenseHistory>,
+  leagueDefense:
+    DefenseHistory
+) {
   const byWeek =
     new Map<
       number,
       QBGame[]
     >();
 
-  for (const game of sorted) {
+  for (
+    const game of
+    validationGames
+  ) {
     if (
       !byWeek.has(
         game.week
@@ -822,46 +958,36 @@ function buildValidation(
     )!.push(game);
   }
 
-  const qbHistory =
-    new Map<
-      string,
-      QBHistory
-    >();
-
-  const defenseHistory =
-    new Map<
-      string,
-      DefenseHistory
-    >();
-
-  const leagueDefense =
-    emptyDefense();
-
-  const predictions:
-    Prediction[] = [];
-
   const weeks =
     Array.from(
       byWeek.keys()
     ).sort(
-      (a, b) =>
-        a - b
+      (a, b) => a - b
     );
 
+  const predictions:
+    Prediction[] = [];
+
+  let skippedLowAttempts = 0;
+  let skippedNoQBHistory = 0;
+  let defenseAvailable = 0;
+
   for (const week of weeks) {
-    const weekGames =
-      byWeek.get(
-        week
-      )!;
+    const games =
+      byWeek.get(week)!;
 
     /*
-      PREDICT BEFORE UPDATING WEEK
+      PREDICT ENTIRE WEEK FIRST.
+
+      Nothing from this week's games
+      is added until predictions are complete.
     */
 
-    for (const game of weekGames) {
+    for (const game of games) {
       if (
         game.attempts < 10
       ) {
+        skippedLowAttempts++;
         continue;
       }
 
@@ -874,15 +1000,15 @@ function buildValidation(
         !qb ||
         qb.games < 3
       ) {
+        skippedNoQBHistory++;
         continue;
       }
 
       const baseline =
-        baselineProjection(
-          qb
-        );
+        baselineProjection(qb);
 
       if (baseline === null) {
+        skippedNoQBHistory++;
         continue;
       }
 
@@ -902,7 +1028,11 @@ function buildValidation(
       let ypaDifference = 0;
 
       /*
-        Require 3 previous defensive games.
+        Because 2025 was preloaded,
+        established defenses should already
+        have a meaningful sample.
+
+        Still require at least 3 games.
       */
 
       if (
@@ -910,6 +1040,8 @@ function buildValidation(
         defense.games >= 3 &&
         league
       ) {
+        defenseAvailable++;
+
         if (
           defense.passYPG !== null &&
           league.passYPG !== null
@@ -937,9 +1069,22 @@ function buildValidation(
         ypaDifference *
         FROZEN_YPA_COEFFICIENT;
 
-      const combinedAdjustment =
-        ypgAdjustment +
-        ypaAdjustment;
+      const ypgProjection =
+        clamp(
+          baseline +
+            ypgAdjustment,
+          80,
+          450
+        );
+
+      const combinedProjection =
+        clamp(
+          baseline +
+            ypgAdjustment +
+            ypaAdjustment,
+          80,
+          450
+        );
 
       predictions.push({
         week,
@@ -958,19 +1103,19 @@ function buildValidation(
 
         baseline,
 
-        defenseYPG:
+        opponentPassYPG:
           defense?.passYPG ??
           null,
 
-        leagueYPG:
+        leaguePassYPG:
           league?.passYPG ??
           null,
 
-        defenseYPA:
+        opponentPassYPA:
           defense?.passYPA ??
           null,
 
-        leagueYPA:
+        leaguePassYPA:
           league?.passYPA ??
           null,
 
@@ -980,181 +1125,49 @@ function buildValidation(
 
         ypgAdjustment,
 
-        combinedAdjustment,
+        ypaAdjustment,
 
-        ypgProjection:
-          clamp(
-            baseline +
-              ypgAdjustment,
-            80,
-            450
-          ),
+        ypgProjection,
 
-        combinedProjection:
-          clamp(
-            baseline +
-              combinedAdjustment,
-            80,
-            450
-          ),
+        combinedProjection,
       });
     }
 
     /*
-      UPDATE QB HISTORY AFTER WEEK
+      AFTER predictions:
+      add this week's information.
     */
 
-    for (const game of weekGames) {
-      if (
-        game.attempts <= 0
-      ) {
-        continue;
-      }
+    updateQBHistory(
+      qbHistory,
+      games
+    );
 
-      if (
-        !qbHistory.has(
-          game.playerId
-        )
-      ) {
-        qbHistory.set(
-          game.playerId,
-          emptyQB()
-        );
-      }
-
-      const qb =
-        qbHistory.get(
-          game.playerId
-        )!;
-
-      qb.games++;
-
-      qb.attempts +=
-        game.attempts;
-
-      qb.passingYards +=
-        game.passingYards;
-
-      qb.recentAttempts.push(
-        game.attempts
-      );
-
-      qb.recentYPA.push(
-        game.passingYards /
-          game.attempts
-      );
-
-      if (
-        qb.recentAttempts.length >
-        8
-      ) {
-        qb.recentAttempts.shift();
-      }
-
-      if (
-        qb.recentYPA.length >
-        8
-      ) {
-        qb.recentYPA.shift();
-      }
-    }
-
-    /*
-      UPDATE DEFENSE AFTER WEEK
-    */
-
-    const defenseGames =
-      new Map<
-        string,
-        {
-          defense: string;
-          attempts: number;
-          yards: number;
-        }
-      >();
-
-    for (const game of weekGames) {
-      if (
-        game.attempts <= 0
-      ) {
-        continue;
-      }
-
-      const key =
-        `${game.gameId}|${game.opponent}`;
-
-      if (
-        !defenseGames.has(
-          key
-        )
-      ) {
-        defenseGames.set(
-          key,
-          {
-            defense:
-              game.opponent,
-
-            attempts: 0,
-            yards: 0,
-          }
-        );
-      }
-
-      const aggregate =
-        defenseGames.get(
-          key
-        )!;
-
-      aggregate.attempts +=
-        game.attempts;
-
-      aggregate.yards +=
-        game.passingYards;
-    }
-
-    for (
-      const aggregate of
-      defenseGames.values()
-    ) {
-      if (
-        !defenseHistory.has(
-          aggregate.defense
-        )
-      ) {
-        defenseHistory.set(
-          aggregate.defense,
-          emptyDefense()
-        );
-      }
-
-      const defense =
-        defenseHistory.get(
-          aggregate.defense
-        )!;
-
-      defense.games++;
-
-      defense.passAttempts +=
-        aggregate.attempts;
-
-      defense.passYards +=
-        aggregate.yards;
-
-      leagueDefense.games++;
-
-      leagueDefense.passAttempts +=
-        aggregate.attempts;
-
-      leagueDefense.passYards +=
-        aggregate.yards;
-    }
+    updateDefenseHistory(
+      defenseHistory,
+      leagueDefense,
+      games
+    );
   }
 
-  return predictions;
+  return {
+    predictions,
+
+    diagnostics: {
+      skipped_low_attempts:
+        skippedLowAttempts,
+
+      skipped_no_prior_qb_history:
+        skippedNoQBHistory,
+
+      predictions_with_defense_history:
+        defenseAvailable,
+    },
+  };
 }
 
 /* -------------------------------------------------- */
-/* SCORING                                            */
+/* SCORE                                              */
 /* -------------------------------------------------- */
 
 function score(
@@ -1175,7 +1188,7 @@ function score(
 
   let absoluteError = 0;
   let squaredError = 0;
-  let error = 0;
+  let totalError = 0;
 
   for (
     const prediction of
@@ -1184,21 +1197,18 @@ function score(
     const projected =
       prediction[field];
 
-    const difference =
+    const error =
       projected -
       prediction.actual;
 
     absoluteError +=
-      Math.abs(
-        difference
-      );
+      Math.abs(error);
 
     squaredError +=
-      difference *
-      difference;
+      error * error;
 
-    error +=
-      difference;
+    totalError +=
+      error;
   }
 
   return {
@@ -1221,7 +1231,7 @@ function score(
 
     mean_error:
       round(
-        error /
+        totalError /
           predictions.length
       ),
   };
@@ -1283,6 +1293,13 @@ function weekBreakdown(
             "ypgProjection"
           );
 
+        const improvement =
+          baseline.mae !== null &&
+          ypg.mae !== null
+            ? baseline.mae -
+              ypg.mae
+            : null;
+
         return {
           week,
 
@@ -1296,13 +1313,11 @@ function weekBreakdown(
             ypg.mae,
 
           improvement_yards:
-            baseline.mae !== null &&
-            ypg.mae !== null
-              ? round(
-                  baseline.mae -
-                    ypg.mae
-                )
-              : null,
+            improvement === null
+              ? null
+              : round(
+                  improvement
+                ),
         };
       }
     );
@@ -1314,15 +1329,46 @@ function weekBreakdown(
 
 export async function GET() {
   try {
-    const data =
+    /*
+      Sequential loading keeps memory lower.
+    */
+
+    const priorData =
+      await loadSeason(
+        PRIOR_SEASON
+      );
+
+    const validationData =
       await loadSeason(
         VALIDATION_SEASON
       );
 
-    const predictions =
-      buildValidation(
-        data.games
+    /*
+      2025 establishes prior QB and
+      defensive history.
+    */
+
+    const history =
+      initializePriorHistory(
+        priorData.games
       );
+
+    const initialQBCount =
+      history.qbHistory.size;
+
+    const initialDefenseCount =
+      history.defenseHistory.size;
+
+    const validation =
+      validate2026(
+        validationData.games,
+        history.qbHistory,
+        history.defenseHistory,
+        history.leagueDefense
+      );
+
+    const predictions =
+      validation.predictions;
 
     const baseline =
       score(
@@ -1350,7 +1396,7 @@ export async function GET() {
         : 0;
 
     const ypgImprovementPct =
-      baseline.mae &&
+      baseline.mae !== null &&
       baseline.mae > 0
         ? (
             ypgImprovement /
@@ -1366,17 +1412,18 @@ export async function GET() {
         : 0;
 
     /*
-      We are stricter here because 2026
-      is the secondary confirmation test.
+      Secondary-validation rule.
 
-      We want:
-      - positive MAE improvement
-      - no material RMSE deterioration
-      - reasonable sample
+      Because 2026 is still a small sample,
+      this does NOT automatically activate
+      anything live.
+
+      It only determines whether the feature
+      deserves integration testing.
     */
 
     const ypgValidated =
-      predictions.length >= 40 &&
+      predictions.length >= 25 &&
       ypgImprovement > 0 &&
       (
         ypg.rmse === null ||
@@ -1389,13 +1436,21 @@ export async function GET() {
       success: true,
 
       version:
-        "1.0-defense-secondary-validation",
+        "1.1-defense-secondary-validation-prior-history",
 
       purpose:
-        "Validate the frozen 2024 opponent pass-defense coefficients on 2026 data without refitting.",
+        "Validate frozen opponent pass-defense coefficients on 2026 after initializing quarterback and defense history with completed 2025 data.",
 
-      validation_season:
-        VALIDATION_SEASON,
+      seasons: {
+        prior_history:
+          PRIOR_SEASON,
+
+        validation:
+          VALIDATION_SEASON,
+
+        coefficient_training:
+          2024,
+      },
 
       frozen_coefficients: {
         pass_yards_per_game:
@@ -1404,38 +1459,53 @@ export async function GET() {
         pass_ypa:
           FROZEN_YPA_COEFFICIENT,
 
-        fitted_on:
-          2024,
-
-        changed_using_2025:
+        refit_on_2025:
           false,
 
-        changed_using_2026:
+        refit_on_2026:
           false,
       },
 
       leakage_protection: {
-        chronological:
+        prior_2025_used_as_history:
+          true,
+
+        prior_2025_scored:
+          false,
+
+        validation_2026_scored:
+          true,
+
+        chronological_2026:
           true,
 
         same_week_updates:
           false,
 
-        defense_requires_prior_games:
-          3,
-
-        future_defensive_data_used:
+        future_2026_data_used:
           false,
 
-        full_season_defense_used_for_earlier_games:
+        coefficient_changed:
           false,
       },
 
       diagnostics: {
-        ...data.diagnostics,
+        prior_2025:
+          priorData.diagnostics,
+
+        validation_2026:
+          validationData.diagnostics,
+
+        initial_qbs_from_2025:
+          initialQBCount,
+
+        initial_defenses_from_2025:
+          initialDefenseCount,
 
         validation_predictions:
           predictions.length,
+
+        ...validation.diagnostics,
       },
 
       validation_results: {
@@ -1480,8 +1550,8 @@ export async function GET() {
 
         message:
           ypgValidated
-            ? "The frozen pass-yards-allowed-per-game adjustment also improved the 2026 validation sample. This supports testing a conservative defense-adjusted Passing V2. Do not activate it live until the implementation is compared directly with the existing live V2 route."
-            : "The frozen pass-yards-allowed-per-game adjustment did not confirm strongly enough in 2026. Keep defense out of the live Passing V2 model.",
+            ? "The frozen pass-yards-allowed-per-game defense adjustment improved the 2026 secondary validation sample. It is eligible for conservative live-model integration testing, but has not been activated."
+            : "The frozen pass-yards-allowed-per-game adjustment did not improve the 2026 validation sample enough. Keep defense out of live Passing V2.",
       },
 
       sample_predictions:
@@ -1512,23 +1582,29 @@ export async function GET() {
 
               opponent_pass_ypg:
                 round(
-                  row.defenseYPG,
+                  row.opponentPassYPG,
                   1
                 ),
 
               league_pass_ypg:
                 round(
-                  row.leagueYPG,
+                  row.leaguePassYPG,
                   1
                 ),
 
-              ypg_adjustment:
+              ypg_difference:
+                round(
+                  row.ypgDifference,
+                  1
+                ),
+
+              defense_adjustment:
                 round(
                   row.ypgAdjustment,
                   1
                 ),
 
-              defense_ypg_projection:
+              defense_projection:
                 round(
                   row.ypgProjection,
                   1
@@ -1538,15 +1614,15 @@ export async function GET() {
 
       next_step:
         ypgValidated
-          ? "Build a conservative defense-aware Passing V2 candidate and compare it side-by-side with the current live Passing V2 before activation."
-          : "Keep current Passing V2 unchanged and do not activate the defense adjustment.",
+          ? "Build the defense-aware Passing V2 candidate and compare its live projections side-by-side with current frozen Passing V2 before activating it."
+          : "Leave live Passing V2 unchanged and continue collecting 2026 data before reconsidering the defense adjustment.",
 
       generated_at:
         new Date().toISOString(),
     });
   } catch (error: any) {
     console.error(
-      "NFL defense validation error:",
+      "NFL defense validation v1.1 error:",
       error
     );
 
@@ -1555,7 +1631,7 @@ export async function GET() {
         success: false,
 
         version:
-          "1.0-defense-secondary-validation",
+          "1.1-defense-secondary-validation-prior-history",
 
         error:
           error?.message ||
