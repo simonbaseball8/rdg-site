@@ -423,7 +423,6 @@ export default function Home() {
   const [nflError, setNflError] =
     useState("");
   const [lastUpdatedDisplay, setLastUpdatedDisplay] = useState("Updating...");
-  const [showNFLWeekResults, setShowNFLWeekResults] = useState(false);
   const [nflPassingProps, setNflPassingProps] =
     useState<NFLPassingPropsAnalysis | null>(null);
   const [nflPassingPropsLoading, setNflPassingPropsLoading] =
@@ -985,27 +984,6 @@ const [cfbError, setCfbError] =
   const sixLeg = buildWeeklyNFLParlay(higherRiskCandidates, 6);
   const eightLeg = buildWeeklyNFLParlay(higherRiskCandidates, 8);
 
-  const nflWeekDates = (nfl?.games || [])
-    .map((game) => game.start_date?.slice(0, 10))
-    .filter((date): date is string => Boolean(date))
-    .sort();
-
-  const nflWeekStart = nflWeekDates[0] || null;
-  const nflWeekEnd = nflWeekDates[nflWeekDates.length - 1] || null;
-
-  const nflWeekParlays = parlays.filter((parlay) => {
-    if (!nflWeekStart || !nflWeekEnd || !parlay.bet_date) return false;
-    const date = parlay.bet_date.slice(0, 10);
-    const legs = parlay.parlay_legs || [];
-    const hasNFLLeg = legs.some((leg) => String(leg.sport || "").toUpperCase() === "NFL");
-    return hasNFLLeg && date >= nflWeekStart && date <= nflWeekEnd;
-  });
-
-  const nflWeekLegs = nflWeekParlays.flatMap((parlay) => parlay.parlay_legs || []);
-  const nflWeekWins = nflWeekLegs.filter((leg) => ["won", "win"].includes(String(leg.status || "").toLowerCase())).length;
-  const nflWeekLosses = nflWeekLegs.filter((leg) => ["lost", "loss"].includes(String(leg.status || "").toLowerCase())).length;
-  const nflWeekPending = nflWeekLegs.length - nflWeekWins - nflWeekLosses;
-
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_50%_18%,rgba(16,185,129,0.07),transparent_28%),linear-gradient(180deg,#020a07_0%,#020806_42%,#010403_100%)] text-white">
       <header className="border-b border-emerald-500/20 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.16),transparent_38%),linear-gradient(180deg,#03110c_0%,#020806_100%)]">
@@ -1092,14 +1070,9 @@ const [cfbError, setCfbError] =
                   <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-emerald-300">
                     RDG NFL MODEL
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => setShowNFLWeekResults((open) => !open)}
-                    className="rounded-full border border-emerald-400/30 bg-white/[0.035] px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-slate-300 transition hover:bg-emerald-400/10 hover:text-emerald-300"
-                    aria-expanded={showNFLWeekResults}
-                  >
-                    Week {nfl?.schedule_week ?? "—"} {showNFLWeekResults ? "▲" : "▼"}
-                  </button>
+                  <span className="rounded-full border border-white/10 bg-white/[0.035] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">
+                    Week {nfl?.schedule_week ?? "—"}
+                  </span>
                 </div>
 
                 <h2 className="mt-3 text-2xl font-black tracking-tight text-white sm:text-3xl">
@@ -1146,100 +1119,6 @@ const [cfbError, setCfbError] =
             </div>
           </div>
         )}
-        {activeSport === "NFL" && showNFLWeekResults && (
-          <section className="mb-10 overflow-hidden rounded-2xl border border-emerald-500/30 bg-[linear-gradient(135deg,rgba(16,185,129,0.08),rgba(0,0,0,0.28))]">
-            <div className="flex flex-col gap-4 border-b border-white/10 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
-              <div>
-                <p className="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-400">RDG WEEKLY HISTORY</p>
-                <h3 className="mt-2 text-2xl font-black uppercase text-white">
-                  Week {nfl?.schedule_week ?? "—"} <span className="text-emerald-400">Results</span>
-                </h3>
-                <p className="mt-1 text-xs text-slate-400">
-                  Saved NFL parlays and graded legs from this week.
-                </p>
-              </div>
-              <div className="grid grid-cols-3 gap-2">
-                <div className="rounded-xl border border-white/10 bg-black/25 px-4 py-3 text-center">
-                  <p className="text-[9px] font-black uppercase tracking-wider text-slate-500">Won</p>
-                  <p className="mt-1 text-xl font-black text-emerald-400">{nflWeekWins}</p>
-                </div>
-                <div className="rounded-xl border border-white/10 bg-black/25 px-4 py-3 text-center">
-                  <p className="text-[9px] font-black uppercase tracking-wider text-slate-500">Lost</p>
-                  <p className="mt-1 text-xl font-black text-red-400">{nflWeekLosses}</p>
-                </div>
-                <div className="rounded-xl border border-white/10 bg-black/25 px-4 py-3 text-center">
-                  <p className="text-[9px] font-black uppercase tracking-wider text-slate-500">Pending</p>
-                  <p className="mt-1 text-xl font-black text-amber-300">{nflWeekPending}</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-3 p-5 sm:p-6">
-              {nflWeekParlays.length === 0 ? (
-                <div className="rounded-xl border border-white/10 bg-black/20 p-5">
-                  <p className="font-black text-white">No saved Week {nfl?.schedule_week ?? "—"} NFL results yet.</p>
-                  <p className="mt-1 text-sm text-slate-400">
-                    Once this week&apos;s parlays are saved and graded in Supabase, their results will appear here automatically.
-                  </p>
-                </div>
-              ) : (
-                nflWeekParlays.map((parlay) => {
-                  const legs = [...(parlay.parlay_legs || [])]
-                    .filter((leg) => String(leg.sport || "").toUpperCase() === "NFL")
-                    .sort((a, b) => a.leg_number - b.leg_number);
-                  const lost = legs.some((leg) => ["lost", "loss"].includes(String(leg.status || "").toLowerCase()));
-                  const allWon = legs.length > 0 && legs.every((leg) => ["won", "win"].includes(String(leg.status || "").toLowerCase()));
-                  const resultLabel = allWon ? "WON" : lost ? "LOST" : "PENDING";
-                  const resultClass = allWon
-                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
-                    : lost
-                    ? "border-red-500/30 bg-red-500/10 text-red-400"
-                    : "border-amber-500/30 bg-amber-500/10 text-amber-300";
-
-                  return (
-                    <article key={parlay.id} className="rounded-xl border border-white/10 bg-black/20 p-4">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-emerald-400">
-                            {parlay.category || "NFL PARLAY"}
-                          </p>
-                          <h4 className="mt-1 text-lg font-black text-white">{parlay.name}</h4>
-                        </div>
-                        <span className={`rounded-full border px-3 py-1 text-[10px] font-black ${resultClass}`}>
-                          {resultLabel}
-                        </span>
-                      </div>
-
-                      <div className="mt-4 space-y-2">
-                        {legs.map((leg) => {
-                          const status = String(leg.status || "pending").toLowerCase();
-                          const won = status === "won" || status === "win";
-                          const lostLeg = status === "lost" || status === "loss";
-                          return (
-                            <div key={leg.id} className="flex items-center justify-between gap-4 rounded-lg border border-white/5 bg-white/[0.025] px-3 py-2">
-                              <div className="min-w-0">
-                                <p className="truncate text-sm font-bold text-white">
-                                  {leg.player ? `${leg.player} • ` : ""}{leg.bet_type}
-                                </p>
-                                <p className="mt-0.5 text-xs text-slate-500">
-                                  {[leg.team, leg.opponent ? `vs ${leg.opponent}` : null, leg.odds].filter(Boolean).join(" • ")}
-                                </p>
-                              </div>
-                              <span className={`shrink-0 text-sm font-black ${won ? "text-emerald-400" : lostLeg ? "text-red-400" : "text-amber-300"}`}>
-                                {won ? "✓ WIN" : lostLeg ? "✕ LOSS" : "• PENDING"}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </article>
-                  );
-                })
-              )}
-            </div>
-          </section>
-        )}
-
         {activeSport === "MLB" && (
           <MLBSection mlb={mlb} loading={mlbLoading} error={mlbError} />
         )}
