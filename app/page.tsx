@@ -315,7 +315,7 @@ type NHLBetCandidate = {
 type BetCandidate = {
   event_id: string;
   correlation_key: string;
-  market_type: "spread" | "passing_prop";
+  market_type: "spread" | "moneyline" | "passing_prop";
   matchup: string;
   team: string;
   line: number;
@@ -662,180 +662,176 @@ const [cfbError, setCfbError] =
     request.
   */
 
+  const nowMs = Date.now();
+
+  function americanImpliedProbability(odds: string | number | null) {
+    if (odds === null || odds === undefined) return null;
+    const value = Number(odds);
+    if (!Number.isFinite(value) || value === 0) return null;
+
+    return value > 0
+      ? (100 / (value + 100)) * 100
+      : (Math.abs(value) / (Math.abs(value) + 100)) * 100;
+  }
+
+  // SPREAD CANDIDATES
   const candidates: BetCandidate[] =
     rankedGames
       .map((game) => {
-        if (!game.stats_connected) {
-          return null;
-        }
+        if (!game.stats_connected) return null;
+        if (new Date(game.start_date).getTime() <= nowMs) return null;
 
-        const market =
-          game.rdg.market_analysis;
+        const market = game.rdg.market_analysis;
+        const historical = game.rdg.historical_signal;
+        const difference = market.model_vs_market_difference;
 
-        const historical =
-          game.rdg.historical_signal;
+        if (difference === null) return null;
 
-        const difference =
-          market.model_vs_market_difference;
+        const edge = Math.abs(difference);
+        if (edge < 2) return null;
 
-        if (difference === null) {
-          return null;
-        }
+        const team = market.spread_lean;
+        const isHome = team === game.home_team;
+        const isAway = team === game.away_team;
 
-        const edge =
-          Math.abs(difference);
-
-        if (edge < 2) {
-          return null;
-        }
-
-        const team =
-          market.spread_lean;
-
-        const isHome =
-          team === game.home_team;
-
-        const isAway =
-          team === game.away_team;
-
-        if (!isHome && !isAway) {
-          return null;
-        }
+        if (!isHome && !isAway) return null;
 
         const line = isHome
-          ? market.hard_rock_spread
-              .home_line
-          : market.hard_rock_spread
-              .away_line;
+          ? market.hard_rock_spread.home_line
+          : market.hard_rock_spread.away_line;
 
         const odds = isHome
-          ? market.hard_rock_spread
-              .home_odds
-          : market.hard_rock_spread
-              .away_odds;
+          ? market.hard_rock_spread.home_odds
+          : market.hard_rock_spread.away_odds;
 
-        if (line === null) {
-          return null;
-        }
+        if (line === null) return null;
 
         let score = edge * 10;
 
-        if (
-          historical
-            .historical_winner_accuracy >=
-          70
-        ) {
-          score += 10;
-        } else if (
-          historical
-            .historical_winner_accuracy >=
-          60
-        ) {
-          score += 6;
-        } else if (
-          historical
-            .historical_winner_accuracy >=
-          55
-        ) {
-          score += 3;
-        }
+        if (historical.historical_winner_accuracy >= 70) score += 10;
+        else if (historical.historical_winner_accuracy >= 60) score += 6;
+        else if (historical.historical_winner_accuracy >= 55) score += 3;
 
-        if (
-          historical.sample >= 30
-        ) {
-          score += 3;
-        }
-
-        if (
-          game.rdg.projected_winner ===
-          team
-        ) {
-          score += 4;
-        }
+        if (historical.sample >= 30) score += 3;
+        if (game.rdg.projected_winner === team) score += 4;
 
         return {
-          event_id: game.event_id,
-
-          correlation_key:
-            `${game.away_team}@${game.home_team}`.toUpperCase(),
-
+          event_id: `spread-${game.event_id}`,
+          correlation_key: `${game.away_team}@${game.home_team}`.toUpperCase(),
           market_type: "spread" as const,
-
-          matchup:
-            `${game.away_team} @ ${game.home_team}`,
-
+          matchup: `${game.away_team} @ ${game.home_team}`,
           team,
-
           line,
-
           odds,
-
-          display_bet:
-            `${team} ${formatSpread(
-              line
-            )}`,
-
-          projected_winner:
-            game.rdg
-              .projected_winner,
-
-          projected_margin:
-            game.rdg
-              .projected_margin,
-
-          difference:
-            Number(
-              edge.toFixed(2)
-            ),
-
-          historical_accuracy:
-            historical
-              .historical_winner_accuracy,
-
-          historical_sample:
-            historical.sample,
-
-          historical_correct:
-            historical.correct,
-
-          historical_bucket:
-            historical.bucket,
-
-          score:
-            Number(
-              score.toFixed(2)
-            ),
+          display_bet: `${team} ${formatSpread(line)}`,
+          projected_winner: game.rdg.projected_winner,
+          projected_margin: game.rdg.projected_margin,
+          difference: Number(edge.toFixed(2)),
+          historical_accuracy: historical.historical_winner_accuracy,
+          historical_sample: historical.sample,
+          historical_correct: historical.correct,
+          historical_bucket: historical.bucket,
+          score: Number(score.toFixed(2)),
+          sportsbook_name: "Hard Rock Bet",
         } as BetCandidate;
       })
-      .filter(
-        (
-          candidate
-        ): candidate is BetCandidate =>
-          candidate !== null
-      )
-      .sort(
-        (a, b) =>
-          b.score - a.score
-      );
+      .filter((candidate): candidate is BetCandidate => candidate !== null)
+      .sort((a, b) => b.score - a.score);
 
-  // NFL MIXED PARLAY POOLS
-  // Passing props can mix with spreads after passing the RDG review filters.
-  // Default correlation guardrail: maximum one leg from the same NFL game.
+  // MONEYLINE CANDIDATES
+  // The team model is a margin model, not a calibrated moneyline probability
+  // model. Moneylines therefore use projected winner/margin, historical
+  // winner-bucket performance, and current price as a conservative ranking
+  // filter. We do not label this as a true model probability edge.
+  const moneylineCandidates: BetCandidate[] =
+    rankedGames
+      .map((game) => {
+        if (!game.stats_connected) return null;
+        if (new Date(game.start_date).getTime() <= nowMs) return null;
+
+        const market = game.rdg.market_analysis;
+        const historical = game.rdg.historical_signal;
+        const team = game.rdg.projected_winner;
+
+        const isHome = team === game.home_team;
+        const isAway = team === game.away_team;
+        if (!isHome && !isAway) return null;
+
+        const odds = isHome
+          ? market.hard_rock_moneyline.home_odds
+          : market.hard_rock_moneyline.away_odds;
+
+        if (odds === null || odds === undefined) return null;
+
+        const numericOdds = Number(odds);
+        if (!Number.isFinite(numericOdds)) return null;
+
+        // Avoid very expensive favorites that add little parlay value.
+        if (numericOdds < -250) return null;
+
+        if (
+          historical.historical_winner_accuracy < 55 ||
+          historical.sample < 30 ||
+          game.rdg.projected_margin < 3
+        ) {
+          return null;
+        }
+
+        const implied = americanImpliedProbability(odds);
+        if (implied === null) return null;
+
+        // Ranking only: this is NOT an individual-game win probability.
+        const historicalVsPrice =
+          historical.historical_winner_accuracy - implied;
+
+        let score =
+          game.rdg.projected_margin * 5 +
+          Math.max(0, historicalVsPrice) * 3;
+
+        if (historical.historical_winner_accuracy >= 70) score += 14;
+        else if (historical.historical_winner_accuracy >= 60) score += 8;
+
+        if (numericOdds >= -160) score += 6;
+        if (numericOdds > 0) score += 5;
+
+        return {
+          event_id: `moneyline-${game.event_id}`,
+          correlation_key: `${game.away_team}@${game.home_team}`.toUpperCase(),
+          market_type: "moneyline" as const,
+          matchup: `${game.away_team} @ ${game.home_team}`,
+          team,
+          line: 0,
+          odds: String(odds),
+          display_bet: `${team} MONEYLINE`,
+          projected_winner: game.rdg.projected_winner,
+          projected_margin: game.rdg.projected_margin,
+          difference: Number(game.rdg.projected_margin.toFixed(2)),
+          historical_accuracy: historical.historical_winner_accuracy,
+          historical_sample: historical.sample,
+          historical_correct: historical.correct,
+          historical_bucket: historical.bucket,
+          score: Number(score.toFixed(2)),
+          market_probability: Number(implied.toFixed(2)),
+          sportsbook_name: "Hard Rock Bet",
+        } as BetCandidate;
+      })
+      .filter((candidate): candidate is BetCandidate => candidate !== null)
+      .sort((a, b) => b.score - a.score);
+
+  // PASSING PROP CANDIDATES
   const passingPropCandidates: BetCandidate[] =
     (nflPassingProps?.props || [])
       .filter((prop) =>
         prop.review !== "PASS" &&
         prop.model_vs_market_probability !== null &&
-        prop.model_vs_market_probability >= 2
+        prop.model_vs_market_probability >= 2 &&
+        (!prop.start_time || new Date(prop.start_time).getTime() > nowMs)
       )
       .map((prop) => {
         const away = prop.matchup.away || "AWAY";
         const home = prop.matchup.home || "HOME";
         const edge = prop.model_vs_market_probability || 0;
 
-        // Use the best currently available price for the exact displayed
-        // line and selected side. This prevents mixing a line from one
-        // market with odds attached to a different line.
         const matchingPrices = (prop.sportsbook_lines || [])
           .filter((book) =>
             book.available &&
@@ -888,21 +884,34 @@ const [cfbError, setCfbError] =
       })
       .sort((a, b) => b.score - a.score);
 
-  const spreadSaferCandidates =
-    candidates.filter((candidate) =>
-      candidate.difference >= 3.5 &&
-      candidate.historical_accuracy >= 55 &&
-      candidate.historical_sample >= 30
-    );
+  const spreadSaferCandidates = candidates.filter((candidate) =>
+    candidate.difference >= 3.5 &&
+    candidate.historical_accuracy >= 55 &&
+    candidate.historical_sample >= 30
+  );
 
-  const spreadBalancedCandidates =
-    candidates.filter((candidate) =>
-      candidate.difference >= 3 &&
-      candidate.historical_sample >= 30
-    );
+  const spreadBalancedCandidates = candidates.filter((candidate) =>
+    candidate.difference >= 3 &&
+    candidate.historical_sample >= 30
+  );
 
   const spreadHigherRiskCandidates =
     candidates.filter((candidate) => candidate.difference >= 2);
+
+  const moneylineSaferCandidates = moneylineCandidates.filter((candidate) =>
+    candidate.projected_margin >= 6 &&
+    candidate.historical_accuracy >= 60 &&
+    Number(candidate.odds || -999) >= -220
+  );
+
+  const moneylineBalancedCandidates = moneylineCandidates.filter((candidate) =>
+    candidate.projected_margin >= 4 &&
+    candidate.historical_accuracy >= 55 &&
+    Number(candidate.odds || -999) >= -250
+  );
+
+  const moneylineHigherRiskCandidates =
+    moneylineCandidates.filter((candidate) => candidate.projected_margin >= 3);
 
   const propSaferCandidates = passingPropCandidates.filter((candidate) =>
     (candidate.model_probability || 0) >= 58 &&
@@ -916,18 +925,26 @@ const [cfbError, setCfbError] =
     (candidate.review === "STRONG REVIEW" || candidate.review === "REVIEW")
   );
 
-  const propHigherRiskCandidates = passingPropCandidates.filter((candidate) =>
-    candidate.difference >= 2
-  );
+  const propHigherRiskCandidates =
+    passingPropCandidates.filter((candidate) => candidate.difference >= 2);
 
-  const saferCandidates = [...spreadSaferCandidates, ...propSaferCandidates]
-    .sort((a, b) => b.score - a.score);
+  const saferCandidates = [
+    ...spreadSaferCandidates,
+    ...moneylineSaferCandidates,
+    ...propSaferCandidates,
+  ].sort((a, b) => b.score - a.score);
 
-  const balancedCandidates = [...spreadBalancedCandidates, ...propBalancedCandidates]
-    .sort((a, b) => b.score - a.score);
+  const balancedCandidates = [
+    ...spreadBalancedCandidates,
+    ...moneylineBalancedCandidates,
+    ...propBalancedCandidates,
+  ].sort((a, b) => b.score - a.score);
 
-  const higherRiskCandidates = [...spreadHigherRiskCandidates, ...propHigherRiskCandidates]
-    .sort((a, b) => b.score - a.score);
+  const higherRiskCandidates = [
+    ...spreadHigherRiskCandidates,
+    ...moneylineHigherRiskCandidates,
+    ...propHigherRiskCandidates,
+  ].sort((a, b) => b.score - a.score);
 
   const bestStraight =
     saferCandidates.length > 0
@@ -942,31 +959,44 @@ const [cfbError, setCfbError] =
     pool: BetCandidate[],
     count: number
   ) {
-    // One leg per game by default. This prevents an ordinary parlay from
-    // accidentally stacking correlated spreads and player props.
-    const uniqueByGame = Array.from(
-      new Map(
-        [...pool]
-          .sort((a, b) => b.score - a.score)
-          .map((candidate) => [candidate.correlation_key, candidate])
-      ).values()
-    );
+    const sorted = [...pool].sort((a, b) => b.score - a.score);
+    const selected: BetCandidate[] = [];
+    const usedGames = new Set<string>();
+    const marketCounts = new Map<string, number>();
 
-    const selected = [...uniqueByGame]
-      .sort((a, b) => {
-        const aUsage = nflCandidateUsage.get(a.event_id) || 0;
-        const bUsage = nflCandidateUsage.get(b.event_id) || 0;
-        if (aUsage !== bUsage) return aUsage - bUsage;
-        return b.score - a.score;
-      })
-      .slice(0, Math.min(count, uniqueByGame.length));
+    // Prefer the strongest unused game while gently favoring market variety.
+    // This does not force a spread/ML/prop quota; weak legs still stay out.
+    while (selected.length < count) {
+      const available = sorted
+        .filter((candidate) => !usedGames.has(candidate.correlation_key))
+        .map((candidate) => {
+          const usage = nflCandidateUsage.get(candidate.event_id) || 0;
+          const marketUsage = marketCounts.get(candidate.market_type) || 0;
 
-    selected.forEach((candidate) => {
-      nflCandidateUsage.set(
-        candidate.event_id,
-        (nflCandidateUsage.get(candidate.event_id) || 0) + 1
+          return {
+            candidate,
+            adjustedScore:
+              candidate.score -
+              usage * 12 -
+              marketUsage * 18,
+          };
+        })
+        .sort((a, b) => b.adjustedScore - a.adjustedScore);
+
+      if (available.length === 0) break;
+
+      const pick = available[0].candidate;
+      selected.push(pick);
+      usedGames.add(pick.correlation_key);
+      marketCounts.set(
+        pick.market_type,
+        (marketCounts.get(pick.market_type) || 0) + 1
       );
-    });
+      nflCandidateUsage.set(
+        pick.event_id,
+        (nflCandidateUsage.get(pick.event_id) || 0) + 1
+      );
+    }
 
     return selected;
   }
@@ -1386,7 +1416,7 @@ const [cfbError, setCfbError] =
                 </h2>
 
                 <p className="mt-2 max-w-3xl text-sm text-slate-400">
-                  Built from qualified NFL spreads and calibrated passing-yard props.
+                  Built from qualified NFL spreads, Hard Rock moneylines, and calibrated passing-yard props.
                   RDG allows only one leg per game by default to reduce accidental
                   correlation, and it will not force weaker selections into a parlay.
                 </p>
@@ -1838,12 +1868,12 @@ function BuilderCard({
                     )}
 
                     <div className="mt-1 flex items-center gap-3">
-                      {candidate.market_type === "spread" ? (
-                        <TeamLogo sport="NFL" team={candidate.team} />
-                      ) : (
+                      {candidate.market_type === "passing_prop" ? (
                         <span className="rounded-md border border-cyan-400/30 bg-cyan-400/10 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-cyan-300">
                           PROP
                         </span>
+                      ) : (
+                        <TeamLogo sport="NFL" team={candidate.team} />
                       )}
                       <p className="text-lg font-bold">{candidate.display_bet}</p>
                     </div>
@@ -1857,11 +1887,13 @@ function BuilderCard({
 
                   <div className="text-right">
                     <p className="font-bold text-green-400">
-                      {candidate.difference.toFixed(1)}{candidate.market_type === "passing_prop" ? "%" : " pts"}
+                      {candidate.market_type === "moneyline"
+                        ? `${candidate.projected_margin.toFixed(1)} pts`
+                        : `${candidate.difference.toFixed(1)}${candidate.market_type === "passing_prop" ? "%" : " pts"}`}
                     </p>
 
                     <p className="mt-1 text-[10px] uppercase text-slate-500">
-                      Model vs Market
+                      {candidate.market_type === "moneyline" ? "RDG PROJECTED MARGIN" : "Model vs Market"}
                     </p>
                   </div>
                 </div>
@@ -1888,6 +1920,22 @@ function BuilderCard({
                     </div>
                     <p className="mt-3 text-xs text-slate-500">
                       Passing-yard probability is model-implied from the frozen V2 residual calibration; it is not a historical sportsbook prop win rate.
+                    </p>
+                  </>
+                ) : candidate.market_type === "moneyline" ? (
+                  <>
+                    <div className="mt-4 grid grid-cols-2 gap-3">
+                      <MiniStat
+                        title="RDG PROJECTION"
+                        value={`${candidate.projected_winner} by ${candidate.projected_margin.toFixed(1)}`}
+                      />
+                      <MiniStat
+                        title="HARD ROCK MONEYLINE"
+                        value={candidate.odds ? `${Number(candidate.odds) > 0 ? "+" : ""}${candidate.odds}` : "—"}
+                      />
+                    </div>
+                    <p className="mt-3 text-xs text-slate-500">
+                      Historical {candidate.historical_bucket} bucket: {candidate.historical_correct}/{candidate.historical_sample} ({candidate.historical_accuracy}%) straight-up. This historical bucket rate is not an individual-game win probability.
                     </p>
                   </>
                 ) : (
@@ -1978,6 +2026,25 @@ function BuilderCard({
                           </div>
                         </div>
                       </>
+                    ) : candidate.market_type === "moneyline" ? (
+                      <div className="grid gap-3 lg:grid-cols-2">
+                        <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/[0.06] p-4">
+                          <p className="text-sm font-black uppercase tracking-[0.12em] text-emerald-300">✓ Why RDG Likes This Moneyline</p>
+                          <div className="mt-3 space-y-2 text-sm leading-6 text-slate-200">
+                            <p>✓ RDG projects <b className="text-white">{candidate.projected_winner} by {candidate.projected_margin.toFixed(1)}</b>.</p>
+                            <p>✓ Hard Rock currently lists <b className="text-white">{candidate.team} moneyline {candidate.odds ? `${Number(candidate.odds) > 0 ? "+" : ""}${candidate.odds}` : "—"}</b>.</p>
+                            <p>✓ The historical <b>{candidate.historical_bucket}</b> projected-margin bucket went <b>{candidate.historical_correct}/{candidate.historical_sample} ({candidate.historical_accuracy}%)</b> on straight-up projected winners.</p>
+                          </div>
+                        </div>
+                        <div className="rounded-xl border border-red-500/40 bg-red-500/[0.06] p-4">
+                          <p className="text-sm font-black uppercase tracking-[0.12em] text-red-400">⚠ Potential Cons / Risks</p>
+                          <div className="mt-3 space-y-2 text-sm leading-6 text-red-200">
+                            <p>⚠ RDG&apos;s team model is calibrated for projected margin, not individual-game moneyline win probability.</p>
+                            <p>⚠ The historical bucket rate is descriptive straight-up performance and should not be treated as the probability this specific moneyline wins.</p>
+                            <p>⚠ Injuries, inactive starters, weather, and late price movement can materially change the matchup and value.</p>
+                          </div>
+                        </div>
+                      </div>
                     ) : (
                       <div className="grid gap-3 lg:grid-cols-2">
                         <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/[0.06] p-4">
