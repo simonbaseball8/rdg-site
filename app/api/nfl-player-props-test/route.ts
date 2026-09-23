@@ -370,7 +370,11 @@ export async function GET() {
     // so player matching is performed inside all Week-1 NFL events returned around those dates.
     for (const event of eventList) {
       const commence = String(event.commence_time || "");
-      if (!commence.startsWith("2025-09-")) continue;
+      const kickoffMs = new Date(commence).getTime();
+      const week1StartMs = new Date("2025-09-04T00:00:00Z").getTime();
+      const week1EndMs = new Date("2025-09-09T12:00:00Z").getTime();
+      if (!Number.isFinite(kickoffMs) || kickoffMs < week1StartMs || kickoffMs > week1EndMs) continue;
+
       const snapshot = isoMinusMinutes(commence, SNAPSHOT_MINUTES_BEFORE_KICKOFF);
 
       let odds:any;
@@ -458,7 +462,7 @@ export async function GET() {
 
     return NextResponse.json({
       success:true,
-      version:"1.2-rushing-v5-historical-sportsbook-week1-test",
+      version:"1.3-rushing-v5-historical-sportsbook-week1-test",
       purpose:"Verify frozen Rushing V5 against real pregame 2025 historical player_rush_yds lines before running a full-season sportsbook backtest.",
       model:"Frozen 5.0-rushing-v5-direct-yards",
       test_scope:{season:TEST_SEASON,week:TEST_WEEK,snapshot_minutes_before_kickoff:SNAPSHOT_MINUTES_BEFORE_KICKOFF,market:MARKET,region:"us"},
@@ -470,6 +474,6 @@ export async function GET() {
       bets:results
     });
   } catch (error:any) {
-    return NextResponse.json({success:false,version:"1.2-rushing-v5-historical-sportsbook-week1-test",error:error?.message||String(error)},{status:500});
+    return NextResponse.json({success:false,version:"1.3-rushing-v5-historical-sportsbook-week1-test",error:error?.message||String(error)},{status:500});
   }
 }
