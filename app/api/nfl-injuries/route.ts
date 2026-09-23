@@ -4,11 +4,8 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const maxDuration = 30;
 
-const VERSION = "2.0-free-espn-current-injuries";
-const ESPN_INJURIES =
-  "https://site.api.espn.com/apis/site/v2/sports/football/nfl/injuries";
-
-type AnyRecord = Record<string, any>;
+const VERSION = "3.0-official-nfl-injury-page";
+const NFL_URL = "https://www.nfl.com/injuries/";
 
 type Injury = {
   player_name: string;
@@ -20,110 +17,55 @@ type Injury = {
   current_injury: boolean;
   importance_score: number | null;
   importance_tier: string | null;
-  source: "ESPN";
-  source_status: string | null;
-  source_date: string | null;
+  source: "NFL.com";
 };
 
-function str(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
+const TEAM_NAMES: Record<string, string> = {
+  Cardinals: "ARI", Falcons: "ATL", Ravens: "BAL", Bills: "BUF",
+  Panthers: "CAR", Bears: "CHI", Bengals: "CIN", Browns: "CLE",
+  Cowboys: "DAL", Broncos: "DEN", Lions: "DET", Packers: "GB",
+  Texans: "HOU", Colts: "IND", Jaguars: "JAX", Chiefs: "KC",
+  Raiders: "LV", Chargers: "LAC", Rams: "LA", Dolphins: "MIA",
+  Vikings: "MIN", Patriots: "NE", Saints: "NO", Giants: "NYG",
+  Jets: "NYJ", Eagles: "PHI", Steelers: "PIT", "49ers": "SF",
+  Seahawks: "SEA", Buccaneers: "TB", Titans: "TEN", Commanders: "WAS",
+};
+
+function cleanText(value: string): string {
+  return value
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&#39;/gi, "'")
+    .replace(/&quot;/gi, '"')
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
-function upper(value: unknown): string {
-  return str(value).toUpperCase();
+function decodeCell(value: string): string {
+  return cleanText(value);
 }
 
-function normalizeTeam(value: unknown): string {
-  const raw = upper(value);
-  const aliases: Record<string, string> = {
-    ARZ: "ARI",
-    JAC: "JAX",
-    KAN: "KC",
-    LAR: "LA",
-    LOSANGELESRAMS: "LA",
-    NEP: "NE",
-    NOR: "NO",
-    OAK: "LV",
-    SFO: "SF",
-    TAM: "TB",
-    WSH: "WAS",
-  };
-  return aliases[raw.replace(/[^A-Z]/g, "")] || raw;
-}
-
-function statusText(item: AnyRecord): string {
-  return (
-    str(item.status) ||
-    str(item.type?.description) ||
-    str(item.type?.name) ||
-    str(item.type?.abbreviation) ||
-    str(item.details?.status) ||
-    str(item.shortComment) ||
-    str(item.longComment)
-  );
-}
-
-function normalizeGameStatus(value: unknown): string {
-  const x = upper(value);
-
-  if (!x) return "NO_DESIGNATION";
-  if (
-    x.includes("INJURED RESERVE") ||
-    x.includes("RESERVE/INJURED") ||
-    x === "IR" ||
-    x.includes("OUT")
-  ) return "OUT";
+function normalizeStatus(value: string): string {
+  const x = value.trim().toUpperCase();
+  if (x.includes("OUT")) return "OUT";
   if (x.includes("DOUBT")) return "DOUBTFUL";
   if (x.includes("QUESTION")) return "QUESTIONABLE";
   if (x.includes("PROBABLE")) return "PROBABLE";
-  if (x.includes("DAY-TO-DAY") || x.includes("DAY TO DAY")) return "QUESTIONABLE";
-
   return "NO_DESIGNATION";
 }
 
-function injuryDescription(item: AnyRecord): string {
-  const candidates = [
-    item.details?.type,
-    item.details?.detail,
-    item.details?.location,
-    item.type?.description,
-    item.longComment,
-    item.shortComment,
-  ]
-    .map(str)
-    .filter(Boolean);
-
-  // Prefer a concise body-part description when ESPN supplies one.
-  const bodyPart = str(item.details?.location) || str(item.details?.type);
-  if (bodyPart) return bodyPart;
-
-  const comment = candidates.find(
-    (x) =>
-      !/^(out|questionable|doubtful|probable|injured reserve|ir)$/i.test(x),
-  );
-
-  return comment || "Injury";
+function normalizePractice(value: string): string {
+  const x = value.trim().toUpperCase();
+  if (x.includes("DID NOT")) return "DNP";
+  if (x.includes("LIMITED")) return "LIMITED";
+  if (x.includes("FULL")) return "FULL";
+  return value.trim();
 }
 
-function practiceStatus(item: AnyRecord): string {
-  const x =
-    str(item.practiceStatus) ||
-    str(item.practice_status) ||
-    str(item.details?.practiceStatus) ||
-    str(item.details?.practice_status);
-
-  const u = upper(x);
-  if (!u) return "";
-  if (u === "DNP" || u.includes("DID NOT")) return "DNP";
-  if (u === "LP" || u.includes("LIMITED")) return "LIMITED";
-  if (u === "FP" || u.includes("FULL")) return "FULL";
-  return x;
-}
-
-function importance(position: string, status: string): {
-  score: number | null;
-  tier: string | null;
-} {
+function importance(position: string, status: string, practice: string) {
   let score = 0;
 
   if (position === "QB") score += 70;
@@ -137,135 +79,116 @@ function importance(position: string, status: string): {
   else if (status === "DOUBTFUL") score += 22;
   else if (status === "QUESTIONABLE") score += 12;
 
-  const tier =
-    score >= 85 ? "CRITICAL" :
-    score >= 60 ? "HIGH" :
-    score >= 35 ? "MEDIUM" :
-    "LOW";
-
-  return { score, tier };
-}
-
-function extractTeam(group: AnyRecord): string {
-  return normalizeTeam(
-    group.team?.abbreviation ||
-    group.team?.shortDisplayName ||
-    group.abbreviation ||
-    group.teamAbbreviation ||
-    group.team,
-  );
-}
-
-function normalizeItem(item: AnyRecord, fallbackTeam: string): Injury | null {
-  const athlete = item.athlete || item.player || {};
-  const playerName =
-    str(athlete.displayName) ||
-    str(athlete.fullName) ||
-    str(item.displayName) ||
-    str(item.player_name) ||
-    str(item.name);
-
-  if (!playerName) return null;
-
-  const team = normalizeTeam(
-    athlete.team?.abbreviation ||
-    item.team?.abbreviation ||
-    item.teamAbbreviation ||
-    item.team ||
-    fallbackTeam,
-  );
-
-  const position = upper(
-    athlete.position?.abbreviation ||
-    athlete.position?.name ||
-    item.position?.abbreviation ||
-    item.position,
-  );
-
-  const rawStatus = statusText(item);
-  const gameStatus = normalizeGameStatus(rawStatus);
-  const practice = practiceStatus(item);
-  const injury = injuryDescription(item);
-
-  // ESPN's injuries endpoint is already a current-injury feed. Keep all
-  // returned players, even when the exact Sunday designation has not yet
-  // been posted.
-  const current = true;
-  const imp = importance(position, gameStatus);
+  if (practice === "DNP") score += 8;
+  else if (practice === "LIMITED") score += 4;
 
   return {
-    player_name: playerName,
-    team,
-    position,
-    injury,
-    game_status: gameStatus,
-    practice_status: practice,
-    current_injury: current,
-    importance_score: imp.score,
-    importance_tier: imp.tier,
-    source: "ESPN",
-    source_status: rawStatus || null,
-    source_date: str(item.date) || null,
+    score,
+    tier:
+      score >= 85 ? "CRITICAL" :
+      score >= 60 ? "HIGH" :
+      score >= 35 ? "MEDIUM" :
+      "LOW",
   };
 }
 
-function collectFromPayload(payload: AnyRecord): Injury[] {
-  const output: Injury[] = [];
+function parseOfficialNFL(html: string): Injury[] {
+  const rows: Injury[] = [];
 
-  // Common ESPN site-api shape:
-  // { injuries: [{ team: {...}, injuries: [...] }, ...] }
-  if (Array.isArray(payload.injuries)) {
-    for (const group of payload.injuries) {
-      if (!group || typeof group !== "object") continue;
+  /*
+    NFL.com's page renders team injury tables in HTML.
+    We scan headings/team labels and then parse table rows beneath them.
+    This avoids private APIs and requires no API key.
+  */
+  const teamPattern = Object.keys(TEAM_NAMES)
+    .sort((a, b) => b.length - a.length)
+    .map((x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|");
 
-      const fallbackTeam = extractTeam(group);
-      const items =
-        Array.isArray(group.injuries) ? group.injuries :
-        Array.isArray(group.items) ? group.items :
-        [];
+  const sectionRegex = new RegExp(
+    `(?:<[^>]+>\\s*)*(${teamPattern})(?:\\s*</[^>]+>)+([\\s\\S]*?)(?=(?:<[^>]+>\\s*)*(?:${teamPattern})(?:\\s*</[^>]+>)+|$)`,
+    "gi",
+  );
 
-      if (items.length) {
-        for (const item of items) {
-          const normalized = normalizeItem(item, fallbackTeam);
-          if (normalized) output.push(normalized);
-        }
-      } else {
-        const normalized = normalizeItem(group, fallbackTeam);
-        if (normalized) output.push(normalized);
+  let sectionMatch: RegExpExecArray | null;
+
+  while ((sectionMatch = sectionRegex.exec(html)) !== null) {
+    const teamName = sectionMatch[1];
+    const team = TEAM_NAMES[teamName];
+    const section = sectionMatch[2];
+
+    if (!team) continue;
+
+    const trRegex = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
+    let trMatch: RegExpExecArray | null;
+
+    while ((trMatch = trRegex.exec(section)) !== null) {
+      const rowHtml = trMatch[1];
+
+      const cells = [...rowHtml.matchAll(/<t[dh]\b[^>]*>([\s\S]*?)<\/t[dh]>/gi)]
+        .map((m) => decodeCell(m[1]));
+
+      if (cells.length < 4) continue;
+
+      const joined = cells.join(" | ").toLowerCase();
+      if (
+        joined.includes("player") &&
+        joined.includes("position") &&
+        joined.includes("practice")
+      ) {
+        continue;
       }
+
+      // NFL table columns:
+      // Player | Position | Injuries | Practice Status | Game Status
+      const playerName = cells[0]?.trim() || "";
+      const position = (cells[1] || "").trim().toUpperCase();
+      const injury = (cells[2] || "").trim() || "Injury report";
+      const practice = normalizePractice(cells[3] || "");
+      const gameStatus = normalizeStatus(cells[4] || "");
+
+      if (!playerName || !position) continue;
+
+      const current =
+        gameStatus === "OUT" ||
+        gameStatus === "DOUBTFUL" ||
+        gameStatus === "QUESTIONABLE" ||
+        practice === "DNP" ||
+        practice === "LIMITED";
+
+      // Do not treat full-practice/no-designation entries as injury concerns.
+      if (!current) continue;
+
+      const imp = importance(position, gameStatus, practice);
+
+      rows.push({
+        player_name: playerName,
+        team,
+        position,
+        injury,
+        game_status: gameStatus,
+        practice_status: practice,
+        current_injury: true,
+        importance_score: imp.score,
+        importance_tier: imp.tier,
+        source: "NFL.com",
+      });
     }
   }
 
-  // Alternate shape used by some ESPN endpoints:
-  // { teams: [{ team: {...}, injuries: [...] }] }
-  if (Array.isArray(payload.teams)) {
-    for (const group of payload.teams) {
-      const fallbackTeam = extractTeam(group);
-      const items =
-        Array.isArray(group.injuries) ? group.injuries :
-        Array.isArray(group.items) ? group.items :
-        [];
-
-      for (const item of items) {
-        const normalized = normalizeItem(item, fallbackTeam);
-        if (normalized) output.push(normalized);
-      }
-    }
-  }
-
-  // Flat fallback.
-  if (!output.length && Array.isArray(payload.items)) {
-    for (const item of payload.items) {
-      const normalized = normalizeItem(item, "");
-      if (normalized) output.push(normalized);
-    }
-  }
-
-  return output;
+  return rows;
 }
 
-function dedupe(rows: Injury[]): Injury[] {
+function dedupe(rows: Injury[]) {
   const map = new Map<string, Injury>();
+
+  const statusRank: Record<string, number> = {
+    OUT: 4,
+    DOUBTFUL: 3,
+    QUESTIONABLE: 2,
+    PROBABLE: 1,
+    NO_DESIGNATION: 0,
+  };
 
   for (const row of rows) {
     const key = `${row.team}|${row.player_name.toLowerCase()}`;
@@ -276,18 +199,16 @@ function dedupe(rows: Injury[]): Injury[] {
       continue;
     }
 
-    const rank = (x: Injury) => {
-      const statusRank: Record<string, number> = {
-        OUT: 4,
-        DOUBTFUL: 3,
-        QUESTIONABLE: 2,
-        PROBABLE: 1,
-        NO_DESIGNATION: 0,
-      };
-      return statusRank[x.game_status] || 0;
-    };
+    const oldRank = statusRank[old.game_status] || 0;
+    const newRank = statusRank[row.game_status] || 0;
 
-    if (rank(row) > rank(old)) map.set(key, row);
+    if (
+      newRank > oldRank ||
+      (newRank === oldRank &&
+        Number(row.importance_score || 0) > Number(old.importance_score || 0))
+    ) {
+      map.set(key, row);
+    }
   }
 
   return [...map.values()];
@@ -296,39 +217,41 @@ function dedupe(rows: Injury[]): Injury[] {
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
-    const teamFilter = normalizeTeam(url.searchParams.get("team"));
+    const teamFilter = (url.searchParams.get("team") || "")
+      .trim()
+      .toUpperCase();
 
-    const response = await fetch(ESPN_INJURIES, {
+    const response = await fetch(NFL_URL, {
       headers: {
-        Accept: "application/json",
-        "User-Agent": "RDG/2.0",
+        Accept: "text/html,application/xhtml+xml",
+        "Accept-Language": "en-US,en;q=0.9",
+        "User-Agent":
+          "Mozilla/5.0 (compatible; RDG-Injury-Research/1.0; +https://vercel.app)",
       },
       cache: "no-store",
     });
 
     if (!response.ok) {
-      const body = await response.text();
-      throw new Error(
-        `ESPN injury feed returned ${response.status}: ${body.slice(0, 250)}`,
-      );
+      throw new Error(`NFL.com returned HTTP ${response.status}.`);
     }
 
-    const payload = await response.json();
-    let injuries = dedupe(collectFromPayload(payload));
+    const html = await response.text();
+
+    let injuries = dedupe(parseOfficialNFL(html));
 
     if (teamFilter) {
       injuries = injuries.filter((x) => x.team === teamFilter);
     }
 
-    injuries.sort((a, b) => {
-      const statusRank: Record<string, number> = {
-        OUT: 4,
-        DOUBTFUL: 3,
-        QUESTIONABLE: 2,
-        PROBABLE: 1,
-        NO_DESIGNATION: 0,
-      };
+    const statusRank: Record<string, number> = {
+      OUT: 4,
+      DOUBTFUL: 3,
+      QUESTIONABLE: 2,
+      PROBABLE: 1,
+      NO_DESIGNATION: 0,
+    };
 
+    injuries.sort((a, b) => {
       const sr =
         (statusRank[b.game_status] || 0) -
         (statusRank[a.game_status] || 0);
@@ -350,20 +273,43 @@ export async function GET(request: Request) {
       (x) => x.game_status === "QUESTIONABLE",
     );
 
-    const teams = [...new Set(injuries.map((x) => x.team).filter(Boolean))].sort();
+    const teams = [
+      ...new Set(injuries.map((x) => x.team)),
+    ].sort();
+
+    /*
+      Important safety check:
+      An HTTP 200 with zero parsed rows is not accepted as a healthy feed.
+      That prevents RDG from silently treating a changed/blocked NFL page
+      as "no injuries".
+    */
+    if (!teamFilter && injuries.length === 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          version: VERSION,
+          provider: "NFL.com",
+          requires_api_key: false,
+          error:
+            "NFL.com loaded, but no injury rows could be parsed. RDG will not treat this as a clean injury report.",
+          generated_at: new Date().toISOString(),
+        },
+        { status: 502 },
+      );
+    }
 
     return NextResponse.json({
       success: true,
       version: VERSION,
-      provider: "ESPN",
+      provider: "NFL.com",
       requires_api_key: false,
       team_filter: teamFilter || null,
       summary: {
-        total_current_injuries: injuries.length,
+        current_injuries: injuries.length,
         out: out.length,
         doubtful: doubtful.length,
         questionable: questionable.length,
-        teams_with_injuries: teams.length,
+        teams_with_current_injuries: teams.length,
       },
       teams,
       current_injuries: injuries,
@@ -374,9 +320,11 @@ export async function GET(request: Request) {
         questionable,
       },
       diagnostics: {
-        source_url: ESPN_INJURIES,
+        source: NFL_URL,
+        parsed_html: true,
+        fail_closed: true,
         note:
-          "Free current ESPN NFL injury feed. No NFLMeta or Odds API key is required.",
+          "Only current concerns are returned: OUT, DOUBTFUL, QUESTIONABLE, DNP, or LIMITED. Full-practice players with no designation are excluded.",
       },
       generated_at: new Date().toISOString(),
     });
@@ -385,14 +333,15 @@ export async function GET(request: Request) {
       {
         success: false,
         version: VERSION,
-        provider: "ESPN",
+        provider: "NFL.com",
         requires_api_key: false,
         error:
           error instanceof Error
             ? error.message
             : "Unknown NFL injury route error.",
+        generated_at: new Date().toISOString(),
       },
-      { status: 500 },
+      { status: 502 },
     );
   }
 }
