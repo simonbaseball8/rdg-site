@@ -322,6 +322,24 @@ type NHLBetCandidate = {
   signal: string;
 };
 
+type NFLInjury = {
+  player_name: string;
+  team: string;
+  position: string;
+  injury: string;
+  game_status: string;
+  practice_status: string;
+  importance_score?: number | null;
+  importance_tier?: string | null;
+  current_injury?: boolean;
+};
+
+type NFLInjuriesResponse = {
+  success: boolean;
+  current_injuries?: NFLInjury[];
+  injuries?: NFLInjury[];
+};
+
 type BetCandidate = {
   event_id: string;
   correlation_key: string;
@@ -784,6 +802,8 @@ export default function Home() {
   const [lastUpdatedDisplay, setLastUpdatedDisplay] = useState("Updating...");
   const [nflPlayerProps, setNflPlayerProps] =
     useState<NFLPlayerPropsAnalysis | null>(null);
+  const [nflInjuries, setNflInjuries] =
+    useState<NFLInjuriesResponse | null>(null);
 const [activeSport, setActiveSport] =
   useState<"ALL" | "NFL" | "CFB" | "MLB" | "NHL" | "NBA">("NFL");
 
@@ -879,6 +899,16 @@ const [cfbError, setCfbError] =
       }
     }
 
+    async function loadNFLInjuries() {
+      try {
+        const response = await fetch("/api/nfl-injuries", { cache: "no-store" });
+        if (!response.ok) throw new Error(`NFL injuries failed: ${response.status}`);
+        setNflInjuries(await response.json());
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
         async function loadCFB() {
       try {
         const response = await fetch(
@@ -940,6 +970,7 @@ const [cfbError, setCfbError] =
     loadParlays();
     loadNFL();
     loadNFLPlayerProps();
+    loadNFLInjuries();
     loadCFB();
     loadMLB();
     loadNHL();
@@ -1022,6 +1053,83 @@ const [cfbError, setCfbError] =
   }
 
   // SPREAD CANDIDATES
+  const currentNFLInjuries =
+    nflInjuries?.current_injuries ||
+    nflInjuries?.injuries ||
+    [];
+
+  function injuryPriority(injury: NFLInjury) {
+    const status = String(injury.game_status || "").toUpperCase();
+    const practice = String(injury.practice_status || "").toUpperCase();
+    const position = String(injury.position || "").toUpperCase();
+    let score = Number(injury.importance_score || 0);
+
+    if (position === "QB") score += 100;
+    else if (["WR", "RB", "TE", "OL", "OT", "G", "C"].includes(position)) score += 35;
+    else if (["CB", "S", "DL", "DE", "DT", "LB", "OLB", "ILB"].includes(position)) score += 20;
+
+    if (status === "OUT") score += 80;
+    else if (status === "DOUBTFUL") score += 60;
+    else if (status === "QUESTIONABLE") score += 35;
+
+    if (practice.includes("DID NOT") || practice === "DNP") score += 25;
+    else if (practice.includes("LIMITED") || practice === "LP") score += 12;
+
+    return score;
+  }
+
+  function injuryText(injury: NFLInjury) {
+    const status = String(injury.game_status || "").toUpperCase();
+    const practice = String(injury.practice_status || "");
+    const statusText =
+      status && status !== "NO_DESIGNATION" && status !== "UNSPECIFIED"
+        ? status
+        : practice || "on the injury report";
+
+    return `${injury.player_name} (${injury.position}) — ${injury.injury}; ${statusText}.`;
+  }
+
+  function gameBetResearch(
+    selectedTeam: string,
+    opponent: string,
+    basePros: string[],
+    baseCons: string[],
+  ) {
+    const teamInjuries = currentNFLInjuries
+      .filter((x) => x.team === selectedTeam && x.current_injury !== false)
+      .sort((a, b) => injuryPriority(b) - injuryPriority(a));
+
+    const opponentInjuries = currentNFLInjuries
+      .filter((x) => x.team === opponent && x.current_injury !== false)
+      .sort((a, b) => injuryPriority(b) - injuryPriority(a));
+
+    const major = (x: NFLInjury) => {
+      const status = String(x.game_status || "").toUpperCase();
+      const practice = String(x.practice_status || "").toUpperCase();
+      return (
+        x.position === "QB" ||
+        status === "OUT" ||
+        status === "DOUBTFUL" ||
+        status === "QUESTIONABLE" ||
+        practice.includes("DID NOT") ||
+        practice === "DNP" ||
+        injuryPriority(x) >= 55
+      );
+    };
+
+    const cons = [
+      ...teamInjuries.filter(major).slice(0, 3).map((x) => `Injury concern: ${injuryText(x)}`),
+      ...baseCons,
+    ].slice(0, 5);
+
+    const pros = [
+      ...basePros,
+      ...opponentInjuries.filter(major).slice(0, 2).map((x) => `Opponent injury: ${injuryText(x)}`),
+    ].slice(0, 5);
+
+    return { pros, cons };
+  }
+
   const candidates: BetCandidate[] =
     rankedGames
       .map((game) => {
@@ -1080,6 +1188,16 @@ const [cfbError, setCfbError] =
           historical_bucket: historical.bucket,
           score: Number(score.toFixed(2)),
           sportsbook_name: "Hard Rock Bet",
+          research: gameBetResearch(
+            team,
+            isHome ? game.away_team : game.home_team,
+            [
+              `RDG projects ${game.rdg.projected_winner} by ${game.rdg.projected_margin.toFixed(1)}.`,
+              `Model/market difference: ${edge.toFixed(1)} points.`,
+              `Historical model bucket: ${historical.historical_winner_accuracy.toFixed(1)}% (${historical.correct}/${historical.sample}).`,
+            ],
+            [],
+          ),
         } as BetCandidate;
       })
       .filter((candidate): candidate is BetCandidate => candidate !== null)
@@ -1160,6 +1278,16 @@ const [cfbError, setCfbError] =
           score: Number(score.toFixed(2)),
           market_probability: Number(implied.toFixed(2)),
           sportsbook_name: "Hard Rock Bet",
+          research: gameBetResearch(
+            team,
+            isHome ? game.away_team : game.home_team,
+            [
+              `RDG projects ${game.rdg.projected_winner} by ${game.rdg.projected_margin.toFixed(1)}.`,
+              `Historical model bucket: ${historical.historical_winner_accuracy.toFixed(1)}% (${historical.correct}/${historical.sample}).`,
+              `Current moneyline price: ${numericOdds > 0 ? "+" : ""}${numericOdds}.`,
+            ],
+            [],
+          ),
         } as BetCandidate;
       })
       .filter((candidate): candidate is BetCandidate => candidate !== null)
@@ -2749,18 +2877,12 @@ function BuilderCard({
                               ) : (
                                 <p>• Detailed player and matchup research is loading for this pick.</p>
                               )
-                            ) : isMoneyline ? (
-                              <>
-                                <p>• RDG projects <strong className="text-white">{candidate.projected_winner}</strong> by {candidate.projected_margin.toFixed(1)}</p>
-                                <p>• Historical bucket: <strong className="text-white">{candidate.historical_accuracy.toFixed(1)}%</strong> ({candidate.historical_correct}/{candidate.historical_sample})</p>
-                                <p>• Current price: <strong className="text-white">{oddsText}</strong></p>
-                              </>
+                            ) : candidate.research?.pros?.length ? (
+                              candidate.research.pros.map((reason, reasonIndex) => (
+                                <p key={`pro-${reasonIndex}`}>• {reason}</p>
+                              ))
                             ) : (
-                              <>
-                                <p>• Model/market difference: <strong className="text-white">{candidate.difference.toFixed(1)} pts</strong></p>
-                                <p>• RDG projects <strong className="text-white">{candidate.projected_winner}</strong> by {candidate.projected_margin.toFixed(1)}</p>
-                                <p>• Historical bucket: <strong className="text-white">{candidate.historical_accuracy.toFixed(1)}%</strong></p>
-                              </>
+                              <p>• RDG selected this play from the current model and market comparison.</p>
                             )}
                           </div>
                         </div>
@@ -2778,18 +2900,12 @@ function BuilderCard({
                               ) : (
                                 <p>• No specific statistical counter-signal was strong enough to display.</p>
                               )
-                            ) : isMoneyline ? (
-                              <>
-                                <p>• Historical bucket results do not predict this individual game.</p>
-                                <p>• Moneyline value can change as sportsbook odds move.</p>
-                                <p>• Upsets remain possible even when RDG projects the winner.</p>
-                              </>
+                            ) : candidate.research?.cons?.length ? (
+                              candidate.research.cons.map((reason, reasonIndex) => (
+                                <p key={`con-${reasonIndex}`}>• {reason}</p>
+                              ))
                             ) : (
-                              <>
-                                <p>• The spread can move before kickoff and change the value of the pick.</p>
-                                <p>• Model/market difference is not the probability the wager wins.</p>
-                                <p>• Game script and late availability news can change the matchup.</p>
-                              </>
+                              <p>• No major current injury or statistical counter-signal was strong enough to display.</p>
                             )}
                           </div>
                         </div>
