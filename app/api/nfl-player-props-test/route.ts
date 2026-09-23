@@ -1,13 +1,10 @@
 import { NextResponse } from "next/server";
-import { createGunzip } from "node:zlib";
-import { Readable } from "node:stream";
-import * as readline from "node:readline";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const VERSION = "1.0-rushing-v1-backtest";
+const VERSION = "1.1-rushing-v1-backtest";
 const MIN_CARRIES = 5;
 const MIN_PRIOR_GAMES = 2;
 
@@ -28,91 +25,95 @@ type History = {
   yards: number;
 };
 
-function n(v: unknown): number {
+function num(v: unknown): number {
   const x = Number(v);
   return Number.isFinite(x) ? x : 0;
 }
 
-function csvSplit(line: string): string[] {
-  const out: string[] = [];
-  let cur = "";
-  let quoted = false;
+function parseCSV(text: string): Record<string, string>[] {
+  const lines = text.split(/\r?\n/).filter(Boolean);
+  if (!lines.length) return [];
 
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i];
-    if (c === '"') {
-      if (quoted && line[i + 1] === '"') {
-        cur += '"';
-        i++;
-      } else {
-        quoted = !quoted;
-      }
-    } else if (c === "," && !quoted) {
-      out.push(cur);
-      cur = "";
-    } else {
-      cur += c;
+  function split(line: string) {
+    const out: string[] = [];
+    let cur = "";
+    let quoted = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') {
+        if (quoted && line[i + 1] === '"') {
+          cur += '"';
+          i++;
+        } else quoted = !quoted;
+      } else if (c === "," && !quoted) {
+        out.push(cur);
+        cur = "";
+      } else cur += c;
     }
+    out.push(cur);
+    return out;
   }
-  out.push(cur);
-  return out;
+
+  const headers = split(lines[0]);
+  return lines.slice(1).map((line) => {
+    const vals = split(line);
+    const row: Record<string, string> = {};
+    headers.forEach((h, i) => (row[h] = vals[i] ?? ""));
+    return row;
+  });
 }
 
 async function loadSeason(season: number): Promise<PlayerGame[]> {
-  // nflverse weekly player stats are compact and ideal for player-prop backtests.
+  // nflverse changed the player-stats release layout before the 2025 season.
+  // Use the season-specific weekly file instead of the old combined player_stats.csv.
   const url =
-    `https://github.com/nflverse/nflverse-data/releases/download/player_stats/player_stats.csv`;
+    `https://github.com/nflverse/nflverse-data/releases/download/player_stats/stats_player_week_${season}.csv`;
 
   const res = await fetch(url, {
-    headers: { "User-Agent": "RDG-NFL-Rushing-Backtest/1.0" },
+    headers: { "User-Agent": "RDG-NFL-Rushing-Backtest/1.1" },
     next: { revalidate: 3600 },
   });
 
-  if (!res.ok || !res.body) {
-    throw new Error(`nflverse player stats failed: ${res.status}`);
+  if (!res.ok) {
+    throw new Error(`nflverse ${season} weekly player stats failed: ${res.status}`);
   }
 
-  // The release is plain CSV. Stream it so Vercel does not hold the whole file twice.
-  const stream = Readable.fromWeb(res.body as any);
-  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  const rows = parseCSV(await res.text());
+  const games: PlayerGame[] = [];
 
-  let headers: string[] | null = null;
-  const rows: PlayerGame[] = [];
+  for (const row of rows) {
+    const seasonType = (row.season_type || "").toUpperCase();
+    if (seasonType && seasonType !== "REG") continue;
 
-  for await (const line of rl) {
-    if (!headers) {
-      headers = csvSplit(line);
-      continue;
-    }
-    if (!line.trim()) continue;
+    const carries = num(row.carries);
+    if (carries < MIN_CARRIES) continue;
 
-    const values = csvSplit(line);
-    const row: Record<string, string> = {};
-    for (let i = 0; i < headers.length; i++) row[headers[i]] = values[i] ?? "";
+    const playerId =
+      row.player_id ||
+      row.player_display_name ||
+      row.player_name ||
+      "";
 
-    if (n(row.season) !== season) continue;
-    if ((row.season_type || "").toUpperCase() !== "REG") continue;
+    if (!playerId) continue;
 
-    const playerId = row.player_id || row.player_display_name || row.player_name;
-    const playerName = row.player_display_name || row.player_name || playerId;
-    const carries = n(row.carries);
-    const rushYards = n(row.rushing_yards);
-
-    if (!playerId || carries < MIN_CARRIES) continue;
-
-    rows.push({
+    games.push({
       season,
-      week: n(row.week),
-      gameId: row.game_id || `${season}-${row.week}-${row.recent_team}-${playerId}`,
+      week: num(row.week),
+      gameId:
+        row.game_id ||
+        `${season}-${row.week}-${row.recent_team || row.team}-${playerId}`,
       playerId,
-      playerName,
+      playerName:
+        row.player_display_name ||
+        row.player_name ||
+        playerId,
       team: row.recent_team || row.team || "",
       carries,
-      rushYards,
+      rushYards: num(row.rushing_yards),
     });
   }
 
-  return rows.sort((a, b) => a.week - b.week || a.gameId.localeCompare(b.gameId));
+  return games.sort((a, b) => a.week - b.week || a.gameId.localeCompare(b.gameId));
 }
 
 function updateHistory(map: Map<string, History>, g: PlayerGame) {
@@ -124,15 +125,20 @@ function updateHistory(map: Map<string, History>, g: PlayerGame) {
 }
 
 function metrics(errors: number[]) {
-  if (!errors.length) return { n: 0, mae: null, rmse: null, mean_error: null };
+  if (!errors.length) {
+    return { n: 0, mae: null, rmse: null, mean_error: null };
+  }
+
   const mae = errors.reduce((s, e) => s + Math.abs(e), 0) / errors.length;
-  const mse = errors.reduce((s, e) => s + e * e, 0) / errors.length;
+  const rmse = Math.sqrt(
+    errors.reduce((s, e) => s + e * e, 0) / errors.length,
+  );
   const mean = errors.reduce((s, e) => s + e, 0) / errors.length;
 
   return {
     n: errors.length,
     mae: Number(mae.toFixed(2)),
-    rmse: Number(Math.sqrt(mse).toFixed(2)),
+    rmse: Number(rmse.toFixed(2)),
     mean_error: Number(mean.toFixed(2)),
   };
 }
@@ -144,25 +150,26 @@ export async function GET() {
       loadSeason(2025),
     ]);
 
-    // Baseline: player's historical rushing yards/game.
-    // V1: expected carries * historical yards/carry.
-    // All 2025 predictions use only information available BEFORE that game.
-    const history = new Map<string, History>();
+    if (!train2024.length || !test2025.length) {
+      throw new Error(
+        `Missing player-game data: 2024=${train2024.length}, 2025=${test2025.length}`,
+      );
+    }
 
+    const history = new Map<string, History>();
     for (const g of train2024) updateHistory(history, g);
 
     const baselineErrors: number[] = [];
     const v1Errors: number[] = [];
     const predictions: any[] = [];
+    let skippedNoHistory = 0;
 
     const weeks = [...new Set(test2025.map((g) => g.week))].sort((a, b) => a - b);
-
-    let skippedNoHistory = 0;
 
     for (const week of weeks) {
       const games = test2025.filter((g) => g.week === week);
 
-      // Predict entire week before adding that week's results.
+      // Predict the full week before adding that week's results.
       for (const g of games) {
         const h = history.get(g.playerId);
 
@@ -171,18 +178,15 @@ export async function GET() {
           continue;
         }
 
-        const histYardsPerGame = h.yards / h.games;
-        const histCarriesPerGame = h.carries / h.games;
-        const histYardsPerCarry = h.yards / h.carries;
+        const yardsPerGame = h.yards / h.games;
+        const carriesPerGame = h.carries / h.games;
+        const yardsPerCarry = h.yards / h.carries;
 
-        const baselineProjection = histYardsPerGame;
-        const v1Projection = histCarriesPerGame * histYardsPerCarry;
+        const baselineProjection = yardsPerGame;
+        const v1Projection = carriesPerGame * yardsPerCarry;
 
-        const baselineError = baselineProjection - g.rushYards;
-        const v1Error = v1Projection - g.rushYards;
-
-        baselineErrors.push(baselineError);
-        v1Errors.push(v1Error);
+        baselineErrors.push(baselineProjection - g.rushYards);
+        v1Errors.push(v1Projection - g.rushYards);
 
         predictions.push({
           week,
@@ -191,8 +195,8 @@ export async function GET() {
           actual_rushing_yards: g.rushYards,
           actual_carries: g.carries,
           prior_games: h.games,
-          prior_carries_per_game: Number(histCarriesPerGame.toFixed(2)),
-          prior_yards_per_carry: Number(histYardsPerCarry.toFixed(2)),
+          prior_carries_per_game: Number(carriesPerGame.toFixed(2)),
+          prior_yards_per_carry: Number(yardsPerCarry.toFixed(2)),
           baseline_projection: Number(baselineProjection.toFixed(1)),
           rushing_v1_projection: Number(v1Projection.toFixed(1)),
         });
@@ -213,9 +217,15 @@ export async function GET() {
       success: true,
       version: VERSION,
       purpose:
-        "Initial leakage-safe NFL rushing-yards projection backtest. 2024 initializes player history; 2025 is held out and processed chronologically.",
+        "Leakage-safe NFL rushing-yards projection backtest. 2024 initializes history; 2025 is held out and processed chronologically.",
       model_status: "TEST ONLY — NOT LIVE",
-      data_source: "nflverse weekly player stats",
+      data_source: {
+        provider: "nflverse",
+        files: [
+          "stats_player_week_2024.csv",
+          "stats_player_week_2025.csv",
+        ],
+      },
       filters: {
         season_type: "REG",
         minimum_game_carries: MIN_CARRIES,
@@ -238,13 +248,13 @@ export async function GET() {
       comparison: {
         mae_improvement_yards: improvement,
         note:
-          "Positive means Rushing V1 beat the baseline. This first test does not use sportsbook lines and is not a betting win-rate test.",
+          "Positive means Rushing V1 beat the baseline. This is a projection backtest, not a sportsbook betting win-rate test.",
       },
       methodology: {
         leakage_control:
-          "2024 is prior history. During 2025, every week is predicted before that week's results are added.",
+          "2024 supplies prior history. Every 2025 week is predicted before that week's results are added.",
         next_step:
-          "If the model is useful, improve the rushing projection with recent workload, role stability and matchup features, then validate separately on 2026 before enabling live PropLine rushing props.",
+          "Use these results to decide whether workload/recency features are needed before separate 2026 validation and live PropLine integration.",
       },
       sample_predictions: predictions.slice(0, 25),
     });
