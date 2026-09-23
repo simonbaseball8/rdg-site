@@ -330,20 +330,30 @@ export async function GET() {
     const weekGames = season2025.filter(g => g.week === TEST_WEEK);
     const gameIds = [...new Set(weekGames.map(g => g.gameId))];
 
-    // NFLverse game IDs contain the date, so query historical events near each game's date.
-    const eventsById = new Map<string, any>();
-    let lastUsage:any = null;
-    const eventQueryDates = [...new Set(gameIds.map(id => {
-      const m = id.match(/^2025_(\d{2})(\d{2})_/);
-      if (!m) return null;
-      return `2025-${m[1]}-${m[2]}T12:00:00Z`;
-    }).filter(Boolean))] as string[];
+    // Historical-events returns events that had odds at the requested snapshot.
+    // Week 1 spans Thursday through Monday, so use late pregame snapshots on each
+    // NFL game day instead of querying noon. This endpoint itself is quota-free.
+    const week1DiscoverySnapshots = [
+      "2025-09-04T23:30:00Z",
+      "2025-09-05T23:30:00Z",
+      "2025-09-07T16:30:00Z",
+      "2025-09-07T19:30:00Z",
+      "2025-09-07T23:30:00Z",
+      "2025-09-08T23:30:00Z",
+    ];
 
-    for (const date of eventQueryDates) {
-      const r = await oddsJson(`${ODDS_BASE}/historical/sports/${SPORT}/events?date=${encodeURIComponent(date)}`, apiKey);
+    for (const date of week1DiscoverySnapshots) {
+      const r = await oddsJson(
+        `${ODDS_BASE}/historical/sports/${SPORT}/events?date=${encodeURIComponent(date)}&dateFormat=iso`,
+        apiKey
+      );
       lastUsage = r.usage;
       const events = Array.isArray(r.data?.data) ? r.data.data : [];
-      for (const e of events) eventsById.set(e.id, e);
+      for (const e of events) {
+        if (String(e.commence_time || "").startsWith("2025-09-")) {
+          eventsById.set(e.id, e);
+        }
+      }
     }
 
     const eventList = [...eventsById.values()];
@@ -445,7 +455,7 @@ export async function GET() {
 
     return NextResponse.json({
       success:true,
-      version:"1.0-rushing-v5-historical-sportsbook-week1-test",
+      version:"1.1-rushing-v5-historical-sportsbook-week1-test",
       purpose:"Verify frozen Rushing V5 against real pregame 2025 historical player_rush_yds lines before running a full-season sportsbook backtest.",
       model:"Frozen 5.0-rushing-v5-direct-yards",
       test_scope:{season:TEST_SEASON,week:TEST_WEEK,snapshot_minutes_before_kickoff:SNAPSHOT_MINUTES_BEFORE_KICKOFF,market:MARKET,region:"us"},
@@ -457,6 +467,6 @@ export async function GET() {
       bets:results
     });
   } catch (error:any) {
-    return NextResponse.json({success:false,version:"1.0-rushing-v5-historical-sportsbook-week1-test",error:error?.message||String(error)},{status:500});
+    return NextResponse.json({success:false,version:"1.1-rushing-v5-historical-sportsbook-week1-test",error:error?.message||String(error)},{status:500});
   }
 }
