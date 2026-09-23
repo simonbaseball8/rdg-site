@@ -1,251 +1,293 @@
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const revalidate = 0;
+export const maxDuration = 30;
 
-const NFLMETA_BASE = "https://nflmeta.org/api/v1";
-const VERSION = "1.3-all-32-teams-injury-feed";
+const VERSION = "2.0-free-espn-current-injuries";
+const ESPN_INJURIES =
+  "https://site.api.espn.com/apis/site/v2/sports/football/nfl/injuries";
 
-const NFL_TEAMS = [
-  "ARI","ATL","BAL","BUF","CAR","CHI","CIN","CLE",
-  "DAL","DEN","DET","GB","HOU","IND","JAX","KC",
-  "LV","LAC","LA","MIA","MIN","NE","NO","NYG",
-  "NYJ","PHI","PIT","SF","SEA","TB","TEN","WAS",
-] as const;
-
-type RawInjury = Record<string, any>;
+type AnyRecord = Record<string, any>;
 
 type Injury = {
-  season_year: number | null;
-  week: number | null;
-  season_type: string;
   player_name: string;
-  player_key: string | null;
-  player_id: string | number | null;
   team: string;
-  team_name: string | null;
   position: string;
   injury: string;
-  primary_injury: string | null;
-  secondary_injury: string | null;
-  rest_related: boolean;
   game_status: string;
   practice_status: string;
   current_injury: boolean;
-  severity: number;
-  unavailable: boolean;
-  high_risk: boolean;
-  monitor: boolean;
-  practice_concern: boolean;
   importance_score: number | null;
   importance_tier: string | null;
-  source: "weekly_report" | "current_reserve";
-  raw: RawInjury;
+  source: "ESPN";
+  source_status: string | null;
+  source_date: string | null;
 };
 
-function text(v: unknown): string {
-  return typeof v === "string" ? v.trim() : "";
+function str(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
 }
 
-function upper(v: unknown): string {
-  return text(v).toUpperCase();
+function upper(value: unknown): string {
+  return str(value).toUpperCase();
 }
 
-function isRestOnly(value: string): boolean {
-  const x = value.toUpperCase();
+function normalizeTeam(value: unknown): string {
+  const raw = upper(value);
+  const aliases: Record<string, string> = {
+    ARZ: "ARI",
+    JAC: "JAX",
+    KAN: "KC",
+    LAR: "LA",
+    LOSANGELESRAMS: "LA",
+    NEP: "NE",
+    NOR: "NO",
+    OAK: "LV",
+    SFO: "SF",
+    TAM: "TB",
+    WSH: "WAS",
+  };
+  return aliases[raw.replace(/[^A-Z]/g, "")] || raw;
+}
+
+function statusText(item: AnyRecord): string {
   return (
-    x.includes("NIR") ||
-    x.includes("REST") ||
-    x.includes("NOT INJURY RELATED")
+    str(item.status) ||
+    str(item.type?.description) ||
+    str(item.type?.name) ||
+    str(item.type?.abbreviation) ||
+    str(item.details?.status) ||
+    str(item.shortComment) ||
+    str(item.longComment)
   );
 }
 
-function normalizePractice(v: unknown): string {
-  const x = upper(v);
-  if (!x) return "";
-  if (x === "DNP" || x.includes("DID NOT")) return "DNP";
-  if (x === "LP" || x.includes("LIMITED")) return "LIMITED";
-  if (x === "FP" || x.includes("FULL")) return "FULL";
-  return x;
-}
+function normalizeGameStatus(value: unknown): string {
+  const x = upper(value);
 
-function normalizeGameStatus(row: RawInjury, reserve = false): string {
-  if (reserve) return "OUT";
-
-  const candidates = [
-    row.game_status,
-    row.report_status,
-    row.status,
-    row.designation,
-  ];
-
-  for (const c of candidates) {
-    const x = upper(c);
-    if (!x) continue;
-    if (x.includes("INACTIVE")) return "OUT";
-    if (x.includes("OUT")) return "OUT";
-    if (x.includes("DOUBT")) return "DOUBTFUL";
-    if (x.includes("QUESTION")) return "QUESTIONABLE";
-    if (x.includes("PROBABLE")) return "PROBABLE";
-  }
+  if (!x) return "NO_DESIGNATION";
+  if (
+    x.includes("INJURED RESERVE") ||
+    x.includes("RESERVE/INJURED") ||
+    x === "IR" ||
+    x.includes("OUT")
+  ) return "OUT";
+  if (x.includes("DOUBT")) return "DOUBTFUL";
+  if (x.includes("QUESTION")) return "QUESTIONABLE";
+  if (x.includes("PROBABLE")) return "PROBABLE";
+  if (x.includes("DAY-TO-DAY") || x.includes("DAY TO DAY")) return "QUESTIONABLE";
 
   return "NO_DESIGNATION";
 }
 
-function severityFor(status: string, practice: string, reserve: boolean): number {
-  if (reserve || status === "OUT") return 4;
-  if (status === "DOUBTFUL") return 3;
-  if (status === "QUESTIONABLE") return 2;
-  if (practice === "DNP") return 1;
-  if (practice === "LIMITED") return 1;
-  return 0;
+function injuryDescription(item: AnyRecord): string {
+  const candidates = [
+    item.details?.type,
+    item.details?.detail,
+    item.details?.location,
+    item.type?.description,
+    item.longComment,
+    item.shortComment,
+  ]
+    .map(str)
+    .filter(Boolean);
+
+  // Prefer a concise body-part description when ESPN supplies one.
+  const bodyPart = str(item.details?.location) || str(item.details?.type);
+  if (bodyPart) return bodyPart;
+
+  const comment = candidates.find(
+    (x) =>
+      !/^(out|questionable|doubtful|probable|injured reserve|ir)$/i.test(x),
+  );
+
+  return comment || "Injury";
 }
 
-function normalizeRow(
-  row: RawInjury,
-  fallbackTeam: string,
-  source: "weekly_report" | "current_reserve",
-): Injury {
-  const reserve = source === "current_reserve";
-  const team =
-    upper(row.team_abbr) ||
-    upper(row.team) ||
-    fallbackTeam;
+function practiceStatus(item: AnyRecord): string {
+  const x =
+    str(item.practiceStatus) ||
+    str(item.practice_status) ||
+    str(item.details?.practiceStatus) ||
+    str(item.details?.practice_status);
 
-  const primary =
-    text(row.report_primary_injury) ||
-    text(row.practice_primary_injury) ||
-    text(row.primary_injury) ||
-    text(row.injury) ||
-    (reserve ? "Reserve / unavailable" : "");
+  const u = upper(x);
+  if (!u) return "";
+  if (u === "DNP" || u.includes("DID NOT")) return "DNP";
+  if (u === "LP" || u.includes("LIMITED")) return "LIMITED";
+  if (u === "FP" || u.includes("FULL")) return "FULL";
+  return x;
+}
 
-  const secondary =
-    text(row.report_secondary_injury) ||
-    text(row.practice_secondary_injury) ||
-    text(row.secondary_injury) ||
-    null;
+function importance(position: string, status: string): {
+  score: number | null;
+  tier: string | null;
+} {
+  let score = 0;
 
-  const injury = [primary, secondary].filter(Boolean).join(" / ");
-  const practice = normalizePractice(row.practice_status);
-  const gameStatus = normalizeGameStatus(row, reserve);
-  const restRelated = isRestOnly(injury);
-  const severity = severityFor(gameStatus, practice, reserve);
+  if (position === "QB") score += 70;
+  else if (["WR", "RB", "TE"].includes(position)) score += 35;
+  else if (["T", "OT", "G", "C", "OL"].includes(position)) score += 28;
+  else if (["DE", "DT", "DL", "LB", "OLB", "ILB", "CB", "S"].includes(position))
+    score += 20;
+  else score += 10;
 
-  const currentInjury =
-    reserve ||
-    gameStatus === "OUT" ||
-    gameStatus === "DOUBTFUL" ||
-    gameStatus === "QUESTIONABLE" ||
-    (!restRelated && (practice === "DNP" || practice === "LIMITED"));
+  if (status === "OUT") score += 30;
+  else if (status === "DOUBTFUL") score += 22;
+  else if (status === "QUESTIONABLE") score += 12;
+
+  const tier =
+    score >= 85 ? "CRITICAL" :
+    score >= 60 ? "HIGH" :
+    score >= 35 ? "MEDIUM" :
+    "LOW";
+
+  return { score, tier };
+}
+
+function extractTeam(group: AnyRecord): string {
+  return normalizeTeam(
+    group.team?.abbreviation ||
+    group.team?.shortDisplayName ||
+    group.abbreviation ||
+    group.teamAbbreviation ||
+    group.team,
+  );
+}
+
+function normalizeItem(item: AnyRecord, fallbackTeam: string): Injury | null {
+  const athlete = item.athlete || item.player || {};
+  const playerName =
+    str(athlete.displayName) ||
+    str(athlete.fullName) ||
+    str(item.displayName) ||
+    str(item.player_name) ||
+    str(item.name);
+
+  if (!playerName) return null;
+
+  const team = normalizeTeam(
+    athlete.team?.abbreviation ||
+    item.team?.abbreviation ||
+    item.teamAbbreviation ||
+    item.team ||
+    fallbackTeam,
+  );
+
+  const position = upper(
+    athlete.position?.abbreviation ||
+    athlete.position?.name ||
+    item.position?.abbreviation ||
+    item.position,
+  );
+
+  const rawStatus = statusText(item);
+  const gameStatus = normalizeGameStatus(rawStatus);
+  const practice = practiceStatus(item);
+  const injury = injuryDescription(item);
+
+  // ESPN's injuries endpoint is already a current-injury feed. Keep all
+  // returned players, even when the exact Sunday designation has not yet
+  // been posted.
+  const current = true;
+  const imp = importance(position, gameStatus);
 
   return {
-    season_year:
-      Number.isFinite(Number(row.season_year)) ? Number(row.season_year) : null,
-    week:
-      Number.isFinite(Number(row.week)) ? Number(row.week) : null,
-    season_type: text(row.season_type) || "REG",
-    player_name:
-      text(row.display_name) ||
-      text(row.player_name) ||
-      text(row.name) ||
-      text(row.player_key) ||
-      "Unknown",
-    player_key: text(row.player_key) || null,
-    player_id: row.player_id ?? null,
+    player_name: playerName,
     team,
-    team_name: text(row.team_name) || null,
-    position: upper(row.position),
-    injury: injury || (reserve ? "Reserve / unavailable" : "Injury report"),
-    primary_injury: primary || null,
-    secondary_injury: secondary,
-    rest_related: restRelated,
+    position,
+    injury,
     game_status: gameStatus,
     practice_status: practice,
-    current_injury: currentInjury,
-    severity,
-    unavailable: reserve || gameStatus === "OUT",
-    high_risk:
-      reserve ||
-      gameStatus === "OUT" ||
-      gameStatus === "DOUBTFUL",
-    monitor:
-      gameStatus === "QUESTIONABLE" ||
-      (!restRelated && (practice === "DNP" || practice === "LIMITED")),
-    practice_concern:
-      !restRelated && (practice === "DNP" || practice === "LIMITED"),
-    importance_score: null,
-    importance_tier: null,
-    source,
-    raw: row,
+    current_injury: current,
+    importance_score: imp.score,
+    importance_tier: imp.tier,
+    source: "ESPN",
+    source_status: rawStatus || null,
+    source_date: str(item.date) || null,
   };
 }
 
-function getRows(payload: any): RawInjury[] {
-  if (Array.isArray(payload)) return payload;
-  if (Array.isArray(payload?.data)) return payload.data;
-  if (Array.isArray(payload?.injuries)) return payload.injuries;
-  if (Array.isArray(payload?.reports)) return payload.reports;
-  if (Array.isArray(payload?.items)) return payload.items;
-  return [];
-}
+function collectFromPayload(payload: AnyRecord): Injury[] {
+  const output: Injury[] = [];
 
-function getReserves(payload: any): RawInjury[] {
-  const candidates = [
-    payload?.current_reserves,
-    payload?.meta?.current_reserves,
-    payload?.data?.current_reserves,
-  ];
-  for (const c of candidates) {
-    if (Array.isArray(c)) return c;
-  }
-  return [];
-}
+  // Common ESPN site-api shape:
+  // { injuries: [{ team: {...}, injuries: [...] }, ...] }
+  if (Array.isArray(payload.injuries)) {
+    for (const group of payload.injuries) {
+      if (!group || typeof group !== "object") continue;
 
-async function nflmeta(path: string, apiKey: string) {
-  const response = await fetch(`${NFLMETA_BASE}${path}`, {
-    headers: {
-      "X-NFLMeta-Key": apiKey,
-      Accept: "application/json",
-    },
-    cache: "no-store",
-  });
+      const fallbackTeam = extractTeam(group);
+      const items =
+        Array.isArray(group.injuries) ? group.injuries :
+        Array.isArray(group.items) ? group.items :
+        [];
 
-  const body = await response.text();
-
-  if (!response.ok) {
-    throw new Error(`NFLMeta ${path} returned ${response.status}: ${body.slice(0, 300)}`);
+      if (items.length) {
+        for (const item of items) {
+          const normalized = normalizeItem(item, fallbackTeam);
+          if (normalized) output.push(normalized);
+        }
+      } else {
+        const normalized = normalizeItem(group, fallbackTeam);
+        if (normalized) output.push(normalized);
+      }
+    }
   }
 
-  try {
-    return JSON.parse(body);
-  } catch {
-    throw new Error(`NFLMeta ${path} returned invalid JSON.`);
+  // Alternate shape used by some ESPN endpoints:
+  // { teams: [{ team: {...}, injuries: [...] }] }
+  if (Array.isArray(payload.teams)) {
+    for (const group of payload.teams) {
+      const fallbackTeam = extractTeam(group);
+      const items =
+        Array.isArray(group.injuries) ? group.injuries :
+        Array.isArray(group.items) ? group.items :
+        [];
+
+      for (const item of items) {
+        const normalized = normalizeItem(item, fallbackTeam);
+        if (normalized) output.push(normalized);
+      }
+    }
   }
+
+  // Flat fallback.
+  if (!output.length && Array.isArray(payload.items)) {
+    for (const item of payload.items) {
+      const normalized = normalizeItem(item, "");
+      if (normalized) output.push(normalized);
+    }
+  }
+
+  return output;
 }
 
 function dedupe(rows: Injury[]): Injury[] {
   const map = new Map<string, Injury>();
 
   for (const row of rows) {
-    const key =
-      `${row.team}|${row.player_key || row.player_name.toLowerCase()}`;
+    const key = `${row.team}|${row.player_name.toLowerCase()}`;
+    const old = map.get(key);
 
-    const previous = map.get(key);
-
-    if (!previous) {
+    if (!old) {
       map.set(key, row);
       continue;
     }
 
-    // Current reserve / OUT beats a weaker weekly practice row.
-    const previousScore =
-      (previous.source === "current_reserve" ? 100 : 0) +
-      previous.severity * 10;
-    const newScore =
-      (row.source === "current_reserve" ? 100 : 0) +
-      row.severity * 10;
+    const rank = (x: Injury) => {
+      const statusRank: Record<string, number> = {
+        OUT: 4,
+        DOUBTFUL: 3,
+        QUESTIONABLE: 2,
+        PROBABLE: 1,
+        NO_DESIGNATION: 0,
+      };
+      return statusRank[x.game_status] || 0;
+    };
 
-    if (newScore > previousScore) map.set(key, row);
+    if (rank(row) > rank(old)) map.set(key, row);
   }
 
   return [...map.values()];
@@ -253,123 +295,78 @@ function dedupe(rows: Injury[]): Injury[] {
 
 export async function GET(request: Request) {
   try {
-    const apiKey =
-      process.env.NFLMETA_API_KEY ||
-      process.env.NFL_META_API_KEY;
+    const url = new URL(request.url);
+    const teamFilter = normalizeTeam(url.searchParams.get("team"));
 
-    if (!apiKey) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "NFLMETA_API_KEY is missing.",
-        },
-        { status: 500 },
+    const response = await fetch(ESPN_INJURIES, {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "RDG/2.0",
+      },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(
+        `ESPN injury feed returned ${response.status}: ${body.slice(0, 250)}`,
       );
     }
 
-    const url = new URL(request.url);
-    const requestedTeam = upper(url.searchParams.get("team"));
+    const payload = await response.json();
+    let injuries = dedupe(collectFromPayload(payload));
 
-    const teams =
-      requestedTeam && NFL_TEAMS.includes(requestedTeam as any)
-        ? [requestedTeam]
-        : [...NFL_TEAMS];
+    if (teamFilter) {
+      injuries = injuries.filter((x) => x.team === teamFilter);
+    }
 
-    /*
-      IMPORTANT:
-      We intentionally query the TEAM injury endpoint for every club.
-      The old league-wide request returned exactly 100 rows and stopped
-      alphabetically after ~14 teams. This guarantees all 32 teams are
-      checked instead of trusting that capped league response.
-    */
-    const results = await Promise.allSettled(
-      teams.map(async (team) => {
-        const payload = await nflmeta(
-          `/teams/${encodeURIComponent(team)}/injuries`,
-          apiKey,
-        );
+    injuries.sort((a, b) => {
+      const statusRank: Record<string, number> = {
+        OUT: 4,
+        DOUBTFUL: 3,
+        QUESTIONABLE: 2,
+        PROBABLE: 1,
+        NO_DESIGNATION: 0,
+      };
 
-        const weekly = getRows(payload).map((row) =>
-          normalizeRow(row, team, "weekly_report"),
-        );
+      const sr =
+        (statusRank[b.game_status] || 0) -
+        (statusRank[a.game_status] || 0);
 
-        const reserves = getReserves(payload).map((row) =>
-          normalizeRow(row, team, "current_reserve"),
-        );
+      if (sr !== 0) return sr;
 
-        return {
-          team,
-          weekly,
-          reserves,
-          meta: payload?.meta ?? null,
-        };
-      }),
-    );
+      const ir =
+        Number(b.importance_score || 0) -
+        Number(a.importance_score || 0);
 
-    const successfulTeams: string[] = [];
-    const failedTeams: Array<{ team: string; error: string }> = [];
-    const allRows: Injury[] = [];
-
-    results.forEach((result, index) => {
-      const team = teams[index];
-
-      if (result.status === "fulfilled") {
-        successfulTeams.push(team);
-        allRows.push(...result.value.weekly, ...result.value.reserves);
-      } else {
-        failedTeams.push({
-          team,
-          error:
-            result.reason instanceof Error
-              ? result.reason.message
-              : String(result.reason),
-        });
-      }
+      if (ir !== 0) return ir;
+      if (a.team !== b.team) return a.team.localeCompare(b.team);
+      return a.player_name.localeCompare(b.player_name);
     });
 
-    const injuries = dedupe(allRows)
-      .filter((x) => x.team)
-      .sort((a, b) => {
-        if (b.severity !== a.severity) return b.severity - a.severity;
-        if (a.team !== b.team) return a.team.localeCompare(b.team);
-        return a.player_name.localeCompare(b.player_name);
-      });
-
-    const currentInjuries = injuries.filter((x) => x.current_injury);
-
-    const out = currentInjuries.filter((x) => x.game_status === "OUT");
-    const doubtful = currentInjuries.filter((x) => x.game_status === "DOUBTFUL");
-    const questionable = currentInjuries.filter(
+    const out = injuries.filter((x) => x.game_status === "OUT");
+    const doubtful = injuries.filter((x) => x.game_status === "DOUBTFUL");
+    const questionable = injuries.filter(
       (x) => x.game_status === "QUESTIONABLE",
     );
 
-    const teamsWithCurrentReports = [
-      ...new Set(currentInjuries.map((x) => x.team)),
-    ].sort();
+    const teams = [...new Set(injuries.map((x) => x.team).filter(Boolean))].sort();
 
     return NextResponse.json({
       success: true,
       version: VERSION,
-      provider: "NFLMeta",
-      coverage: {
-        requested_teams: teams.length,
-        successful_teams: successfulTeams.length,
-        failed_teams: failedTeams.length,
-        all_32_checked: !requestedTeam && successfulTeams.length === 32,
-        teams_with_current_injuries: teamsWithCurrentReports.length,
-      },
+      provider: "ESPN",
+      requires_api_key: false,
+      team_filter: teamFilter || null,
       summary: {
-        total_records: injuries.length,
-        current_injuries: currentInjuries.length,
+        total_current_injuries: injuries.length,
         out: out.length,
         doubtful: doubtful.length,
         questionable: questionable.length,
-        current_reserve_records: injuries.filter(
-          (x) => x.source === "current_reserve",
-        ).length,
+        teams_with_injuries: teams.length,
       },
-      teams: teamsWithCurrentReports,
-      current_injuries: currentInjuries,
+      teams,
+      current_injuries: injuries,
       injuries,
       game_designations: {
         out,
@@ -377,10 +374,9 @@ export async function GET(request: Request) {
         questionable,
       },
       diagnostics: {
-        successful_teams: successfulTeams,
-        failed_teams: failedTeams,
+        source_url: ESPN_INJURIES,
         note:
-          "Each NFL team injury endpoint is queried directly so the feed is not truncated by the league-wide 100-row result window.",
+          "Free current ESPN NFL injury feed. No NFLMeta or Odds API key is required.",
       },
       generated_at: new Date().toISOString(),
     });
@@ -389,6 +385,8 @@ export async function GET(request: Request) {
       {
         success: false,
         version: VERSION,
+        provider: "ESPN",
+        requires_api_key: false,
         error:
           error instanceof Error
             ? error.message
@@ -398,4 +396,3 @@ export async function GET(request: Request) {
     );
   }
 }
-
