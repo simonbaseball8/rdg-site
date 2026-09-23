@@ -2579,241 +2579,143 @@ function BuilderCard({
   required: number;
   featured?: boolean;
 }) {
-  const qualified =
-    candidates.length >= required;
-
-  const [expandedPicks, setExpandedPicks] = useState<Set<string>>(new Set());
-
-  function togglePickReason(key: string) {
-    setExpandedPicks((current) => {
-      const next = new Set(current);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }
+  const qualified = candidates.length >= required;
 
   return (
-    <article className={featured
-      ? "relative overflow-hidden rounded-2xl border-2 border-emerald-400/70 bg-emerald-500/[0.10] p-6 shadow-[0_0_35px_rgba(16,185,129,0.16)] lg:col-span-2"
-      : "rounded-xl border border-white/10 bg-white/[0.035] p-6 transition hover:border-green-500/30"
-    }>
-      {featured && (
-        <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3">
-          <div>
-            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-emerald-300">RDG FEATURED</p>
-            <p className="mt-1 text-sm font-semibold text-white">Strongest current combination under the stricter model filters</p>
-          </div>
-          <span className="rounded-full bg-emerald-400 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-black">TOP MODEL FILTER</span>
-        </div>
-      )}
-      <div className="flex items-start justify-between gap-4">
+    <article
+      className={
+        featured
+          ? "overflow-hidden rounded-2xl border border-emerald-400/40 bg-[#0c1513] shadow-[0_18px_50px_rgba(0,0,0,0.24)] lg:col-span-2"
+          : "overflow-hidden rounded-2xl border border-white/10 bg-[#0d1317]"
+      }
+    >
+      <div className="flex items-center justify-between gap-4 border-b border-white/10 px-5 py-4">
         <div>
-          <p className="text-xs font-bold uppercase tracking-widest text-green-400">
+          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
             {subtitle}
           </p>
-
-          <h3 className="mt-2 text-xl font-bold">
-            {title}
-          </h3>
+          <h3 className="mt-1 text-xl font-black text-white">{title}</h3>
         </div>
 
         <span
           className={
             qualified
-              ? "rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-bold text-green-400"
-              : "rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-400"
+              ? "rounded-full bg-emerald-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-emerald-400"
+              : "rounded-full bg-amber-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-amber-400"
           }
         >
-          {qualified
-            ? "QUALIFIED"
-            : "NOT ENOUGH LEGS"}
+          {qualified ? "READY" : `${candidates.length}/${required} LEGS`}
         </span>
       </div>
 
       {candidates.length === 0 ? (
-        <div className="mt-6 rounded-lg border border-white/10 bg-black/20 p-4">
-          <p className="font-bold">
-            No qualifying selection
-          </p>
-
-          <p className="mt-2 text-xs text-slate-500">
-            RDG will not force a weaker
-            bet into this tier.
-          </p>
+        <div className="p-5">
+          <div className="rounded-xl border border-dashed border-white/10 p-5 text-center">
+            <p className="font-bold text-slate-300">No qualifying picks right now</p>
+            <p className="mt-1 text-xs text-slate-500">
+              RDG will wait for a better betting opportunity.
+            </p>
+          </div>
         </div>
       ) : (
-        <div className="mt-6 space-y-3">
-          {candidates.map(
-            (candidate, index) => (
-              <div
-                key={
-                  candidate.event_id
-                }
-                className="rounded-lg border border-white/10 bg-black/20 p-4"
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    {required > 1 && (
-                      <p className="text-[10px] font-bold uppercase text-slate-500">
-                        LEG {index + 1}
-                      </p>
-                    )}
+        <div className="divide-y divide-white/10">
+          {candidates.map((candidate, index) => {
+            const isProp = candidate.market_type === "passing_prop";
+            const isMoneyline = candidate.market_type === "moneyline";
+            const marketLabel = isProp
+              ? candidate.prop_market || "PLAYER PROP"
+              : isMoneyline
+                ? "MONEYLINE"
+                : "SPREAD";
 
-                    <div className="mt-1 flex items-center gap-3">
-                      {candidate.market_type === "passing_prop" ? (
-                        <span className="rounded-md border border-cyan-400/30 bg-cyan-400/10 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-cyan-300">
-                          PROP
-                        </span>
-                      ) : (
-                        <TeamLogo sport="NFL" team={candidate.team} />
-                      )}
-                      <p className="text-lg font-bold">{candidate.display_bet}</p>
-                    </div>
+            const oddsText = candidate.odds
+              ? `${Number(candidate.odds) > 0 ? "+" : ""}${candidate.odds}`
+              : "—";
 
-                    <p className="mt-1 text-xs text-slate-500">
-                      {
-                        candidate.matchup
-                      }
-                    </p>
+            return (
+              <div key={`${candidate.event_id}-${index}`} className="px-5 py-5">
+                <div className="flex items-start gap-4">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/[0.06] text-xs font-black text-slate-300">
+                    {index + 1}
                   </div>
 
-                  <div className="text-right">
-                    <p className="font-bold text-green-400">
-                      {candidate.market_type === "moneyline"
-                        ? `${candidate.projected_margin.toFixed(1)} pts`
-                        : `${candidate.difference.toFixed(1)}${candidate.market_type === "passing_prop" ? " edge" : " pts"}`}
-                    </p>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {!isProp && <TeamLogo sport="NFL" team={candidate.team} />}
+                      <span
+                        className={
+                          isProp
+                            ? "text-[10px] font-black uppercase tracking-wider text-cyan-400"
+                            : "text-[10px] font-black uppercase tracking-wider text-sky-400"
+                        }
+                      >
+                        {marketLabel}
+                      </span>
+                    </div>
 
-                    <p className="mt-1 text-[10px] uppercase text-slate-500">
-                      {candidate.market_type === "moneyline" ? "RDG PROJECTED MARGIN" : "Model vs Market"}
-                    </p>
+                    <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                      <p className="text-xl font-black text-white">{candidate.display_bet}</p>
+                      <span className="text-base font-bold text-emerald-400">{oddsText}</span>
+                    </div>
+
+                    <p className="mt-1 text-xs text-slate-500">{candidate.matchup}</p>
+
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {isProp ? (
+                        <>
+                          <span className="rounded-lg bg-white/[0.05] px-3 py-2 text-xs text-slate-400">
+                            RDG projection{" "}
+                            <strong className="ml-1 text-white">
+                              {candidate.projected_margin.toFixed(1)}
+                            </strong>
+                          </span>
+                          {(candidate.grade || candidate.review) && (
+                            <span className="rounded-lg bg-white/[0.05] px-3 py-2 text-xs text-slate-400">
+                              Grade{" "}
+                              <strong className="ml-1 text-white">
+                                {candidate.grade || candidate.review}
+                              </strong>
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        <span className="rounded-lg bg-white/[0.05] px-3 py-2 text-xs text-slate-400">
+                          RDG projects{" "}
+                          <strong className="ml-1 text-white">
+                            {candidate.projected_winner} by {candidate.projected_margin.toFixed(1)}
+                          </strong>
+                        </span>
+                      )}
+
+                      {!isMoneyline && (
+                        <span className="rounded-lg bg-emerald-400/10 px-3 py-2 text-xs font-bold text-emerald-400">
+                          +{candidate.difference.toFixed(1)} edge
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
-
-                {candidate.market_type === "passing_prop" ? (
-                  <>
-                    <div className="mt-4 grid grid-cols-2 gap-3">
-                      <MiniStat title="RDG PROJECTION" value={candidate.projected_margin.toFixed(1)} />
-                      <MiniStat title="RDG GRADE" value={candidate.grade || candidate.review || "—"} />
-                      <MiniStat title="SPORTSBOOK ODDS" value={candidate.odds ? `${Number(candidate.odds) > 0 ? "+" : ""}${candidate.odds}` : "—"} />
-                      <MiniStat title="PROP MARKET" value={candidate.prop_market || "Player Prop"} />
-                    </div>
-                    <p className="mt-3 text-xs text-slate-500">RDG grades rank model evidence and market edge. They are not win probabilities or guarantees.</p>
-                  </>
-                ) : candidate.market_type === "moneyline" ? (
-                  <>
-                    <div className="mt-4 grid grid-cols-2 gap-3">
-                      <MiniStat title="RDG PROJECTION" value={`${candidate.projected_winner} by ${candidate.projected_margin.toFixed(1)}`} />
-                      <MiniStat title="HARD ROCK MONEYLINE" value={candidate.odds ? `${Number(candidate.odds) > 0 ? "+" : ""}${candidate.odds}` : "—"} />
-                    </div>
-                    <p className="mt-3 text-xs text-slate-500">Historical {candidate.historical_bucket} bucket: {candidate.historical_correct}/{candidate.historical_sample} ({candidate.historical_accuracy}%) straight-up. This historical bucket rate is not an individual-game win probability.</p>
-                  </>
-                ) : (
-                  <>
-                    <div className="mt-4 grid grid-cols-2 gap-3">
-                      <MiniStat title="RDG PROJECTION" value={`${candidate.projected_winner} by ${candidate.projected_margin.toFixed(1)}`} />
-                      <MiniStat title="HARD ROCK ODDS" value={candidate.odds || "—"} />
-                    </div>
-                    <p className="mt-3 text-xs text-slate-500">Historical {candidate.historical_bucket} bucket: {candidate.historical_correct}/{candidate.historical_sample} ({candidate.historical_accuracy}%) straight-up.</p>
-                  </>
-                )}
-
-                <button
-                  type="button"
-                  onClick={() => togglePickReason(`${candidate.event_id}-${index}`)}
-                  className="mt-4 flex w-full items-center justify-between rounded-lg border border-emerald-500/20 bg-emerald-500/[0.05] px-4 py-3 text-left text-xs font-black uppercase tracking-[0.16em] text-emerald-300 transition hover:border-emerald-400/40 hover:bg-emerald-500/[0.09]"
-                >
-                  <span>Why this pick?</span>
-                  <span>{expandedPicks.has(`${candidate.event_id}-${index}`) ? "▲" : "▼"}</span>
-                </button>
-
-                {expandedPicks.has(`${candidate.event_id}-${index}`) && (
-                  <div className="mt-3">
-                    {candidate.market_type === "passing_prop" ? (
-                      <div className="grid gap-3 lg:grid-cols-2">
-                        <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/[0.06] p-4">
-                          <p className="text-sm font-black uppercase tracking-[0.12em] text-emerald-300">✓ Why RDG Likes This Player Prop</p>
-                          <div className="mt-3 space-y-2 text-sm leading-6 text-slate-200">
-                            <p>✓ RDG grades this play <b className="text-emerald-300">{candidate.grade || candidate.review}</b>.</p>
-                            <p>✓ RDG projection: <b className="text-white">{candidate.projected_margin.toFixed(1)}</b>{candidate.line ? <> versus sportsbook line <b className="text-white">{candidate.line.toFixed(1)}</b></> : null}.</p>
-                            <p>✓ Model edge: <b className="text-emerald-300">{candidate.difference.toFixed(2)}</b> in the native market unit.</p>
-                            <p>✓ Market: <b className="text-white">{candidate.prop_market || "Player Prop"}</b>.</p>
-                          </div>
-                        </div>
-                        <div className="rounded-xl border border-red-500/40 bg-red-500/[0.06] p-4">
-                          <p className="text-sm font-black uppercase tracking-[0.12em] text-red-400">⚠ Potential Cons / Risks</p>
-                          <div className="mt-3 space-y-2 text-sm leading-6 text-red-200">
-                            <p>⚠ Player props can move quickly as sportsbook lines and prices update.</p>
-                            <p>⚠ Game script and player usage can materially change the result.</p>
-                            <p>⚠ RDG grades are evidence rankings, not predicted win percentages.</p>
-                            {candidate.role_protection && candidate.role_protection !== "NONE" && (<p>⚠ Rushing role protection is active: <b>{candidate.role_protection}</b>.</p>)}
-                          </div>
-                        </div>
-                      </div>
-                    ) : candidate.market_type === "moneyline" ? (
-                      <div className="grid gap-3 lg:grid-cols-2">
-                        <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/[0.06] p-4">
-                          <p className="text-sm font-black uppercase tracking-[0.12em] text-emerald-300">✓ Why RDG Likes This Moneyline</p>
-                          <div className="mt-3 space-y-2 text-sm leading-6 text-slate-200">
-                            <p>✓ RDG projects <b className="text-white">{candidate.projected_winner} by {candidate.projected_margin.toFixed(1)}</b>.</p>
-                            <p>✓ Hard Rock currently lists <b className="text-white">{candidate.team} moneyline {candidate.odds ? `${Number(candidate.odds) > 0 ? "+" : ""}${candidate.odds}` : "—"}</b>.</p>
-                            <p>✓ The historical <b>{candidate.historical_bucket}</b> projected-margin bucket went <b>{candidate.historical_correct}/{candidate.historical_sample} ({candidate.historical_accuracy}%)</b> on straight-up projected winners.</p>
-                          </div>
-                        </div>
-                        <div className="rounded-xl border border-red-500/40 bg-red-500/[0.06] p-4">
-                          <p className="text-sm font-black uppercase tracking-[0.12em] text-red-400">⚠ Potential Cons / Risks</p>
-                          <div className="mt-3 space-y-2 text-sm leading-6 text-red-200">
-                            <p>⚠ RDG&apos;s team model is calibrated for projected margin, not individual-game moneyline win probability.</p>
-                            <p>⚠ The historical bucket rate is descriptive straight-up performance and should not be treated as the probability this specific moneyline wins.</p>
-                            <p>⚠ Injuries, inactive starters, weather, and late price movement can materially change the matchup and value.</p>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="grid gap-3 lg:grid-cols-2">
-                        <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/[0.06] p-4">
-                          <p className="text-sm font-black uppercase tracking-[0.12em] text-emerald-300">✓ Why RDG Likes This Side</p>
-                          <div className="mt-3 space-y-2 text-sm leading-6 text-slate-200">
-                            <p>✓ RDG projects <b className="text-white">{candidate.projected_winner} by {candidate.projected_margin.toFixed(1)}</b>.</p>
-                            <p>✓ The model differs from the current spread market by <b className="text-emerald-300">{candidate.difference.toFixed(1)} points</b>.</p>
-                            <p>✓ The historical <b>{candidate.historical_bucket}</b> projected-margin bucket went <b>{candidate.historical_correct}/{candidate.historical_sample} ({candidate.historical_accuracy}%)</b> on straight-up projected winners.</p>
-                          </div>
-                        </div>
-
-                        <div className="rounded-xl border border-red-500/40 bg-red-500/[0.06] p-4">
-                          <p className="text-sm font-black uppercase tracking-[0.12em] text-red-400">⚠ Potential Cons / Risks</p>
-                          <div className="mt-3 space-y-2 text-sm leading-6 text-red-200">
-                            <p>⚠ The historical percentage shown is straight-up model performance, not ATS cover probability.</p>
-                            <p>⚠ Injuries, inactive starters, weather, and late line movement can materially change the matchup.</p>
-                            <p>⚠ RDG does not currently inject live injury status into this explanation, so current availability should be checked separately.</p>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
               </div>
-            )
-          )}
+            );
+          })}
         </div>
       )}
 
-      {!qualified &&
-        candidates.length > 0 && (
-          <p className="mt-4 text-xs text-amber-400">
-            Only {candidates.length} of{" "}
-            {required} required legs
-            currently qualify. RDG did
-            not fill the remaining
-            spots with weaker
-            selections.
+      <div className="border-t border-white/10 bg-black/10 px-5 py-4">
+        {qualified ? (
+          <p className="text-xs text-slate-400">
+            <span className="font-bold text-emerald-400">{required}-leg card ready.</span>{" "}
+            Built from the current qualifying NFL plays.
+          </p>
+        ) : (
+          <p className="text-xs text-amber-400">
+            Only {candidates.length} of {required} legs qualify right now. No picks were forced.
           </p>
         )}
+      </div>
     </article>
   );
 }
-
 
 function NFLFeaturedReviews({ games }: { games: NFLGame[] }) {
   if (games.length === 0) return null;
