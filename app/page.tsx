@@ -3827,118 +3827,121 @@ function MLBBuilderCard({
   const qualified = candidates.length >= required;
 
   return (
-    <article className={featured ? "rounded-2xl border-2 border-emerald-400/70 bg-emerald-500/[0.10] p-6 shadow-[0_0_35px_rgba(16,185,129,0.16)] lg:col-span-2" : "rounded-xl border border-white/10 bg-white/[0.035] p-6 transition hover:border-green-500/30"}>
-      {featured && <div className="mb-5 rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3"><p className="text-[10px] font-black uppercase tracking-[0.24em] text-emerald-300">RDG FEATURED • TOP MODEL FILTER</p><p className="mt-1 text-sm font-semibold">Strongest current combination under the stricter MLB review filters</p></div>}
-      <div className="flex items-start justify-between gap-4">
+    <article
+      className={
+        featured
+          ? "overflow-hidden rounded-2xl border border-emerald-400/40 bg-[#0c1513] shadow-[0_18px_50px_rgba(0,0,0,0.24)] lg:col-span-2"
+          : "overflow-hidden rounded-2xl border border-white/10 bg-[#0d1317]"
+      }
+    >
+      <div className="flex items-center justify-between gap-4 border-b border-white/10 px-5 py-4">
         <div>
-          <p className="text-xs font-bold uppercase tracking-widest text-green-400">
+          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
             {subtitle}
           </p>
-          <h3 className="mt-2 text-xl font-bold">{title}</h3>
+          <h3 className="mt-1 text-xl font-black text-white">{title}</h3>
         </div>
 
         <span
           className={
             qualified
-              ? "rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-bold text-green-400"
-              : "rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-400"
+              ? "rounded-full bg-emerald-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-emerald-400"
+              : "rounded-full bg-amber-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-amber-400"
           }
         >
-          {qualified ? "QUALIFIED" : "NOT ENOUGH LEGS"}
+          {qualified ? "READY" : `${candidates.length}/${required} LEGS`}
         </span>
       </div>
 
       {candidates.length === 0 ? (
-        <div className="mt-6 rounded-lg border border-white/10 bg-black/20 p-4">
-          <p className="font-bold">No qualifying selection</p>
-          <p className="mt-2 text-xs text-slate-500">
-            RDG will not force a Pass-rated MLB game into this tier.
-          </p>
+        <div className="p-5">
+          <div className="rounded-xl border border-dashed border-white/10 p-5 text-center">
+            <p className="font-bold text-slate-300">No qualifying picks right now</p>
+            <p className="mt-1 text-xs text-slate-500">
+              RDG will wait for a better betting opportunity.
+            </p>
+          </div>
         </div>
       ) : (
-        <div className="mt-6 space-y-3">
-          {candidates.map((candidate, index) => (
-            <div
-              key={`${candidate.event_id}-${candidate.team}-${index}`}
-              className="rounded-lg border border-white/10 bg-black/20 p-4"
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  {required > 1 && (
-                    <p className="text-[10px] font-bold uppercase text-slate-500">
-                      LEG {index + 1}
-                    </p>
-                  )}
-                  <div className="mt-1 flex items-center gap-3">
-                    {candidate.market_type === "moneyline" && (
-                      <TeamLogo sport="MLB" team={candidate.team} />
-                    )}
-                    <div>
-                      {candidate.market_type === "total" && (
-                        <p className="text-[10px] font-black uppercase tracking-wider text-sky-400">
-                          GAME TOTAL
-                        </p>
+        <div className="divide-y divide-white/10">
+          {candidates.map((candidate, index) => {
+            const isTotal = candidate.market_type === "total";
+            const model = candidate.model_probability;
+            const market = candidate.market_probability;
+            const detail =
+              isTotal && candidate.projected_total !== null && candidate.projected_total !== undefined
+                ? `RDG projects ${candidate.projected_total.toFixed(1)} total runs`
+                : candidate.starter
+                  ? `Starter: ${candidate.starter}`
+                  : candidate.matchup;
+
+            return (
+              <div
+                key={`${candidate.event_id}-${candidate.team}-${index}`}
+                className="px-5 py-5"
+              >
+                <div className="flex items-start gap-4">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/[0.06] text-xs font-black text-slate-300">
+                    {index + 1}
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {candidate.market_type === "moneyline" && (
+                        <TeamLogo sport="MLB" team={candidate.team} />
                       )}
-                      <p className="text-lg font-bold">
-                        {candidate.market_type === "total"
-                          ? `${candidate.display_bet} RUNS`
-                          : candidate.display_bet}{" "}
-                        {candidate.odds || ""}
+                      <span className="text-[10px] font-black uppercase tracking-wider text-sky-400">
+                        {isTotal ? "GAME TOTAL" : "MONEYLINE"}
+                      </span>
+                    </div>
+
+                    <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                      <p className="text-xl font-black text-white">
+                        {isTotal ? `${candidate.display_bet} Runs` : candidate.display_bet}
                       </p>
+                      {candidate.odds && (
+                        <span className="text-base font-bold text-emerald-400">
+                          {candidate.odds}
+                        </span>
+                      )}
+                    </div>
+
+                    <p className="mt-1 text-xs text-slate-500">{candidate.matchup}</p>
+                    <p className="mt-2 text-xs text-slate-400">{detail}</p>
+
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <span className="rounded-lg bg-white/[0.05] px-3 py-2 text-xs text-slate-400">
+                        RDG <strong className="ml-1 text-white">{model.toFixed(1)}%</strong>
+                      </span>
+                      {market !== null && (
+                        <span className="rounded-lg bg-white/[0.05] px-3 py-2 text-xs text-slate-400">
+                          Market <strong className="ml-1 text-white">{market.toFixed(1)}%</strong>
+                        </span>
+                      )}
+                      <span className="rounded-lg bg-emerald-400/10 px-3 py-2 text-xs font-bold text-emerald-400">
+                        +{candidate.edge.toFixed(1)}% edge
+                      </span>
                     </div>
                   </div>
-                  <p className="mt-1 text-xs text-slate-500">
-                    {candidate.matchup}
-                    {candidate.market_type === "moneyline"
-                      ? ` • Starter: ${candidate.starter}`
-                      : candidate.projected_total !== null &&
-                          candidate.projected_total !== undefined
-                        ? ` • RDG projected total: ${candidate.projected_total.toFixed(2)}`
-                        : ""}
-                  </p>
-                </div>
-
-                <div className="text-right">
-                  <p className="font-bold text-green-400">
-                    {candidate.edge.toFixed(1)}%
-                  </p>
-                  <p className="mt-1 text-[10px] uppercase text-slate-500">
-                    Model vs Market
-                  </p>
                 </div>
               </div>
-
-              <div className="mt-4 grid grid-cols-2 gap-3">
-                <MiniStat
-                  title="RDG MODEL"
-                  value={`${candidate.model_probability.toFixed(1)}%`}
-                />
-                <MiniStat
-                  title="NO-VIG MARKET"
-                  value={
-                    candidate.market_probability !== null
-                      ? `${candidate.market_probability.toFixed(1)}%`
-                      : "—"
-                  }
-                />
-              </div>
-
-              <p className="mt-3 text-xs text-slate-500">
-                {candidate.signal}.{" "}
-                {candidate.market_type === "total"
-                  ? "Total model is experimental and not yet validated against historical sportsbook total lines."
-                  : "Live pitcher adjustment is experimental."}
-              </p>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
-      {!qualified && candidates.length > 0 && (
-        <p className="mt-4 text-xs text-amber-400">
-          Only {candidates.length} of {required} required legs currently qualify. RDG did not fill the remaining spots with Pass-rated games.
-        </p>
-      )}
+      <div className="border-t border-white/10 bg-black/10 px-5 py-4">
+        {qualified ? (
+          <p className="text-xs text-slate-400">
+            <span className="font-bold text-emerald-400">{required}-leg parlay ready.</span>{" "}
+            RDG selected these from the current qualifying plays.
+          </p>
+        ) : (
+          <p className="text-xs text-amber-400">
+            Only {candidates.length} of {required} legs qualify right now. No picks were forced.
+          </p>
+        )}
+      </div>
     </article>
   );
 }
