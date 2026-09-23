@@ -348,25 +348,42 @@ function logistic(value: number) {
 function getSignal(edge: number) {
   const absolute = Math.abs(edge);
 
-  /*
-    More conservative thresholds than v1.0.
+  if (absolute >= 0.07) return "Priority Review";
+  if (absolute >= 0.05) return "Strong Review";
+  if (absolute >= 0.03) return "Watch";
+  return "Pass";
+}
 
-    These are review labels, NOT claims of
-    historical profitability.
-  */
+/*
+  MLB v1.5 conservative moneyline review filter.
 
-  if (absolute >= 0.07) {
-    return "Priority Review";
+  This does NOT change the calibrated model probability.
+  It only makes the live betting-review layer more selective.
+*/
+function getMoneylineSignal(
+  edge: number,
+  modelProbability: number,
+  americanOdds: number | null
+) {
+  if (!Number.isFinite(edge) || edge <= 0) return "Pass";
+  if (!Number.isFinite(modelProbability)) return "Pass";
+  if (americanOdds === null || !Number.isFinite(americanOdds)) return "Pass";
+
+  const isUnderdog = americanOdds > 100;
+
+  if (isUnderdog) {
+    // Plus-money underdogs need a larger edge and stronger win probability.
+    if (modelProbability < 0.42) return "Pass";
+    if (edge >= 0.09 && modelProbability >= 0.47) return "Priority Review";
+    if (edge >= 0.07 && modelProbability >= 0.45) return "Strong Review";
+    if (edge >= 0.05 && modelProbability >= 0.42) return "Watch";
+    return "Pass";
   }
 
-  if (absolute >= 0.05) {
-    return "Strong Review";
-  }
-
-  if (absolute >= 0.03) {
-    return "Watch";
-  }
-
+  // Favorites / near pick'em.
+  if (edge >= 0.065 && modelProbability >= 0.55) return "Priority Review";
+  if (edge >= 0.045 && modelProbability >= 0.53) return "Strong Review";
+  if (edge >= 0.03 && modelProbability >= 0.51) return "Watch";
   return "Pass";
 }
 
@@ -852,9 +869,28 @@ export async function GET() {
             }
           }
 
+          const leanModelProbability =
+            lean === homeTeam
+              ? modelHomeProbability
+              : lean === awayTeam
+                ? modelAwayProbability
+                : null;
+
+          const leanAmericanOdds =
+            lean === homeTeam
+              ? numberValue(homeMlOdds)
+              : lean === awayTeam
+                ? numberValue(awayMlOdds)
+                : null;
+
           const signal =
-            edge !== null
-              ? getSignal(edge)
+            edge !== null &&
+            leanModelProbability !== null
+              ? getMoneylineSignal(
+                  edge,
+                  leanModelProbability,
+                  leanAmericanOdds
+                )
               : "Pass";
 
           const totalLine =
@@ -1151,6 +1187,28 @@ export async function GET() {
 
               signal,
 
+              review_filter: {
+                selected_odds:
+                  leanAmericanOdds,
+
+                selected_model_probability:
+                  leanModelProbability !== null
+                    ? Number(
+                        (
+                          leanModelProbability * 100
+                        ).toFixed(2)
+                      )
+                    : null,
+
+                plus_money_underdog:
+                  leanAmericanOdds !== null
+                    ? leanAmericanOdds > 100
+                    : null,
+
+                rule:
+                  "Underdogs require larger edge and minimum model probability; favorites/pick'em use conservative edge + probability thresholds.",
+              },
+
               total_model: {
                 status:
                   "Backtest-Calibrated Team Total / Conservative Probability",
@@ -1270,10 +1328,10 @@ export async function GET() {
         "RDG MLB",
 
       version:
-        "1.4-pregame-moneyline-plus-calibrated-totals",
+        "1.5-conservative-moneyline-review-plus-calibrated-totals",
 
       model_status:
-        "Pregame Moneyline Model + Backtest-Calibrated Game Totals",
+        "Pregame Moneyline Model + Conservative Review Filter + Backtest-Calibrated Game Totals",
 
       games_found:
         games.length,
@@ -1330,7 +1388,7 @@ export async function GET() {
           "Team-only game-total projection calibrated on 2023-2024 chronological pregame data and evaluated on 2025. Live Over/Under probabilities use the 2025 held-out RMSE (4.56 runs) as a conservative normal predictive spread. Starting-pitcher adjustments are intentionally excluded from totals because they were not part of the totals backtest.",
 
         warning:
-          "The 55.22% held-out result applies only to the calibrated moneyline team model on the 2025 evaluation sample. The totals projection was separately evaluated on 2025 with MAE 3.611 runs and RMSE 4.56 runs. Historical sportsbook total lines/prices were not available, so Over/Under selection accuracy, EV, and profitability are not validated. The live moneyline pitcher adjustment also remains experimental.",
+          "The 55.22% held-out result applies only to the calibrated moneyline team model on the 2025 evaluation sample. The v1.5 moneyline review filter is intentionally more selective, especially for plus-money underdogs, but has NOT been historically validated against sportsbook closing lines because historical moneyline prices are not in this dataset. The totals projection was separately evaluated on 2025 with MAE 3.611 runs and RMSE 4.56 runs. Historical sportsbook total lines/prices were not available, so Over/Under selection accuracy, EV, and profitability are not validated. The live moneyline pitcher adjustment also remains experimental.",
       },
 
       updated_at:
