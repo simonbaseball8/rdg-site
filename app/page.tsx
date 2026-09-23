@@ -114,6 +114,20 @@ type NFLPlayerProp = {
   sportsbook_count: number;
   role_change_protection?: { detected: boolean; severity: "NONE" | "MODERATE" | "STRONG"; reasons: string[] } | null;
   sportsbook_lines?: Array<{ sportsbook: string; side: string | null; line: number | null; odds: string | number | null; available: boolean; updated_at: string | null }>;
+  research?: {
+    opponent: string | null;
+    player_form: {
+      season_games: number;
+      season_average: number | null;
+      recent_games: number;
+      recent_average: number | null;
+      recent_values: number[];
+      recent_pick_hits: number | null;
+    };
+    opponent_defense: unknown;
+    pros: string[];
+    cons: string[];
+  };
 };
 
 type NFLPlayerPropsAnalysis = {
@@ -334,6 +348,10 @@ type BetCandidate = {
   grade?: string;
   role_protection?: string;
   sportsbook_name?: string | null;
+  research?: {
+    pros: string[];
+    cons: string[];
+  };
 };
 
 function diversifiedSelection<T>(items: T[], count: number, offset: number, stride: number) {
@@ -1189,6 +1207,7 @@ const [cfbError, setCfbError] =
           score: Number(score.toFixed(2)), player_name: prop.player_name, selection: prop.pick === "PASS" ? undefined : prop.pick,
           market_probability: prop.market_no_vig_probability, review: prop.grade, prop_market: prop.market, grade: prop.grade,
           role_protection: prop.role_change_protection?.severity || "NONE", sportsbook_name: bestPrice?.sportsbook || null,
+          research: prop.research ? { pros: prop.research.pros || [], cons: prop.research.cons || [] } : undefined,
         } as BetCandidate;
       })
       .sort((a, b) => b.score - a.score);
@@ -2723,11 +2742,13 @@ function BuilderCard({
                           </p>
                           <div className="mt-2 space-y-2 text-xs text-slate-300">
                             {isProp ? (
-                              <>
-                                <p>• RDG grade: <strong className="text-white">{candidate.grade || candidate.review || "Qualified"}</strong></p>
-                                <p>• Model projection: <strong className="text-white">{candidate.projected_margin.toFixed(1)}</strong></p>
-                                <p>• Model edge: <strong className="text-white">{candidate.difference.toFixed(1)}</strong></p>
-                              </>
+                              candidate.research?.pros?.length ? (
+                                candidate.research.pros.map((reason, reasonIndex) => (
+                                  <p key={`pro-${reasonIndex}`}>• {reason}</p>
+                                ))
+                              ) : (
+                                <p>• Detailed player and matchup research is loading for this pick.</p>
+                              )
                             ) : isMoneyline ? (
                               <>
                                 <p>• RDG projects <strong className="text-white">{candidate.projected_winner}</strong> by {candidate.projected_margin.toFixed(1)}</p>
@@ -2750,13 +2771,13 @@ function BuilderCard({
                           </p>
                           <div className="mt-2 space-y-2 text-xs text-slate-300">
                             {isProp ? (
-                              <>
-                                <p>• Player props can move quickly with role, matchup, and game script.</p>
-                                {candidate.role_protection && candidate.role_protection !== "NONE" && (
-                                  <p>• Role protection flag: <strong className="text-white">{candidate.role_protection}</strong></p>
-                                )}
-                                <p>• RDG grade is a research signal, not a guaranteed win probability.</p>
-                              </>
+                              candidate.research?.cons?.length ? (
+                                candidate.research.cons.map((reason, reasonIndex) => (
+                                  <p key={`con-${reasonIndex}`}>• {reason}</p>
+                                ))
+                              ) : (
+                                <p>• No specific statistical counter-signal was strong enough to display.</p>
+                              )
                             ) : isMoneyline ? (
                               <>
                                 <p>• Historical bucket results do not predict this individual game.</p>
