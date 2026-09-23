@@ -389,6 +389,63 @@ function TeamLogo({ sport, team }: { sport: "NFL" | "CFB" | "MLB" | "NHL"; team:
     },
     CFB: {
       // Full FBS ESPN team-id map (2026) plus common aliases.
+      // RDG feed aliases (hyphenated provider names)
+      "TEXAS-AM": "245",
+      "SOUTH-ALABAMA": "6",
+      "MIAMI-FL": "2390",
+      "WAKE-FOREST": "154",
+      "NEW-MEXICO-STATE": "166",
+      "SAM-HOUSTON-STATE": "2534",
+      "SAM-HOUSTON": "2534",
+      "NORTH-CAROLINA-CENTRAL": "2428",
+      "NOTRE-DAME": "87",
+      "TEXAS-TECH": "2641",
+      "CENTRAL-MICHIGAN": "2117",
+      "LOUISIANA-STATE": "99",
+      "LOUISIANA-TECH": "2348",
+      "FLORIDA-STATE": "52",
+      "OHIO-STATE": "194",
+      "PENN-STATE": "213",
+      "MICHIGAN-STATE": "127",
+      "IOWA-STATE": "66",
+      "KANSAS-STATE": "2306",
+      "OKLAHOMA-STATE": "197",
+      "OREGON-STATE": "204",
+      "WASHINGTON-STATE": "265",
+      "ARIZONA-STATE": "9",
+      "UTAH-STATE": "328",
+      "BOISE-STATE": "68",
+      "FRESNO-STATE": "278",
+      "SAN-DIEGO-STATE": "21",
+      "SAN-JOSE-STATE": "23",
+      "COLORADO-STATE": "36",
+      "BALL-STATE": "2050",
+      "KENT-STATE": "2309",
+      "GEORGIA-STATE": "2247",
+      "GEORGIA-SOUTHERN": "290",
+      "APPALACHIAN-STATE": "2026",
+      "EAST-CAROLINA": "151",
+      "WEST-VIRGINIA": "277",
+      "VIRGINIA-TECH": "259",
+      "NORTH-CAROLINA": "153",
+      "NORTH-CAROLINA-STATE": "152",
+      "BOSTON-COLLEGE": "103",
+      "SOUTH-CAROLINA": "2579",
+      "SOUTH-FLORIDA": "58",
+      "WESTERN-KENTUCKY": "98",
+      "WESTERN-MICHIGAN": "2711",
+      "EASTERN-MICHIGAN": "2199",
+      "MIDDLE-TENNESSEE": "2393",
+      "NORTH-TEXAS": "249",
+      "TEXAS-STATE": "326",
+      "OLD-DOMINION": "295",
+      "COASTAL-CAROLINA": "324",
+      "BOWLING-GREEN": "189",
+      "FLORIDA-ATLANTIC": "2226",
+      "FLORIDA-INTERNATIONAL": "2229",
+      "SOUTHERN-MISS": "2572",
+      "NEW-MEXICO": "167",
+      "AIR-FORCE": "2005",
       "AIR FORCE": "2005", AF: "2005",
       AKR: "2006", AKRON: "2006",
       ALA: "333", ALABAMA: "333",
@@ -532,15 +589,37 @@ function TeamLogo({ sport, team }: { sport: "NFL" | "CFB" | "MLB" | "NHL"; team:
   };
 
   const key = team.trim().toUpperCase();
-  const mappedCode = aliases[sport]?.[key];
+  const normalizedCfbKey =
+    sport === "CFB"
+      ? key
+          .replace(/_/g, "-")
+          .replace(/\s+/g, " ")
+          .trim()
+      : key;
+
+  const spacedCfbKey =
+    sport === "CFB"
+      ? normalizedCfbKey.replace(/-/g, " ")
+      : normalizedCfbKey;
+
+  const mappedCode =
+    aliases[sport]?.[normalizedCfbKey] ||
+    aliases[sport]?.[spacedCfbKey];
 
   if (sport === "CFB" && !mappedCode) {
+    const initials = spacedCfbKey
+      .split(" ")
+      .filter(Boolean)
+      .map((part) => part[0])
+      .join("")
+      .slice(0, 3);
+
     return (
       <span
         title={`${team} logo unavailable`}
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-sm"
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-[9px] font-black text-slate-300"
       >
-        🏈
+        {initials || "CFB"}
       </span>
     );
   }
