@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 900;
 export const maxDuration = 60;
 
-const VERSION = "6.2-rdg-final-grading-role-protection";
+const VERSION = "6.3-rdg-elite-grade-calibration";
 const CACHE_SECONDS = 900;
 
 const CURRENT_SEASON = 2026;
@@ -1878,7 +1878,7 @@ function sportsbookLineSpread(
 }
 
 /* =========================================================
-   FINAL V6.2 GRADING
+   FINAL V6.3 ELITE GRADING
 ========================================================= */
 
 const MARKET_SCALE:
@@ -1928,23 +1928,23 @@ function gradeFromScore(
   score: number,
 ): Grade {
   /*
-    V6.2:
-    A+ threshold raised from 90 to 94.
+    V6.3 ELITE CALIBRATION:
+    A+ is intentionally rare.
   */
 
-  if (score >= 94) {
+  if (score >= 98) {
     return "A+";
   }
 
-  if (score >= 82) {
+  if (score >= 90) {
     return "A";
   }
 
-  if (score >= 73) {
+  if (score >= 82) {
     return "B+";
   }
 
-  if (score >= 64) {
+  if (score >= 74) {
     return "B";
   }
 
@@ -2422,31 +2422,32 @@ function analyzeOverUnder(
      A+ PROTECTION
 
      A+ now requires ALL of these:
-     - internal score >= 94
-     - edge >= one full market scale
-     - 12+ historical games
-     - 4+ sportsbooks
-     - tight sportsbook agreement
+     - internal score >= 98
+     - edge >= 1.25x the normal market scale
+     - 15+ historical games
+     - 5+ sportsbooks
+     - exceptionally tight sportsbook agreement
   ===================================================== */
 
   const exceptionalEdge =
     absoluteEdge >=
     MARKET_SCALE[
       market
-    ];
+    ] *
+      1.25;
 
   const exceptionalHistory =
-    historyCount >= 12;
+    historyCount >= 15;
 
   const exceptionalMarketDepth =
-    sportsbooks >= 4;
+    sportsbooks >= 5;
 
   const exceptionalAgreement =
     lineSpread <=
     MAX_GOOD_SPREAD[
       market
     ] *
-      0.50;
+      0.35;
 
   if (
     grade === "A+" &&
@@ -3540,7 +3541,7 @@ export async function GET() {
           },
 
           a_plus_requirements:
-            "Exceptional model edge, 12+ history games, 4+ sportsbooks and strong sportsbook line agreement.",
+            "Internal score 98+, edge at least 1.25x market scale, 15+ history games, 5+ sportsbooks and exceptionally tight sportsbook line agreement.",
 
           disclaimer:
             "RDG grades rank model evidence and are not win probabilities or guarantees.",
@@ -3580,7 +3581,7 @@ export async function GET() {
             "RDG conservative historical scoring model",
 
           grading:
-            "V6.2 final letter-grade evidence ranking. No public confidence percentage.",
+            "V6.3 elite letter-grade calibration. A+ is intentionally rare. No public confidence percentage.",
         },
 
         api_usage: {
