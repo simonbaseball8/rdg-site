@@ -1014,6 +1014,307 @@ const [cfbError, setCfbError] =
   const sixLeg = buildWeeklyNFLParlay(higherRiskCandidates, 6);
   const eightLeg = buildWeeklyNFLParlay(higherRiskCandidates, 8);
 
+  /*
+    CROSS-SPORT MONDAY / THURSDAY PARLAY EDITIONS
+    Monday edition covers Monday-Wednesday; Thursday edition covers Thursday-Sunday.
+    This uses the qualifying model signals already loaded on this page.
+  */
+  type CrossSportCandidate = {
+    id: string;
+    sport: "NFL" | "CFB" | "MLB" | "NHL";
+    event_key: string;
+    start_time: string;
+    display_bet: string;
+    matchup: string;
+    odds: string | null;
+    score: number;
+    detail: string;
+  };
+
+  // Fixed twice-weekly editions:
+  // Monday edition = Monday through Wednesday
+  // Thursday edition = Thursday through Sunday
+  // The active edition changes only when Thursday or Monday begins.
+  const editionNow = new Date();
+  const editionDay = editionNow.getDay(); // Sun=0, Mon=1 ... Sat=6
+
+  const editionStart = new Date(editionNow);
+  editionStart.setHours(0, 0, 0, 0);
+
+  if (editionDay === 0) {
+    // Sunday belongs to the Thursday edition.
+    editionStart.setDate(editionStart.getDate() - 3);
+  } else if (editionDay >= 1 && editionDay <= 3) {
+    // Monday-Wednesday: move back to Monday.
+    editionStart.setDate(editionStart.getDate() - (editionDay - 1));
+  } else {
+    // Thursday-Saturday: move back to Thursday.
+    editionStart.setDate(editionStart.getDate() - (editionDay - 4));
+  }
+
+  const isMondayEdition = editionStart.getDay() === 1;
+  const editionEnd = new Date(editionStart);
+  editionEnd.setDate(editionEnd.getDate() + (isMondayEdition ? 2 : 3));
+  editionEnd.setHours(23, 59, 59, 999);
+
+  const editionLabel = isMondayEdition ? "MONDAY EDITION" : "THURSDAY EDITION";
+  const editionDateRange = `${new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+  }).format(editionStart)}–${new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+  }).format(editionEnd)}`;
+
+  const isInEditionWindow = (dateValue: string | null | undefined) => {
+    if (!dateValue) return false;
+    const time = new Date(dateValue).getTime();
+    return (
+      Number.isFinite(time) &&
+      time > nowMs &&
+      time >= editionStart.getTime() &&
+      time <= editionEnd.getTime()
+    );
+  };
+
+  const crossSportCandidates: CrossSportCandidate[] = [];
+
+  // NFL spreads, moneylines and passing props.
+  [...candidates, ...moneylineCandidates, ...passingPropCandidates].forEach((candidate) => {
+    let startTime: string | null = null;
+
+    if (candidate.market_type === "passing_prop") {
+      const prop = (nflPassingProps?.props || []).find(
+        (item) => `prop-${item.event_id}-${item.player_id}` === candidate.event_id
+      );
+      startTime = prop?.start_time || null;
+    } else {
+      const rawEventId = candidate.event_id.replace(/^spread-/, "").replace(/^moneyline-/, "");
+      const game = (nfl?.games || []).find((item) => item.event_id === rawEventId);
+      startTime = game?.start_date || null;
+    }
+
+    if (!isInEditionWindow(startTime)) return;
+
+    crossSportCandidates.push({
+      id: `NFL-${candidate.event_id}`,
+      sport: "NFL",
+      event_key: `NFL-${candidate.correlation_key}`,
+      start_time: startTime as string,
+      display_bet: candidate.display_bet,
+      matchup: candidate.matchup,
+      odds: candidate.odds,
+      score: candidate.score,
+      detail:
+        candidate.market_type === "passing_prop"
+          ? `${candidate.review || "Review"} • Model ${candidate.model_probability?.toFixed(1) || "—"}%`
+          : candidate.market_type === "moneyline"
+            ? `Projected margin ${candidate.projected_margin.toFixed(1)} • ${candidate.historical_accuracy.toFixed(1)}% historical bucket`
+            : `${candidate.difference.toFixed(1)} pt model/market difference`,
+    });
+  });
+
+  // College Football qualifying spreads.
+  (cfb?.games || []).forEach((game) => {
+    if (!isInEditionWindow(game.start_date) || !game.rdg || game.rdg.signal === "Pass") return;
+    const team = game.rdg.spread_lean;
+    if (!team) return;
+
+    const isHome = team === game.home_team;
+    const isAway = team === game.away_team;
+    if (!isHome && !isAway) return;
+
+    const line = isHome ? game.hard_rock.spread.home_line : game.hard_rock.spread.away_line;
+    const odds = isHome ? game.hard_rock.spread.home_odds : game.hard_rock.spread.away_odds;
+    if (line === null) return;
+
+    const edge = Math.abs(Number(game.rdg.model_vs_market_difference ?? 0));
+    const signalBonus =
+      game.rdg.signal === "Priority Review" ? 30 :
+      game.rdg.signal === "Strong Review" ? 20 :
+      game.rdg.signal === "Watch" ? 8 : 0;
+
+    crossSportCandidates.push({
+      id: `CFB-${game.event_id}`,
+      sport: "CFB",
+      event_key: `CFB-${game.event_id}`,
+      start_time: game.start_date,
+      display_bet: `${team} ${formatSpread(line)}`,
+      matchup: `${game.away_team} @ ${game.home_team}`,
+      odds,
+      score: edge * 10 + signalBonus,
+      detail: `${game.rdg.signal} • ${edge.toFixed(1)} pt model/market difference`,
+    });
+  });
+
+  // MLB qualifying moneylines and experimental totals.
+  (mlb?.games || []).forEach((game) => {
+    if (!isInEditionWindow(game.start_date) || !game.rdg) return;
+
+    const team = game.rdg.projected_winner;
+    const isHome = team === game.home_team;
+    const isAway = team === game.away_team;
+
+    if (team && (isHome || isAway)) {
+      const modelProbability = Number(
+        isHome ? game.rdg.model_home_probability : game.rdg.model_away_probability
+      );
+      const marketProbability = isHome
+        ? game.hard_rock.moneyline.no_vig_home_probability
+        : game.hard_rock.moneyline.no_vig_away_probability;
+      const odds = isHome
+        ? game.hard_rock.moneyline.home_odds
+        : game.hard_rock.moneyline.away_odds;
+      const price = americanOddsNumber(odds);
+
+      if (
+        Number.isFinite(modelProbability) &&
+        typeof marketProbability === "number" &&
+        price !== null &&
+        price >= -350 &&
+        price <= 150
+      ) {
+        const edge = modelProbability - marketProbability;
+        if (modelProbability >= 55 || edge >= 3) {
+          crossSportCandidates.push({
+            id: `MLB-ML-${game.event_id}`,
+            sport: "MLB",
+            event_key: `MLB-${game.event_id}`,
+            start_time: game.start_date,
+            display_bet: `${team} ML`,
+            matchup: `${game.away_team} @ ${game.home_team}`,
+            odds,
+            score: modelProbability + Math.max(0, edge) * 3,
+            detail: `Model ${modelProbability.toFixed(1)}% • ${edge.toFixed(1)}% vs market`,
+          });
+        }
+      }
+    }
+
+    const total = game.rdg.total_model;
+    if (total?.signal === "Experimental Review" && total.lean && total.market_total !== null) {
+      const isOver = total.lean === "Over";
+      const odds = isOver ? game.hard_rock.total.over_odds : game.hard_rock.total.under_odds;
+      const modelProbability = Number(
+        isOver ? total.model_over_probability : total.model_under_probability
+      );
+      const marketProbability = isOver
+        ? total.no_vig_over_probability
+        : total.no_vig_under_probability;
+      const price = americanOddsNumber(odds);
+
+      if (
+        Number.isFinite(modelProbability) &&
+        typeof marketProbability === "number" &&
+        price !== null &&
+        price >= -180 &&
+        price <= 130
+      ) {
+        const edge = modelProbability - marketProbability;
+        if (edge >= 8) {
+          crossSportCandidates.push({
+            id: `MLB-TOTAL-${game.event_id}`,
+            sport: "MLB",
+            event_key: `MLB-${game.event_id}`,
+            start_time: game.start_date,
+            display_bet: `${total.lean} ${total.market_total}`,
+            matchup: `${game.away_team} @ ${game.home_team}`,
+            odds,
+            score: modelProbability + edge * 3,
+            detail: `Experimental total review • ${edge.toFixed(1)}% vs market`,
+          });
+        }
+      }
+    }
+  });
+
+  // NHL qualifying regular-season moneylines.
+  (nhl?.games || []).forEach((game) => {
+    if (
+      game.game_type !== 2 ||
+      !game.odds_available ||
+      game.signal === "Pass" ||
+      game.signal === "Preseason" ||
+      !isInEditionWindow(game.start_time_utc)
+    ) {
+      return;
+    }
+
+    const team = game.moneyline_lean || game.rdg_projected_winner;
+    const isHome = team === game.home_team;
+    const odds = isHome
+      ? game.hard_rock?.moneyline?.home_odds
+      : game.hard_rock?.moneyline?.away_odds;
+    const modelProbability = isHome ? game.rdg_home_probability : game.rdg_away_probability;
+    const marketProbability = isHome
+      ? game.hard_rock?.moneyline?.no_vig_home_probability
+      : game.hard_rock?.moneyline?.no_vig_away_probability;
+    const edge =
+      typeof game.model_market_edge === "number"
+        ? Math.abs(game.model_market_edge)
+        : typeof marketProbability === "number"
+          ? Math.abs(modelProbability - marketProbability)
+          : 0;
+
+    const signalBonus =
+      game.signal === "Priority Review" ? 30 :
+      game.signal === "Strong Review" ? 20 :
+      game.signal === "Watch" ? 8 : 0;
+
+    crossSportCandidates.push({
+      id: `NHL-${game.event_id}`,
+      sport: "NHL",
+      event_key: `NHL-${game.event_id}`,
+      start_time: game.start_time_utc,
+      display_bet: `${team} ML`,
+      matchup: game.matchup,
+      odds: odds ?? null,
+      score: modelProbability + edge * 3 + signalBonus,
+      detail: `${game.signal} • Model ${modelProbability.toFixed(1)}%`,
+    });
+  });
+
+  crossSportCandidates.sort((a, b) => b.score - a.score);
+
+  function buildCrossSportParlay(count: number, offset = 0) {
+    const selected: CrossSportCandidate[] = [];
+    const usedEvents = new Set<string>();
+    const sportCounts = new Map<string, number>();
+
+    const ranked = crossSportCandidates
+      .map((candidate, index) => ({
+        candidate,
+        baseRank: candidate.score - Math.abs(index - offset) * 0.15,
+      }))
+      .sort((a, b) => b.baseRank - a.baseRank);
+
+    while (selected.length < count) {
+      const available = ranked
+        .filter(({ candidate }) => !usedEvents.has(candidate.event_key))
+        .map(({ candidate, baseRank }) => ({
+          candidate,
+          adjusted:
+            baseRank -
+            (sportCounts.get(candidate.sport) || 0) * 8,
+        }))
+        .sort((a, b) => b.adjusted - a.adjusted);
+
+      if (available.length === 0) break;
+
+      const pick = available[0].candidate;
+      selected.push(pick);
+      usedEvents.add(pick.event_key);
+      sportCounts.set(pick.sport, (sportCounts.get(pick.sport) || 0) + 1);
+    }
+
+    return selected;
+  }
+
+  const crossSportBest = buildCrossSportParlay(2, 0);
+  const crossSportThree = buildCrossSportParlay(3, 1);
+  const crossSportFour = buildCrossSportParlay(4, 2);
+  const crossSportFive = buildCrossSportParlay(5, 3);
+
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_50%_18%,rgba(16,185,129,0.07),transparent_28%),linear-gradient(180deg,#020a07_0%,#020806_42%,#010403_100%)] text-white">
       <header className="border-b border-emerald-500/20 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.16),transparent_38%),linear-gradient(180deg,#03110c_0%,#020806_100%)]">
@@ -1105,51 +1406,107 @@ const [cfbError, setCfbError] =
 </div>
 
         {activeSport === "ALL" && (
-          <section className="mb-10 overflow-hidden rounded-2xl border border-amber-400/25 bg-[radial-gradient(circle_at_top_left,rgba(251,191,36,0.10),transparent_34%),linear-gradient(135deg,rgba(16,185,129,0.05),rgba(255,255,255,0.015))] p-6 shadow-[0_18px_55px_rgba(0,0,0,0.24)] sm:p-8">
-            <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-              <div>
-                <span className="inline-flex rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-amber-300">
-                  RDG CROSS-SPORT COMMAND CENTER
-                </span>
-                <h2 className="mt-4 text-3xl font-black tracking-tight text-white sm:text-4xl">
-                  🏆 Best Parlays Across All Sports
-                </h2>
-                <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400">
-                  One place for RDG&apos;s strongest qualifying plays across NFL, College Football, MLB, and NHL.
-                  This section will combine only plays that pass each sport&apos;s model filters instead of forcing weak legs.
-                </p>
-              </div>
-
-              <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.07] px-5 py-4">
-                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-amber-300">
-                  Cross-Sport Builder
-                </p>
-                <p className="mt-1 text-sm font-bold text-white">
-                  Ready for 5M-credit odds integration
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-7 grid gap-4 md:grid-cols-4">
-              {[
-                ["NFL", "Spreads • Moneylines • Player Props"],
-                ["COLLEGE FOOTBALL", "Spreads • Moneylines • Totals"],
-                ["MLB", "Moneylines • Run Lines • Totals • Player Props"],
-                ["NHL", "Moneylines • Puck Lines • Totals • Player Props"],
-              ].map(([sport, markets]) => (
-                <div key={sport} className="rounded-xl border border-white/10 bg-black/20 p-4">
-                  <p className="text-xs font-black uppercase tracking-[0.16em] text-white">{sport}</p>
-                  <p className="mt-2 text-xs leading-5 text-slate-500">{markets}</p>
+          <section className="mb-10">
+            <div className="overflow-hidden rounded-2xl border border-amber-400/25 bg-[radial-gradient(circle_at_top_left,rgba(251,191,36,0.10),transparent_34%),linear-gradient(135deg,rgba(16,185,129,0.05),rgba(255,255,255,0.015))] p-6 shadow-[0_18px_55px_rgba(0,0,0,0.24)] sm:p-8">
+              <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                  <span className="inline-flex rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-amber-300">
+                    {editionLabel} • {editionDateRange}
+                  </span>
+                  <h2 className="mt-4 text-3xl font-black tracking-tight text-white sm:text-4xl">
+                    🏆 Best Parlays Across All Sports
+                  </h2>
+                  <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400">
+                    RDG scans qualifying NFL, College Football, MLB, and NHL games starting within the next 96 hours.
+                    Started games and games outside the four-day window are automatically excluded.
+                  </p>
                 </div>
-              ))}
+
+                <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.07] px-5 py-4">
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-amber-300">
+                    Eligible Plays
+                  </p>
+                  <p className="mt-1 text-2xl font-black text-white">{crossSportCandidates.length}</p>
+                  <p className="mt-1 text-[10px] uppercase tracking-wider text-slate-500">{editionDateRange}</p>
+                </div>
+              </div>
             </div>
 
-            <div className="mt-6 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] p-5">
-              <p className="text-sm font-black text-emerald-300">Cross-sport parlay engine is staged.</p>
-              <p className="mt-2 text-xs leading-5 text-slate-400">
-                As we move RDG to the 5M-credit odds plan, this tab will rank qualified plays from every sport together
-                and generate the best mixed-sport combinations from the same live odds source.
-              </p>
+            {crossSportCandidates.length === 0 ? (
+              <div className="mt-6 rounded-xl border border-white/10 bg-white/[0.03] p-6">
+                <p className="font-bold">No qualifying cross-sport plays in this edition.</p>
+                <p className="mt-2 text-sm text-slate-500">RDG will not force weaker legs just to create a parlay.</p>
+              </div>
+            ) : (
+              <div className="mt-6 grid gap-5 lg:grid-cols-2">
+                {[
+                  ["BEST 2-LEG", "Strongest cross-sport combination", crossSportBest, 2],
+                  ["BALANCED 3-LEG", "Diversified across qualifying sports", crossSportThree, 3],
+                  ["4-LEG PARLAY", "Wider edition model mix", crossSportFour, 4],
+                  ["5-LEG • HIGHER RISK", "Extended edition model mix", crossSportFive, 5],
+                ].map(([title, subtitle, picks, required]) => {
+                  const selections = picks as CrossSportCandidate[];
+                  const needed = required as number;
+                  const qualified = selections.length >= needed;
+
+                  return (
+                    <article
+                      key={title as string}
+                      className={
+                        title === "BEST 2-LEG"
+                          ? "rounded-2xl border-2 border-amber-400/60 bg-amber-400/[0.07] p-6 shadow-[0_0_32px_rgba(251,191,36,0.10)]"
+                          : "rounded-2xl border border-white/10 bg-white/[0.035] p-6"
+                      }
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <p className="text-xs font-bold uppercase tracking-widest text-amber-300">{subtitle as string}</p>
+                          <h3 className="mt-2 text-xl font-black">{title as string}</h3>
+                        </div>
+                        <span className={qualified ? "rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-bold text-green-400" : "rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-400"}>
+                          {qualified ? "QUALIFIED" : "NOT ENOUGH LEGS"}
+                        </span>
+                      </div>
+
+                      <div className="mt-6 space-y-3">
+                        {selections.map((pick, index) => (
+                          <div key={pick.id} className="rounded-xl border border-white/10 bg-black/25 p-4">
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-black text-emerald-300">
+                                {pick.sport}
+                              </span>
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                                LEG {index + 1}
+                              </span>
+                            </div>
+                            <p className="mt-3 text-lg font-black text-white">{pick.display_bet}</p>
+                            <p className="mt-1 text-xs text-slate-500">{pick.matchup}</p>
+                            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+                              <span className="text-slate-400">{pick.detail}</span>
+                              <span className="font-bold text-emerald-400">
+                                {pick.odds ? `${Number(pick.odds) > 0 ? "+" : ""}${pick.odds}` : "Odds —"}
+                              </span>
+                            </div>
+                            <p className="mt-2 text-[10px] uppercase tracking-wider text-slate-600">
+                              {new Intl.DateTimeFormat("en-US", {
+                                weekday: "short",
+                                month: "short",
+                                day: "numeric",
+                                hour: "numeric",
+                                minute: "2-digit",
+                              }).format(new Date(pick.start_time))}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="mt-5 rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 text-xs text-slate-400">
+              The Monday/Thursday builder ranks existing RDG model signals across sports. It does not guarantee wins and will leave cards incomplete when there are not enough qualifying independent events.
             </div>
           </section>
         )}
