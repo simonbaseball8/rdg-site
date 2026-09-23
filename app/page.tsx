@@ -648,7 +648,7 @@ function TeamLogo({ sport, team }: { sport: "NFL" | "CFB" | "MLB" | "NHL"; team:
       RICE: "242",
       RUTG: "164", RUTGERS: "164",
       SHSU: "2534", "SAM HOUSTON": "2534", "SAM HOUSTON STATE": "2534",
-      SDSU: "21", "SAN DIEGO STATE": "21",
+      "SAN DIEGO STATE": "21",
       SJSU: "23", "SAN JOSE STATE": "23",
       SMU: "2567",
       USA: "6", "SOUTH ALABAMA": "6",
@@ -688,8 +688,8 @@ function TeamLogo({ sport, team }: { sport: "NFL" | "CFB" | "MLB" | "NHL"; team:
       WISC: "275", WISCONSIN: "275",
       WYO: "2751", WYOMING: "2751",
       KENN: "338", "KENNESAW STATE": "338",
-      DEL: "48", DELAWARE: "48",
-      MOST: "2623", "MISSOURI STATE": "2623"
+      DEL: "48",
+      MOST: "2623", "MISSOURI STATE": "2623",
     },
     NHL: {
       ANA: "ana", BOS: "bos", BUF: "buf", CAR: "car", CBJ: "cbj", CGY: "cgy", CHI: "chi", COL: "col", DAL: "dal", DET: "det",
