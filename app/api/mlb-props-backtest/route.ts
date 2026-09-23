@@ -79,20 +79,32 @@ function median(values: number[]) {
     : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-function marketThreshold(market: MarketKey) {
-  if (market === "batter_hits") return 0.12;
-  if (market === "batter_total_bases") return 0.25;
-  return 0.45;
-}
-
-function maxAdjustment(market: MarketKey) {
-  if (market === "batter_hits") return 0.35;
-  if (market === "batter_total_bases") return 0.75;
-  return 1.25;
+function probabilityEdgeThreshold(market: MarketKey) {
+  // Strict V2 thresholds: minimum RDG advantage over the no-vig market.
+  if (market === "batter_hits") return 0.07;
+  if (market === "batter_total_bases") return 0.08;
+  return 0.09;
 }
 
 function minHistory(market: MarketKey) {
-  return market === "pitcher_strikeouts" ? 5 : 10;
+  // Deliberately conservative. We want stable samples before calling a play.
+  return market === "pitcher_strikeouts" ? 10 : 30;
+}
+
+function minCompleteBooks(market: MarketKey) {
+  // Require real market consensus, not a single-book opinion.
+  return market === "pitcher_strikeouts" ? 3 : 3;
+}
+
+function historyWeight(market: MarketKey) {
+  // Market remains the anchor. Historical evidence only moves us modestly.
+  if (market === "batter_hits") return 0.35;
+  if (market === "batter_total_bases") return 0.30;
+  return 0.25;
+}
+
+function validAmericanOdds(odds: number) {
+  return Number.isFinite(odds) && (odds >= 100 || odds <= -100);
 }
 
 function americanToImplied(odds: number) {
@@ -309,6 +321,50 @@ function historicalProjection(
   };
 }
 
+function historicalOverProbability(
+  history: Array<{ date: string; value: number }>,
+  eventDate: string,
+  line: number
+) {
+  const prior = history
+    .filter((g) => g.date < eventDate)
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const overRate = (games: Array<{ date: string; value: number }>) => {
+    if (!games.length) return null;
+    const overs = games.filter((g) => g.value > line).length;
+    const pushes = games.filter((g) => g.value === line).length;
+    const decisions = games.length - pushes;
+    return decisions ? overs / decisions : null;
+  };
+
+  const season = overRate(prior);
+  const last10 = overRate(prior.slice(-10));
+  const last5 = overRate(prior.slice(-5));
+
+  if (season === null) {
+    return {
+      games: prior.length,
+      season_over_probability: null,
+      last_10_over_probability: null,
+      last_5_over_probability: null,
+      weighted_over_probability: null,
+    };
+  }
+
+  const p10 = last10 ?? season;
+  const p5 = last5 ?? p10;
+  const weighted = season * 0.55 + p10 * 0.30 + p5 * 0.15;
+
+  return {
+    games: prior.length,
+    season_over_probability: round(season, 4),
+    last_10_over_probability: round(p10, 4),
+    last_5_over_probability: round(p5, 4),
+    weighted_over_probability: round(weighted, 4),
+  };
+}
+
 function actualResult(
   history: Array<{ date: string; value: number }>,
   eventDate: string
@@ -334,27 +390,8 @@ function summarize(rows: any[], market?: MarketKey) {
   const pushes = scoped.filter((r) => r.result === "PUSH").length;
   const passes = scoped.filter((r) => r.signal === "PASS").length;
 
-  const projectionRows = scoped.filter(
-    (r) =>
-      typeof r.actual === "number" &&
-      typeof r.rdg_projection === "number"
-  );
-
-  const rdgMae = projectionRows.length
-    ? avg(
-        projectionRows.map((r) =>
-          Math.abs(r.actual - r.rdg_projection)
-        )
-      )
-    : null;
-
-  const marketMae = projectionRows.length
-    ? avg(
-        projectionRows.map((r) =>
-          Math.abs(r.actual - r.market_line)
-        )
-      )
-    : null;
+  const overs = graded.filter((r) => r.signal === "OVER");
+  const unders = graded.filter((r) => r.signal === "UNDER");
 
   return {
     rows: scoped.length,
@@ -365,34 +402,44 @@ function summarize(rows: any[], market?: MarketKey) {
     pass: passes,
     win_rate_ex_pushes:
       graded.length ? round((wins / graded.length) * 100, 2) : null,
-    rdg_mae: rdgMae === null ? null : round(rdgMae),
-    market_line_mae: marketMae === null ? null : round(marketMae),
-    rdg_mae_improvement:
-      rdgMae === null || marketMae === null
-        ? null
-        : round(marketMae - rdgMae),
+    over_picks: overs.length,
+    over_win_rate:
+      overs.length
+        ? round(
+            (overs.filter((r) => r.result === "WIN").length / overs.length) * 100,
+            2
+          )
+        : null,
+    under_picks: unders.length,
+    under_win_rate:
+      unders.length
+        ? round(
+            (unders.filter((r) => r.result === "WIN").length / unders.length) * 100,
+            2
+          )
+        : null,
   };
 }
 
 function summarizeEdges(rows: any[]) {
   const buckets = [
-    { name: "0.12-0.24", min: 0.12, max: 0.25 },
-    { name: "0.25-0.49", min: 0.25, max: 0.50 },
-    { name: "0.50-0.74", min: 0.50, max: 0.75 },
-    { name: "0.75+", min: 0.75, max: Infinity },
+    { name: "0-2.9pp", min: 0, max: 0.03 },
+    { name: "3-4.9pp", min: 0.03, max: 0.05 },
+    { name: "5-6.9pp", min: 0.05, max: 0.07 },
+    { name: "7-8.9pp", min: 0.07, max: 0.09 },
+    { name: "9-11.9pp", min: 0.09, max: 0.12 },
+    { name: "12pp+", min: 0.12, max: Infinity },
   ];
 
   return buckets.map((bucket) => {
     const scoped = rows.filter((r) => {
-      const edge = Math.abs(Number(r.edge ?? 0));
+      const edge = Math.abs(Number(r.probability_edge ?? 0));
       return edge >= bucket.min && edge < bucket.max;
     });
-
     const graded = scoped.filter(
       (r) => r.result === "WIN" || r.result === "LOSS"
     );
     const wins = graded.filter((r) => r.result === "WIN").length;
-
     return {
       bucket: bucket.name,
       rows: scoped.length,
@@ -560,62 +607,86 @@ export async function GET(request: Request) {
             continue;
           }
 
-          const rawDifference =
-            hist.weighted_history_avg - group.line;
-
-          const adjustment = Math.max(
-            -maxAdjustment(group.market),
-            Math.min(
-              maxAdjustment(group.market),
-              rawDifference * 0.35
-            )
-          );
-
-          const rdgProjection = group.line + adjustment;
-          const edge = rdgProjection - group.line;
-
-          let signal: "OVER" | "UNDER" | "PASS" = "PASS";
-
-          if (hist.games >= minHistory(group.market)) {
-            const threshold = marketThreshold(group.market);
-
-            if (edge >= threshold) signal = "OVER";
-            if (edge <= -threshold) signal = "UNDER";
-          }
-
-          const result = gradeResult(
-            actual,
-            group.line,
-            signal
-          );
-
-          let noVigOverProbability: number | null = null;
-
-          const completePairs = [...completeBooks]
+          const validCompletePairs = [...completeBooks]
             .map((bookKey) => {
               const over = group.quotes.find(
                 (q) =>
                   q.sportsbook_key === bookKey &&
-                  q.side === "Over"
+                  q.side === "Over" &&
+                  validAmericanOdds(q.odds)
               );
               const under = group.quotes.find(
                 (q) =>
                   q.sportsbook_key === bookKey &&
-                  q.side === "Under"
+                  q.side === "Under" &&
+                  validAmericanOdds(q.odds)
               );
 
               if (!over || !under) return null;
 
               const op = americanToImplied(over.odds);
               const up = americanToImplied(under.odds);
+              if (!Number.isFinite(op) || !Number.isFinite(up) || op + up <= 0) {
+                return null;
+              }
 
-              return op / (op + up);
+              return {
+                bookKey,
+                overOdds: over.odds,
+                underOdds: under.odds,
+                noVigOver: op / (op + up),
+              };
             })
-            .filter((x): x is number => x !== null);
+            .filter((x): x is {
+              bookKey: string;
+              overOdds: number;
+              underOdds: number;
+              noVigOver: number;
+            } => x !== null);
 
-          if (completePairs.length) {
-            noVigOverProbability = avg(completePairs);
+          const noVigOverProbability = validCompletePairs.length
+            ? avg(validCompletePairs.map((x) => x.noVigOver))
+            : null;
+
+          const histProb = historicalOverProbability(
+            playerLog.games,
+            eventDate,
+            group.line
+          );
+
+          let signal: "OVER" | "UNDER" | "PASS" = "PASS";
+          let rdgOverProbability: number | null = null;
+          let probabilityEdge: number | null = null;
+          let passReason: string | null = null;
+
+          if (validCompletePairs.length < minCompleteBooks(group.market)) {
+            passReason = "INSUFFICIENT_COMPLETE_BOOKS";
+          } else if (histProb.games < minHistory(group.market)) {
+            passReason = "INSUFFICIENT_HISTORY";
+          } else if (
+            noVigOverProbability === null ||
+            histProb.weighted_over_probability === null
+          ) {
+            passReason = "MISSING_PROBABILITY";
+          } else {
+            const w = historyWeight(group.market);
+
+            // Market is the anchor; history can only make a controlled correction.
+            rdgOverProbability =
+              noVigOverProbability * (1 - w) +
+              histProb.weighted_over_probability * w;
+
+            probabilityEdge =
+              rdgOverProbability - noVigOverProbability;
+
+            const threshold = probabilityEdgeThreshold(group.market);
+
+            if (probabilityEdge >= threshold) signal = "OVER";
+            else if (probabilityEdge <= -threshold) signal = "UNDER";
+            else passReason = "EDGE_BELOW_STRICT_THRESHOLD";
           }
+
+          const result = gradeResult(actual, group.line, signal);
 
           rows.push({
             event_id: event.id,
@@ -627,19 +698,30 @@ export async function GET(request: Request) {
             mlb_player_id: playerMatch.id,
             market: group.market,
             market_line: group.line,
-            rdg_projection: round(rdgProjection),
-            edge: round(edge),
+            rdg_over_probability:
+              rdgOverProbability === null ? null : round(rdgOverProbability, 4),
+            probability_edge:
+              probabilityEdge === null ? null : round(probabilityEdge, 4),
+            edge: probabilityEdge === null ? 0 : round(probabilityEdge, 4),
             signal,
+            pass_reason: passReason,
             actual,
             result,
-            history: hist,
+            history: {
+              ...hist,
+              ...histProb,
+            },
             market_data: {
               sportsbooks: new Set(
                 group.quotes.map((q) => q.sportsbook_key)
               ).size,
-              complete_over_under_books: completeBooks.size,
-              median_over_odds: median(overOdds),
-              median_under_odds: median(underOdds),
+              complete_over_under_books: validCompletePairs.length,
+              median_over_odds: median(
+                validCompletePairs.map((x) => x.overOdds)
+              ),
+              median_under_odds: median(
+                validCompletePairs.map((x) => x.underOdds)
+              ),
               no_vig_over_probability:
                 noVigOverProbability === null
                   ? null
@@ -666,7 +748,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       success: true,
-      version: "1.1-rdg-mlb-props-multidate-backtest",
+      version: "2.0-rdg-mlb-strict-probability-backtest",
       sport: "MLB",
       season: SEASON,
       dates: targetDates,
@@ -677,24 +759,31 @@ export async function GET(request: Request) {
         actual_game_result_excluded_from_projection: true,
       },
       model: {
-        history_blend: {
+        approach: "market-anchored probability edge",
+        historical_over_probability_blend: {
           season: 0.55,
           last_10: 0.30,
           last_5: 0.15,
         },
-        market_adjustment_factor: 0.35,
-        thresholds: {
-          batter_hits: marketThreshold("batter_hits"),
-          batter_total_bases: marketThreshold(
-            "batter_total_bases"
-          ),
-          pitcher_strikeouts: marketThreshold(
-            "pitcher_strikeouts"
-          ),
+        history_weight: {
+          batter_hits: historyWeight("batter_hits"),
+          batter_total_bases: historyWeight("batter_total_bases"),
+          pitcher_strikeouts: historyWeight("pitcher_strikeouts"),
         },
+        strict_probability_edge_thresholds: {
+          batter_hits: probabilityEdgeThreshold("batter_hits"),
+          batter_total_bases: probabilityEdgeThreshold("batter_total_bases"),
+          pitcher_strikeouts: probabilityEdgeThreshold("pitcher_strikeouts"),
+        },
+        minimum_history_games: {
+          batter_hits: minHistory("batter_hits"),
+          batter_total_bases: minHistory("batter_total_bases"),
+          pitcher_strikeouts: minHistory("pitcher_strikeouts"),
+        },
+        minimum_complete_books: 3,
         grading_enabled: false,
         purpose:
-          "Validate V1 across multiple dates using only two-sided sportsbook markets before creating A+/A/B+/B grades.",
+          "Strict V2 validation: market-anchored no-vig probability versus historical line-clearing probability. No grades until calibrated.",
       },
       sample: {
         requested_games_per_date: requestedGames,
@@ -702,6 +791,7 @@ export async function GET(request: Request) {
         historical_events_found: allEvents.length,
         rows_scored: rows.length,
         two_sided_market_required: true,
+        minimum_complete_books_required_for_action: 3,
       },
       summary: {
         overall: summarize(rows),
