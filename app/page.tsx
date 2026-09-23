@@ -2580,6 +2580,16 @@ function BuilderCard({
   featured?: boolean;
 }) {
   const qualified = candidates.length >= required;
+  const [expandedPicks, setExpandedPicks] = useState<Set<string>>(new Set());
+
+  function toggleWhy(key: string) {
+    setExpandedPicks((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
 
   return (
     <article
@@ -2693,6 +2703,77 @@ function BuilderCard({
                         </span>
                       )}
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={() => toggleWhy(`${candidate.event_id}-${index}`)}
+                      className="mt-4 flex w-full items-center justify-between rounded-lg border border-white/10 bg-white/[0.025] px-3 py-2 text-left text-xs font-bold text-slate-300 transition hover:border-emerald-400/30 hover:text-white"
+                    >
+                      <span>Why RDG selected this pick</span>
+                      <span className="text-emerald-400">
+                        {expandedPicks.has(`${candidate.event_id}-${index}`) ? "−" : "+"}
+                      </span>
+                    </button>
+
+                    {expandedPicks.has(`${candidate.event_id}-${index}`) && (
+                      <div className="mt-3 grid gap-3 md:grid-cols-2">
+                        <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/[0.05] p-4">
+                          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-emerald-400">
+                            PROS
+                          </p>
+                          <div className="mt-2 space-y-2 text-xs text-slate-300">
+                            {isProp ? (
+                              <>
+                                <p>• RDG grade: <strong className="text-white">{candidate.grade || candidate.review || "Qualified"}</strong></p>
+                                <p>• Model projection: <strong className="text-white">{candidate.projected_margin.toFixed(1)}</strong></p>
+                                <p>• Model edge: <strong className="text-white">{candidate.difference.toFixed(1)}</strong></p>
+                              </>
+                            ) : isMoneyline ? (
+                              <>
+                                <p>• RDG projects <strong className="text-white">{candidate.projected_winner}</strong> by {candidate.projected_margin.toFixed(1)}</p>
+                                <p>• Historical bucket: <strong className="text-white">{candidate.historical_accuracy.toFixed(1)}%</strong> ({candidate.historical_correct}/{candidate.historical_sample})</p>
+                                <p>• Current price: <strong className="text-white">{oddsText}</strong></p>
+                              </>
+                            ) : (
+                              <>
+                                <p>• Model/market difference: <strong className="text-white">{candidate.difference.toFixed(1)} pts</strong></p>
+                                <p>• RDG projects <strong className="text-white">{candidate.projected_winner}</strong> by {candidate.projected_margin.toFixed(1)}</p>
+                                <p>• Historical bucket: <strong className="text-white">{candidate.historical_accuracy.toFixed(1)}%</strong></p>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.04] p-4">
+                          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-amber-400">
+                            CONS
+                          </p>
+                          <div className="mt-2 space-y-2 text-xs text-slate-300">
+                            {isProp ? (
+                              <>
+                                <p>• Player props can move quickly with role, matchup, and game script.</p>
+                                {candidate.role_protection && candidate.role_protection !== "NONE" && (
+                                  <p>• Role protection flag: <strong className="text-white">{candidate.role_protection}</strong></p>
+                                )}
+                                <p>• RDG grade is a research signal, not a guaranteed win probability.</p>
+                              </>
+                            ) : isMoneyline ? (
+                              <>
+                                <p>• Historical bucket results do not predict this individual game.</p>
+                                <p>• Moneyline value can change as sportsbook odds move.</p>
+                                <p>• Upsets remain possible even when RDG projects the winner.</p>
+                              </>
+                            ) : (
+                              <>
+                                <p>• The spread can move before kickoff and change the value of the pick.</p>
+                                <p>• Model/market difference is not the probability the wager wins.</p>
+                                <p>• Game script and late availability news can change the matchup.</p>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -3727,6 +3808,16 @@ function MLBBuilderCard({
   featured?: boolean;
 }) {
   const qualified = candidates.length >= required;
+  const [expandedPicks, setExpandedPicks] = useState<Set<string>>(new Set());
+
+  function toggleWhy(key: string) {
+    setExpandedPicks((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
 
   return (
     <article
@@ -3824,6 +3915,59 @@ function MLBBuilderCard({
                         +{candidate.edge.toFixed(1)}% edge
                       </span>
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={() => toggleWhy(`${candidate.event_id}-${candidate.team}-${index}`)}
+                      className="mt-4 flex w-full items-center justify-between rounded-lg border border-white/10 bg-white/[0.025] px-3 py-2 text-left text-xs font-bold text-slate-300 transition hover:border-emerald-400/30 hover:text-white"
+                    >
+                      <span>Why RDG selected this pick</span>
+                      <span className="text-emerald-400">
+                        {expandedPicks.has(`${candidate.event_id}-${candidate.team}-${index}`) ? "−" : "+"}
+                      </span>
+                    </button>
+
+                    {expandedPicks.has(`${candidate.event_id}-${candidate.team}-${index}`) && (
+                      <div className="mt-3 grid gap-3 md:grid-cols-2">
+                        <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/[0.05] p-4">
+                          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-emerald-400">PROS</p>
+                          <div className="mt-2 space-y-2 text-xs text-slate-300">
+                            {isTotal ? (
+                              <>
+                                <p>• RDG projects <strong className="text-white">{candidate.projected_total?.toFixed(2) ?? "—"} runs</strong> compared with the sportsbook line.</p>
+                                <p>• Model/market edge: <strong className="text-white">{candidate.edge.toFixed(1)}%</strong></p>
+                                {market !== null && <p>• Market baseline: <strong className="text-white">{market.toFixed(1)}%</strong></p>}
+                              </>
+                            ) : (
+                              <>
+                                <p>• RDG model: <strong className="text-white">{model.toFixed(1)}%</strong></p>
+                                {market !== null && <p>• Market baseline: <strong className="text-white">{market.toFixed(1)}%</strong></p>}
+                                <p>• Model/market edge: <strong className="text-white">{candidate.edge.toFixed(1)}%</strong></p>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.04] p-4">
+                          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-amber-400">CONS</p>
+                          <div className="mt-2 space-y-2 text-xs text-slate-300">
+                            {isTotal ? (
+                              <>
+                                <p>• Game totals can change quickly with pitching, weather, and lineup news.</p>
+                                <p>• The total model is still experimental.</p>
+                                <p>• Model edge does not guarantee the wager will win.</p>
+                              </>
+                            ) : (
+                              <>
+                                <p>• Starting pitcher and lineup changes can materially change the matchup.</p>
+                                <p>• Sportsbook prices can move before first pitch.</p>
+                                <p>• Model probability is an estimate, not a guaranteed outcome.</p>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
