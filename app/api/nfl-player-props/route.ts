@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 900;
 export const maxDuration = 60;
 
-const VERSION = "6.3-rdg-elite-grade-calibration";
+const VERSION = "6.4-rdg-data-driven-pick-research";
 const CACHE_SECONDS = 900;
 
 const CURRENT_SEASON = 2026;
@@ -47,6 +47,7 @@ type PlayerGame = {
   player_id: string;
   player_name: string;
   team: string;
+  opponent: string;
   position: string;
 
   attempts: number;
@@ -62,6 +63,7 @@ type PlayerGame = {
   receptions: number;
   receiving_yards: number;
   receiving_tds: number;
+  sacks_suffered: number;
 };
 
 type PlayerHistory = {
@@ -284,6 +286,11 @@ function playerGames(
         row.team ||
         "",
 
+      opponent:
+        row.opponent_team ||
+        row.opponent ||
+        "",
+
       position:
         String(
           row.position ?? "",
@@ -321,6 +328,9 @@ function playerGames(
 
       receiving_tds:
         num(row.receiving_tds),
+
+      sacks_suffered:
+        num(row.sacks_suffered || row.sacks),
     }))
     .filter((game) => Boolean(game.player_name))
     .sort(
@@ -2964,6 +2974,8 @@ export async function GET() {
         CURRENT_SEASON,
       );
 
+    const defenseProfiles = buildDefenseProfiles(currentGames);
+
     const priorGames =
       playerGames(
         priorRows,
@@ -3193,6 +3205,17 @@ export async function GET() {
               sportsbook_count:
                 analysis.sportsbook_count,
 
+              research:
+                pickResearch(
+                  player,
+                  market,
+                  null,
+                  analysis.pick,
+                  eventOpponent(player, result.event),
+                  defenseProfiles.get(eventOpponent(player, result.event) || "") || null,
+                  projection,
+                ),
+
               projection_details:
                 projection,
 
@@ -3323,6 +3346,17 @@ export async function GET() {
             role_change_protection:
               analysis.role_change_protection,
 
+            research:
+              pickResearch(
+                player,
+                market,
+                line,
+                analysis.pick,
+                eventOpponent(player, result.event),
+                defenseProfiles.get(eventOpponent(player, result.event) || "") || null,
+                projection,
+              ),
+
             projection_details:
               projection,
 
@@ -3336,7 +3370,88 @@ export async function GET() {
       }
     }
 
-    /* =====================================================
+    
+/* =========================================================
+   DATA-DRIVEN RESEARCH FOR "WHY RDG?"
+   Derived from the nflverse weekly rows already loaded above.
+========================================================= */
+type DefenseProfile = {
+  team:string; games:number;
+  pass_yards_allowed_pg:number|null; rush_yards_allowed_pg:number|null;
+  receptions_allowed_pg:number|null; pass_tds_allowed_pg:number|null;
+  rush_tds_allowed_pg:number|null; sacks_pg:number|null;
+  pass_yards_rank:number|null; rush_yards_rank:number|null; receptions_rank:number|null;
+  last_game:null|{week:number;pass_yards_allowed:number;rush_yards_allowed:number;receptions_allowed:number;pass_tds_allowed:number;rush_tds_allowed:number;sacks:number};
+};
+
+function buildDefenseProfiles(games:PlayerGame[]) {
+  const perGame=new Map<string,any>();
+  for(const g of games){
+    if(!g.team||!g.opponent) continue;
+    const key=`${g.week}|${g.opponent}`;
+    const x=perGame.get(key)||{week:g.week,defense:g.opponent,pass:0,rush:0,rec:0,passTd:0,rushTd:0,sacks:0};
+    x.pass+=g.passing_yards; x.rush+=g.rushing_yards; x.rec+=g.receptions;
+    x.passTd+=g.passing_tds; x.rushTd+=g.rushing_tds; x.sacks+=g.sacks_suffered;
+    perGame.set(key,x);
+  }
+  const grouped=new Map<string,any[]>();
+  for(const x of perGame.values()){const a=grouped.get(x.defense)||[];a.push(x);grouped.set(x.defense,a);}
+  const out=new Map<string,DefenseProfile>();
+  for(const [team,a0] of grouped){
+    const a=[...a0].sort((x,y)=>x.week-y.week), last=a[a.length-1];
+    const avg=(k:string)=>a.length?a.reduce((n,x)=>n+Number(x[k]||0),0)/a.length:null;
+    out.set(team,{team,games:a.length,pass_yards_allowed_pg:avg("pass"),rush_yards_allowed_pg:avg("rush"),
+      receptions_allowed_pg:avg("rec"),pass_tds_allowed_pg:avg("passTd"),rush_tds_allowed_pg:avg("rushTd"),
+      sacks_pg:avg("sacks"),pass_yards_rank:null,rush_yards_rank:null,receptions_rank:null,
+      last_game:last?{week:last.week,pass_yards_allowed:last.pass,rush_yards_allowed:last.rush,receptions_allowed:last.rec,
+        pass_tds_allowed:last.passTd,rush_tds_allowed:last.rushTd,sacks:last.sacks}:null});
+  }
+  const rank=(field:keyof DefenseProfile,target:keyof DefenseProfile)=>{
+    [...out.values()].filter(x=>typeof x[field]==="number").sort((a,b)=>Number(b[field])-Number(a[field]))
+      .forEach((x,i)=>(x as any)[target]=i+1);
+  };
+  rank("pass_yards_allowed_pg","pass_yards_rank"); rank("rush_yards_allowed_pg","rush_yards_rank"); rank("receptions_allowed_pg","receptions_rank");
+  return out;
+}
+function metricForMarket(m:CoreMarket,g:PlayerGame){
+  if(m==="player_pass_yds")return g.passing_yards;if(m==="player_pass_tds")return g.passing_tds;
+  if(m==="player_rush_yds")return g.rushing_yards;if(m==="player_reception_yds")return g.receiving_yards;
+  if(m==="player_receptions")return g.receptions;return g.rushing_tds+g.receiving_tds>0?1:0;
+}
+function eventOpponent(player:PlayerHistory,event:OddsEvent){
+  const aliases:Record<string,string>={"Arizona Cardinals":"ARI","Atlanta Falcons":"ATL","Baltimore Ravens":"BAL","Buffalo Bills":"BUF","Carolina Panthers":"CAR","Chicago Bears":"CHI","Cincinnati Bengals":"CIN","Cleveland Browns":"CLE","Dallas Cowboys":"DAL","Denver Broncos":"DEN","Detroit Lions":"DET","Green Bay Packers":"GB","Houston Texans":"HOU","Indianapolis Colts":"IND","Jacksonville Jaguars":"JAX","Kansas City Chiefs":"KC","Las Vegas Raiders":"LV","Los Angeles Chargers":"LAC","Los Angeles Rams":"LA","Miami Dolphins":"MIA","Minnesota Vikings":"MIN","New England Patriots":"NE","New Orleans Saints":"NO","New York Giants":"NYG","New York Jets":"NYJ","Philadelphia Eagles":"PHI","Pittsburgh Steelers":"PIT","San Francisco 49ers":"SF","Seattle Seahawks":"SEA","Tampa Bay Buccaneers":"TB","Tennessee Titans":"TEN","Washington Commanders":"WAS"};
+  const team=[...player.current,...player.prior].slice(-1)[0]?.team||"",away=aliases[event.away_team||""]||event.away_team||"",home=aliases[event.home_team||""]||event.home_team||"";
+  return team===away?home:team===home?away:null;
+}
+function pickResearch(player:PlayerHistory,m:CoreMarket,line:number|null,pick:string,opp:string|null,d:DefenseProfile|null,projection:any){
+  const current=[...player.current].sort((a,b)=>a.week-b.week), recent=current.slice(-5);
+  const vals=current.map(g=>metricForMarket(m,g)), rv=recent.map(g=>metricForMarket(m,g));
+  const avg=(a:number[])=>a.length?a.reduce((x,y)=>x+y,0)/a.length:null;
+  const season=avg(vals), recentAvg=avg(rv), under=pick==="UNDER";
+  const hits=line===null?null:rv.filter(v=>under?v<line:v>line).length;
+  const pros:string[]=[],cons:string[]=[];
+  const put=(good:boolean,t:string)=>(good?pros:cons).push(t);
+  if(line!==null&&season!==null)put(under?season<line:season>line,`Season average: ${round(season,1)} vs ${line} line.`);
+  if(line!==null&&recentAvg!==null)put(under?recentAvg<line:recentAvg>line,`Last ${rv.length} average: ${round(recentAvg,1)} vs ${line} line.`);
+  if(hits!==null&&rv.length>=2)put(hits/rv.length>=.6,`${under?"Stayed under":"Cleared"} this line in ${hits} of last ${rv.length} games.`);
+  if(d&&opp){
+    if(m==="player_pass_yds"||m==="player_reception_yds"){
+      if(d.pass_yards_allowed_pg!==null&&d.pass_yards_rank!==null)put(under?d.pass_yards_rank>=17:d.pass_yards_rank<=16,`${opp} allows ${round(d.pass_yards_allowed_pg,1)} passing yards/game — No. ${d.pass_yards_rank} most allowed.`);
+      if(d.last_game)put(under?d.last_game.pass_yards_allowed<220:d.last_game.pass_yards_allowed>=220,`${opp} allowed ${d.last_game.pass_yards_allowed} passing yards last game.`);
+    }else if(m==="player_rush_yds"){
+      if(d.rush_yards_allowed_pg!==null&&d.rush_yards_rank!==null)put(under?d.rush_yards_rank>=17:d.rush_yards_rank<=16,`${opp} allows ${round(d.rush_yards_allowed_pg,1)} rushing yards/game — No. ${d.rush_yards_rank} most allowed.`);
+      if(d.last_game)put(under?d.last_game.rush_yards_allowed<110:d.last_game.rush_yards_allowed>=110,`${opp} allowed ${d.last_game.rush_yards_allowed} rushing yards last game.`);
+    }else if(m==="player_receptions"&&d.receptions_allowed_pg!==null&&d.receptions_rank!==null){
+      put(under?d.receptions_rank>=17:d.receptions_rank<=16,`${opp} allows ${round(d.receptions_allowed_pg,1)} receptions/game — No. ${d.receptions_rank} most allowed.`);
+    }else if(m==="player_pass_tds"&&d.pass_tds_allowed_pg!==null){
+      put(under?d.pass_tds_allowed_pg<1.5:d.pass_tds_allowed_pg>=1.5,`${opp} allows ${round(d.pass_tds_allowed_pg,2)} passing TDs/game.`);
+    }
+    if((m==="player_pass_yds"||m==="player_pass_tds")&&d.sacks_pg!==null)put(d.sacks_pg<2.5,`${opp} records ${round(d.sacks_pg,1)} sacks/game.`);
+  }
+  if(line!==null&&projection?.projection!==undefined)pros.unshift(`RDG projection: ${round(Number(projection.projection),1)} vs ${line} sportsbook line.`);
+  return {opponent:opp,player_form:{season_games:current.length,season_average:season===null?null:round(season,2),recent_games:rv.length,recent_average:recentAvg===null?null:round(recentAvg,2),recent_values:rv,recent_pick_hits:hits},opponent_defense:d,pros:pros.slice(0,5),cons:cons.slice(0,4)};
+}
+/* =====================================================
        SORT
     ===================================================== */
 
