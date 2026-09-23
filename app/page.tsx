@@ -1262,11 +1262,39 @@ const [cfbError, setCfbError] =
     const usedGames = new Set<string>();
     const marketCounts = new Map<string, number>();
 
-    // Prefer the strongest unused game while gently favoring market variety.
-    // This does not force a spread/ML/prop quota; weak legs still stay out.
+    // Keep parlays balanced across spreads, moneylines and player props.
+    // For 3+ legs, no single market type can take more than roughly one-third
+    // of the card until each available market type has been represented.
+    const availableTypes = (["spread", "moneyline", "passing_prop"] as const)
+      .filter((type) => sorted.some((candidate) => candidate.market_type === type));
+
+    const targetMaxPerType = Math.max(1, Math.ceil(count / 3));
+
     while (selected.length < count) {
-      const available = sorted
-        .filter((candidate) => !usedGames.has(candidate.correlation_key))
+      const unusedTypes = availableTypes.filter(
+        (type) => (marketCounts.get(type) || 0) === 0
+      );
+
+      let eligible = sorted.filter(
+        (candidate) => !usedGames.has(candidate.correlation_key)
+      );
+
+      // First cycle through every available market type so props cannot dominate.
+      if (unusedTypes.length > 0 && selected.length < availableTypes.length) {
+        const diversified = eligible.filter((candidate) =>
+          unusedTypes.includes(candidate.market_type)
+        );
+        if (diversified.length > 0) eligible = diversified;
+      } else {
+        // After each type is represented, cap each category as evenly as possible.
+        const capped = eligible.filter(
+          (candidate) =>
+            (marketCounts.get(candidate.market_type) || 0) < targetMaxPerType
+        );
+        if (capped.length > 0) eligible = capped;
+      }
+
+      const available = eligible
         .map((candidate) => {
           const usage = nflCandidateUsage.get(candidate.event_id) || 0;
           const marketUsage = marketCounts.get(candidate.market_type) || 0;
@@ -1276,7 +1304,7 @@ const [cfbError, setCfbError] =
             adjustedScore:
               candidate.score -
               usage * 12 -
-              marketUsage * 18,
+              marketUsage * 30,
           };
         })
         .sort((a, b) => b.adjustedScore - a.adjustedScore);
