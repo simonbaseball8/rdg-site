@@ -185,7 +185,7 @@ const ODDS_BASE = "https://api.the-odds-api.com/v4";
 const SPORT = "americanfootball_nfl";
 const MARKET = "player_rush_yds";
 const TEST_SEASON = 2025;
-const TEST_WEEK = 1;
+const DEFAULT_TEST_WEEK = 2;
 const SNAPSHOT_MINUTES_BEFORE_KICKOFF = 30;
 
 function normalizeName(value: string): string {
@@ -317,7 +317,12 @@ function gradeBet(side: "OVER"|"UNDER", line: number, actual: number, odds: numb
   return { result: won ? "WIN" : "LOSS", profit: won ? americanProfit(odds) : -1 };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const requestedWeek = Number(url.searchParams.get("week") || DEFAULT_TEST_WEEK);
+  const TEST_WEEK = Number.isInteger(requestedWeek) && requestedWeek >= 1 && requestedWeek <= 18
+    ? requestedWeek
+    : DEFAULT_TEST_WEEK;
   const apiKey = process.env.ODDS_API_KEY;
   if (!apiKey) {
     return NextResponse.json({ success:false, error:"ODDS_API_KEY is missing." }, { status:500 });
@@ -338,15 +343,22 @@ export async function GET() {
     // Historical-events returns events that had odds at the requested snapshot.
     // Week 1 spans Thursday through Monday, so use late pregame snapshots on each
     // NFL game day instead of querying noon. This endpoint itself is quota-free.
-    const week1DiscoverySnapshots = [
-      "2025-09-04T23:30:00Z",
-      "2025-09-05T23:30:00Z",
-      "2025-09-07T16:30:00Z",
-      "2025-09-07T19:30:00Z",
-      "2025-09-07T23:30:00Z",
-      "2025-09-08T23:30:00Z",
-      "2025-09-09T00:00:00Z",
-    ];
+    const targetDates = weekGames
+      .map(g => {
+        const m = g.gameId.match(/^2025_(\d{2})(\d{2})_/);
+        return m ? `2025-${m[1]}-${m[2]}T12:00:00Z` : null;
+      })
+      .filter(Boolean) as string[];
+
+    const uniqueDates = [...new Set(targetDates)].sort();
+    const firstGameDate = uniqueDates[0];
+    if (!firstGameDate) throw new Error(`Could not determine dates for Week ${TEST_WEEK}.`);
+
+    const discoveryDate = new Date(new Date(firstGameDate).getTime() - 24 * 60 * 60 * 1000)
+      .toISOString()
+      .replace(/\.\d{3}Z$/, "Z");
+
+    const week1DiscoverySnapshots = [discoveryDate];
 
     for (const date of week1DiscoverySnapshots) {
       const r = await oddsJson(
@@ -376,9 +388,9 @@ export async function GET() {
     for (const event of eventList) {
       const commence = String(event.commence_time || "");
       const kickoffMs = new Date(commence).getTime();
-      const week1StartMs = new Date("2025-09-05T00:00:00Z").getTime();
-      const week1EndMs = new Date("2025-09-09T02:00:00Z").getTime();
-      if (!Number.isFinite(kickoffMs) || kickoffMs < week1StartMs || kickoffMs > week1EndMs) continue;
+      const dateOnly = commence.slice(0, 10);
+      const targetDateSet = new Set(uniqueDates.map(x => x.slice(0, 10)));
+      if (!Number.isFinite(kickoffMs) || !targetDateSet.has(dateOnly)) continue;
 
       const snapshot = isoMinusMinutes(commence, SNAPSHOT_MINUTES_BEFORE_KICKOFF);
 
@@ -476,11 +488,11 @@ export async function GET() {
 
     return NextResponse.json({
       success:true,
-      version:"1.7-rushing-v5-historical-sportsbook-week1-test",
+      version:"2.0-rushing-v5-historical-sportsbook-week-runner",
       purpose:"Verify frozen Rushing V5 against real pregame 2025 historical player_rush_yds lines before running a full-season sportsbook backtest.",
       model:"Frozen 5.0-rushing-v5-direct-yards",
       test_scope:{season:TEST_SEASON,week:TEST_WEEK,snapshot_minutes_before_kickoff:SNAPSHOT_MINUTES_BEFORE_KICKOFF,market:MARKET,region:"us"},
-      important:"This first run intentionally tests only Week 1 to verify historical event matching, player matching, grading, and API usage before spending credits on the full season.",
+      important:"Run one 2025 regular-season week at a time to avoid Vercel timeouts and unnecessary repeated historical API spend.",
       api_usage:lastUsage,
       diagnostics:{nflverse_week_player_games:weekGames.length,historical_events_seen:eventList.length,historical_event_odds_attempts:historicalOddsAttempts,historical_event_odds_calls:historicalOddsCalls,historical_event_odds_errors:historicalOddsErrors.length,events_with_matched_prop_players:eventsMatched,graded_bets:graded.length},
       historical_odds_error_samples: historicalOddsErrors.slice(0, 5),
@@ -489,6 +501,6 @@ export async function GET() {
       bets:results
     });
   } catch (error:any) {
-    return NextResponse.json({success:false,version:"1.7-rushing-v5-historical-sportsbook-week1-test",error:error?.message||String(error)},{status:500});
+    return NextResponse.json({success:false,version:"2.0-rushing-v5-historical-sportsbook-week-runner",error:error?.message||String(error)},{status:500});
   }
 }
