@@ -366,86 +366,331 @@ function diversifiedSelection<T>(items: T[], count: number, offset: number, stri
   return result;
 }
 
-type ESPNCollegeTeam = {
-  id: string;
-  abbreviation?: string;
-  displayName?: string;
-  shortDisplayName?: string;
-  location?: string;
-  name?: string;
-  slug?: string;
-  logos?: Array<{ href?: string }>;
-};
-
-let cfbTeamCatalogCache: ESPNCollegeTeam[] | null = null;
-let cfbTeamCatalogPromise: Promise<ESPNCollegeTeam[]> | null = null;
-
-function normalizeCollegeTeamName(value: string) {
-  return value
-    .toUpperCase()
-    .replace(/&/g, " AND ")
-    .replace(/\(FL\)/g, " FL ")
-    .replace(/\(OH\)/g, " OH ")
-    .replace(/[^A-Z0-9]+/g, " ")
-    .replace(/\bSTATE\b/g, " STATE ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function collegeTeamKeys(team: ESPNCollegeTeam) {
-  return [
-    team.abbreviation,
-    team.displayName,
-    team.shortDisplayName,
-    team.location,
-    team.name,
-    team.slug,
-    team.location && team.name ? `${team.location} ${team.name}` : undefined,
-  ]
-    .filter(Boolean)
-    .map((value) => normalizeCollegeTeamName(String(value)));
-}
-
-async function loadESPNCollegeTeams() {
-  if (cfbTeamCatalogCache) return cfbTeamCatalogCache;
-  if (cfbTeamCatalogPromise) return cfbTeamCatalogPromise;
-
-  cfbTeamCatalogPromise = fetch(
-    "https://site.api.espn.com/apis/site/v2/sports/football/college-football/teams?limit=500",
-    { cache: "force-cache" }
-  )
-    .then(async (response) => {
-      if (!response.ok) throw new Error(`ESPN CFB teams failed: ${response.status}`);
-      const data = await response.json();
-      const entries = data?.sports?.[0]?.leagues?.[0]?.teams ?? [];
-      const teams = entries
-        .map((entry: any) => entry?.team)
-        .filter(Boolean) as ESPNCollegeTeam[];
-      cfbTeamCatalogCache = teams;
-      return teams;
-    })
-    .catch(() => {
-      cfbTeamCatalogCache = [];
-      return [];
-    });
-
-  return cfbTeamCatalogPromise;
-}
-
 function TeamLogo({ sport, team }: { sport: "NFL" | "CFB" | "MLB" | "NHL"; team: string }) {
-  const [dynamicCfbLogo, setDynamicCfbLogo] = useState<string | null>(null);
-
   const aliases: Record<string, Record<string, string>> = {
     NFL: {
       ARI: "ari", ATL: "atl", BAL: "bal", BUF: "buf", CAR: "car", CHI: "chi", CIN: "cin", CLE: "cle",
       DAL: "dal", DEN: "den", DET: "det", GB: "gb", HOU: "hou", IND: "ind", JAX: "jax", JAC: "jax",
       KC: "kc", LV: "lv", LAC: "lac", LAR: "lar", MIA: "mia", MIN: "min", NE: "ne", NO: "no",
-      NYG: "nyg", NYJ: "nyj", PHI: "phi", PIT: "pit", SEA: "sea", SF: "sf", TB: "tb", TEN: "ten", WAS: "wsh", WSH: "wsh"
+      NYG: "nyg", NYJ: "nyj", PHI: "phi", PIT: "pit", SEA: "sea", SF: "sf", TB: "tb", TEN: "ten", WAS: "wsh", WSH: "wsh",
+      "ARIZONA CARDINALS": "ari", "ATLANTA FALCONS": "atl", "BALTIMORE RAVENS": "bal", "BUFFALO BILLS": "buf",
+      "CAROLINA PANTHERS": "car", "CHICAGO BEARS": "chi", "CINCINNATI BENGALS": "cin", "CLEVELAND BROWNS": "cle",
+      "DALLAS COWBOYS": "dal", "DENVER BRONCOS": "den", "DETROIT LIONS": "det", "GREEN BAY PACKERS": "gb",
+      "HOUSTON TEXANS": "hou", "INDIANAPOLIS COLTS": "ind", "JACKSONVILLE JAGUARS": "jax", "KANSAS CITY CHIEFS": "kc",
+      "LAS VEGAS RAIDERS": "lv", "LOS ANGELES CHARGERS": "lac", "LOS ANGELES RAMS": "lar", "MIAMI DOLPHINS": "mia",
+      "MINNESOTA VIKINGS": "min", "NEW ENGLAND PATRIOTS": "ne", "NEW ORLEANS SAINTS": "no", "NEW YORK GIANTS": "nyg",
+      "NEW YORK JETS": "nyj", "PHILADELPHIA EAGLES": "phi", "PITTSBURGH STEELERS": "pit", "SEATTLE SEAHAWKS": "sea",
+      "SAN FRANCISCO 49ERS": "sf", "TAMPA BAY BUCCANEERS": "tb", "TENNESSEE TITANS": "ten", "WASHINGTON COMMANDERS": "wsh"
     },
     MLB: {
       ARI: "ari", ATH: "ath", ATL: "atl", BAL: "bal", BOS: "bos", CHC: "chc", CWS: "chw", CHW: "chw", CIN: "cin", CLE: "cle",
       COL: "col", DET: "det", HOU: "hou", KC: "kc", LAA: "laa", LAD: "lad", MIA: "mia", MIL: "mil", MIN: "min", NYM: "nym",
       NYY: "nyy", OAK: "oak", PHI: "phi", PIT: "pit", SD: "sd", SEA: "sea", SF: "sf", SFG: "sf", STL: "stl", TB: "tb", TEX: "tex", TOR: "tor", WSH: "wsh"
+    },
+    CFB: {
+      // Full FBS ESPN team-id map (2026) plus common aliases.
+      // RDG feed aliases (hyphenated provider names)
+      // FCS / Division I direct ESPN logo IDs
+      "HOLY-CROSS": "107", "HOLY CROSS": "107",
+      LAFAYETTE: "322",
+      COLUMBIA: "171",
+      GEORGETOWN: "46",
+      "STONY-BROOK": "2619", "STONY BROOK": "2619",
+      FORDHAM: "2230",
+      "MONMOUTH-NJ": "2405", MONMOUTH: "2405",
+      DARTMOUTH: "159",
+      LEHIGH: "2329",
+      PENNSYLVANIA: "219", PENN: "219",
+      YALE: "43",
+      CORNELL: "172",
+      DRAKE: "2181",
+      DAVIDSON: "2166",
+      HOWARD: "47",
+      HARVARD: "108",
+      BROWN: "225",
+      "NORTH-CAROLINA-CENTRAL": "2428", "NORTH CAROLINA CENTRAL": "2428", NCCU: "2428",
+      "ALABAMA-STATE": "2011", "ALABAMA STATE": "2011",
+      "ALABAMA-A&M": "2010", "ALABAMA A&M": "2010",
+      "ALABAMA-AM": "2010",
+      "ALBANY": "399",
+      "ALCORN-STATE": "2016", "ALCORN STATE": "2016",
+      "AUSTIN-PEAY": "2046", "AUSTIN PEAY": "2046",
+      "BETHUNE-COOKMAN": "2065", "BETHUNE COOKMAN": "2065",
+      "BUCKNELL": "2083",
+      "BUTLER": "2086",
+      "CAMPBELL": "2097",
+      "CENTRAL-ARKANSAS": "2110", "CENTRAL ARKANSAS": "2110",
+      "CENTRAL-CONNECTICUT": "2115", "CENTRAL CONNECTICUT": "2115",
+      "CHARLESTON-SOUTHERN": "2127", "CHARLESTON SOUTHERN": "2127",
+      "COLGATE": "2142",
+      "DELAWARE": "48",
+      "DELAWARE-STATE": "2169", "DELAWARE STATE": "2169",
+      "DUQUESNE": "2184",
+      "EAST-TENNESSEE-STATE": "2193", "EAST TENNESSEE STATE": "2193", ETSU: "2193",
+      "EASTERN-ILLINOIS": "2197", "EASTERN ILLINOIS": "2197",
+      "EASTERN-KENTUCKY": "2198", "EASTERN KENTUCKY": "2198",
+      "EASTERN-WASHINGTON": "331", "EASTERN WASHINGTON": "331",
+      "ELON": "2210",
+      "FLORIDA-A&M": "50", "FLORIDA A&M": "50", "FLORIDA-AM": "50", FAMU: "50",
+      "FURMAN": "231",
+      "GARDNER-WEBB": "2241", "GARDNER WEBB": "2241",
+      "GRAMBLING": "2755", "GRAMBLING-STATE": "2755", "GRAMBLING STATE": "2755",
+      "HAMPTON": "2261",
+      "HOUSTON-CHRISTIAN": "2277", "HOUSTON CHRISTIAN": "2277",
+      "IDAHO": "70",
+      "IDAHO-STATE": "304", "IDAHO STATE": "304",
+      "ILLINOIS-STATE": "2287", "ILLINOIS STATE": "2287",
+      "INCARNATE-WORD": "2916", "INCARNATE WORD": "2916",
+      "INDIANA-STATE": "282", "INDIANA STATE": "282",
+      "JACKSON-STATE": "2296", "JACKSON STATE": "2296",
+      "LAMAR": "2320",
+      "LINDENWOOD": "2815",
+      "LIU": "112358", "LONG-ISLAND": "112358", "LONG ISLAND": "112358",
+      "MAINE": "311",
+      "MARIST": "2368",
+      "MCNEESE": "2377", "MCNEESE-STATE": "2377", "MCNEESE STATE": "2377",
+      "MERCER": "2382",
+      "MERRIMACK": "2771",
+      "MISSISSIPPI-VALLEY-STATE": "2400", "MISSISSIPPI VALLEY STATE": "2400",
+      "MONTANA": "149",
+      "MONTANA-STATE": "147", "MONTANA STATE": "147",
+      "MOREHEAD-STATE": "2413", "MOREHEAD STATE": "2413",
+      "MORGAN-STATE": "2415", "MORGAN STATE": "2415",
+      "MURRAY-STATE": "93", "MURRAY STATE": "93",
+      "NEW-HAMPSHIRE": "160", "NEW HAMPSHIRE": "160",
+      "NICHOLLS": "2447", "NICHOLLS-STATE": "2447", "NICHOLLS STATE": "2447",
+      "NORFOLK-STATE": "2450", "NORFOLK STATE": "2450",
+      "NORTH-ALABAMA": "2453", "NORTH ALABAMA": "2453",
+      "NORTH-DAKOTA": "155", "NORTH DAKOTA": "155",
+      "NORTH-DAKOTA-STATE": "2449", "NORTH DAKOTA STATE": "2449", NDSU: "2449",
+      "NORTHERN-ARIZONA": "2464", "NORTHERN ARIZONA": "2464",
+      "NORTHERN-COLORADO": "2458", "NORTHERN COLORADO": "2458",
+      "NORTHERN-IOWA": "2460", "NORTHERN IOWA": "2460",
+      "PRESBYTERIAN": "2506",
+      "PRINCETON": "163",
+      "RHODE-ISLAND": "227", "RHODE ISLAND": "227",
+      "RICHMOND": "257",
+      "ROBERT-MORRIS": "2523", "ROBERT MORRIS": "2523",
+      "SACRAMENTO-STATE": "16", "SACRAMENTO STATE": "16",
+      "SACRED-HEART": "2529", "SACRED HEART": "2529",
+      "SAINT-FRANCIS": "2598", "SAINT FRANCIS": "2598", "ST-FRANCIS-PA": "2598",
+      "SAN-DIEGO": "301",
+      "SOUTHEAST-MISSOURI-STATE": "2546", "SOUTHEAST MISSOURI STATE": "2546", SEMO: "2546",
+      "SOUTHEASTERN-LOUISIANA": "2545", "SOUTHEASTERN LOUISIANA": "2545",
+      "SOUTH-DAKOTA": "233", "SOUTH DAKOTA": "233",
+      "SOUTH-DAKOTA-STATE": "2571", "SOUTH DAKOTA STATE": "2571", SDSU: "2571",
+      "SOUTHERN": "2582", "SOUTHERN-UNIVERSITY": "2582",
+      "SOUTHERN-ILLINOIS": "79", "SOUTHERN ILLINOIS": "79",
+      "SOUTHERN-UTAH": "253", "SOUTHERN UTAH": "253",
+      "STEPHEN-F-AUSTIN": "2617", "STEPHEN F AUSTIN": "2617", SFA: "2617",
+      "STONEHILL": "284",
+      "TENNESSEE-STATE": "2634", "TENNESSEE STATE": "2634",
+      "TENNESSEE-TECH": "2635", "TENNESSEE TECH": "2635",
+      "THE-CITADEL": "2643", CITADEL: "2643",
+      "TOWSON": "119",
+      "UC-DAVIS": "302", "UC DAVIS": "302",
+      "UT-MARTIN": "2630", "UT MARTIN": "2630",
+      "UT-RIO-GRANDE-VALLEY": "292", "UT RIO GRANDE VALLEY": "292", UTRGV: "292",
+      "VILLANOVA": "222",
+      "VMI": "2678",
+      "WAGNER": "2681",
+      "WEBER-STATE": "2692", "WEBER STATE": "2692",
+      "WESTERN-CAROLINA": "2717", "WESTERN CAROLINA": "2717",
+      "WESTERN-ILLINOIS": "2710", "WESTERN ILLINOIS": "2710",
+      "WILLIAM-&-MARY": "2729", "WILLIAM AND MARY": "2729", "WILLIAM-MARY": "2729",
+      "WOFFORD": "2747",
+      YOUNGSTOWN: "2754", "YOUNGSTOWN-STATE": "2754", "YOUNGSTOWN STATE": "2754",
+
+      "TEXAS-AM": "245",
+      "SOUTH-ALABAMA": "6",
+      "MIAMI-FL": "2390",
+      "WAKE-FOREST": "154",
+      "NEW-MEXICO-STATE": "166",
+      "SAM-HOUSTON-STATE": "2534",
+      "SAM-HOUSTON": "2534",
+      "NORTH-CAROLINA-CENTRAL": "2428",
+      "NOTRE-DAME": "87",
+      "TEXAS-TECH": "2641",
+      "CENTRAL-MICHIGAN": "2117",
+      "LOUISIANA-STATE": "99",
+      "LOUISIANA-TECH": "2348",
+      "FLORIDA-STATE": "52",
+      "OHIO-STATE": "194",
+      "PENN-STATE": "213",
+      "MICHIGAN-STATE": "127",
+      "IOWA-STATE": "66",
+      "KANSAS-STATE": "2306",
+      "OKLAHOMA-STATE": "197",
+      "OREGON-STATE": "204",
+      "WASHINGTON-STATE": "265",
+      "ARIZONA-STATE": "9",
+      "UTAH-STATE": "328",
+      "BOISE-STATE": "68",
+      "FRESNO-STATE": "278",
+      "SAN-DIEGO-STATE": "21",
+      "SAN-JOSE-STATE": "23",
+      "COLORADO-STATE": "36",
+      "BALL-STATE": "2050",
+      "KENT-STATE": "2309",
+      "GEORGIA-STATE": "2247",
+      "GEORGIA-SOUTHERN": "290",
+      "APPALACHIAN-STATE": "2026",
+      "EAST-CAROLINA": "151",
+      "WEST-VIRGINIA": "277",
+      "VIRGINIA-TECH": "259",
+      "NORTH-CAROLINA": "153",
+      "NORTH-CAROLINA-STATE": "152",
+      "BOSTON-COLLEGE": "103",
+      "SOUTH-CAROLINA": "2579",
+      "SOUTH-FLORIDA": "58",
+      "WESTERN-KENTUCKY": "98",
+      "WESTERN-MICHIGAN": "2711",
+      "EASTERN-MICHIGAN": "2199",
+      "MIDDLE-TENNESSEE": "2393",
+      "NORTH-TEXAS": "249",
+      "TEXAS-STATE": "326",
+      "OLD-DOMINION": "295",
+      "COASTAL-CAROLINA": "324",
+      "BOWLING-GREEN": "189",
+      "FLORIDA-ATLANTIC": "2226",
+      "FLORIDA-INTERNATIONAL": "2229",
+      "SOUTHERN-MISS": "2572",
+      "NEW-MEXICO": "167",
+      "AIR-FORCE": "2005",
+      "AIR FORCE": "2005", AF: "2005",
+      AKR: "2006", AKRON: "2006",
+      ALA: "333", ALABAMA: "333",
+      APP: "2026", "APP STATE": "2026", "APPALACHIAN STATE": "2026",
+      ARIZ: "12", ARIZONA: "12",
+      ASU: "9", "ARIZONA STATE": "9",
+      ARK: "8", ARKANSAS: "8",
+      ARST: "2032", "ARKANSAS STATE": "2032",
+      ARMY: "349",
+      AUB: "2", AUBURN: "2",
+      BALL: "2050", "BALL STATE": "2050",
+      BAY: "239", BAYLOR: "239",
+      BOIS: "68", "BOISE STATE": "68",
+      BC: "103", "BOSTON COLLEGE": "103",
+      BGSU: "189", "BOWLING GREEN": "189",
+      BUFF: "2084", BUFFALO: "2084",
+      BYU: "252",
+      CAL: "25", CALIFORNIA: "25",
+      CMU: "2117", "CENTRAL MICHIGAN": "2117",
+      CHAR: "2429", CHARLOTTE: "2429",
+      CIN: "2132", CINCINNATI: "2132",
+      CLEM: "228", CLEMSON: "228",
+      CCU: "324", "COASTAL CAROLINA": "324",
+      COLO: "38", COLORADO: "38",
+      CSU: "36", "COLORADO STATE": "36",
+      CONN: "41", UCONN: "41", CONNECTICUT: "41",
+      DUKE: "150",
+      ECU: "151", "EAST CAROLINA": "151",
+      EMU: "2199", "EASTERN MICHIGAN": "2199",
+      FAU: "2226", "FLORIDA ATLANTIC": "2226",
+      FIU: "2229", "FLORIDA INTERNATIONAL": "2229",
+      FLA: "57", FLORIDA: "57",
+      FSU: "52", "FLORIDA STATE": "52",
+      FRES: "278", "FRESNO STATE": "278",
+      UGA: "61", GEORGIA: "61",
+      GASO: "290", "GEORGIA SOUTHERN": "290",
+      GAST: "2247", "GEORGIA STATE": "2247",
+      GT: "59", "GEORGIA TECH": "59",
+      HAW: "62", HAWAII: "62",
+      HOU: "248", HOUSTON: "248",
+      ILL: "356", ILLINOIS: "356",
+      IU: "84", INDIANA: "84",
+      IOWA: "2294",
+      ISU: "66", "IOWA STATE": "66",
+      JAXST: "55", "JACKSONVILLE STATE": "55",
+      JMU: "256", "JAMES MADISON": "256",
+      KU: "2305", KANSAS: "2305",
+      KSU: "2306", "KANSAS STATE": "2306",
+      KENT: "2309", "KENT STATE": "2309",
+      UK: "96", KENTUCKY: "96",
+      LIB: "2335", LIBERTY: "2335",
+      LT: "2348", "LOUISIANA TECH": "2348",
+      ULL: "309", LOUISIANA: "309", "LOUISIANA-LAFAYETTE": "309",
+      ULM: "2433", "LOUISIANA-MONROE": "2433",
+      LSU: "99",
+      LOU: "97", LOUISVILLE: "97",
+      MARSH: "276", MARSHALL: "276",
+      MD: "120", MARYLAND: "120",
+      MEM: "235", MEMPHIS: "235",
+      MIA: "2390", MIAMI: "2390", "MIAMI (FL)": "2390",
+      OHM: "193", "MIAMI (OH)": "193", "MIAMI OHIO": "193",
+      MICH: "130", MICHIGAN: "130",
+      MSU: "127", "MICHIGAN STATE": "127",
+      MTSU: "2393", "MIDDLE TENNESSEE": "2393",
+      MINN: "135", MINNESOTA: "135",
+      MISS: "145", "OLE MISS": "145", MISSISSIPPI: "145",
+      MSST: "344", "MISSISSIPPI STATE": "344",
+      MIZ: "142", MIZZOU: "142", MISSOURI: "142",
+      NAVY: "2426",
+      NEB: "158", NEBRASKA: "158",
+      NEV: "2440", NEVADA: "2440",
+      UNM: "167", "NEW MEXICO": "167",
+      NMSU: "166", "NEW MEXICO STATE": "166",
+      UNC: "153", "NORTH CAROLINA": "153",
+      NCST: "152", "NC STATE": "152",
+      UNT: "249", "NORTH TEXAS": "249",
+      NIU: "2459", "NORTHERN ILLINOIS": "2459",
+      NW: "77", NORTHWESTERN: "77",
+      ND: "87", "NOTRE DAME": "87",
+      OHIO: "195",
+      OSU: "194", "OHIO STATE": "194",
+      OU: "201", OKLAHOMA: "201",
+      OKST: "197", "OKLAHOMA STATE": "197",
+      ODU: "295", "OLD DOMINION": "295",
+      ORE: "2483", OREGON: "2483",
+      ORST: "204", "OREGON STATE": "204",
+      PSU: "213", "PENN STATE": "213",
+      PITT: "221", PITTSBURGH: "221",
+      PUR: "2509", PURDUE: "2509",
+      RICE: "242",
+      RUTG: "164", RUTGERS: "164",
+      SHSU: "2534", "SAM HOUSTON": "2534", "SAM HOUSTON STATE": "2534",
+      SDSU: "21", "SAN DIEGO STATE": "21",
+      SJSU: "23", "SAN JOSE STATE": "23",
+      SMU: "2567",
+      USA: "6", "SOUTH ALABAMA": "6",
+      SC: "2579", "SOUTH CAROLINA": "2579",
+      USF: "58", "SOUTH FLORIDA": "58",
+      USM: "2572", "SOUTHERN MISS": "2572", "SOUTHERN MISSISSIPPI": "2572",
+      STAN: "24", STANFORD: "24",
+      SYR: "183", SYRACUSE: "183",
+      TCU: "2628",
+      TEM: "218", TEMPLE: "218",
+      TENN: "2633", TENNESSEE: "2633",
+      TEX: "251", TEXAS: "251",
+      TAMU: "245", "TEXAS A&M": "245",
+      TXST: "326", "TEXAS STATE": "326",
+      TTU: "2641", "TEXAS TECH": "2641",
+      TOL: "2649", TOLEDO: "2649",
+      TROY: "2653",
+      TULN: "2655", TULANE: "2655",
+      TLSA: "202", TULSA: "202",
+      UAB: "5",
+      UCF: "2116",
+      UCLA: "26",
+      USC: "30",
+      UTAH: "254",
+      USU: "328", "UTAH STATE": "328",
+      UTEP: "2638",
+      UTSA: "2636",
+      VAN: "238", VANDERBILT: "238",
+      VT: "259", "VIRGINIA TECH": "259",
+      UVA: "258", VIRGINIA: "258",
+      WAKE: "154", "WAKE FOREST": "154",
+      WASH: "264", WASHINGTON: "264",
+      WSU: "265", "WASHINGTON STATE": "265",
+      WVU: "277", "WEST VIRGINIA": "277",
+      WKU: "98", "WESTERN KENTUCKY": "98",
+      WMU: "2711", "WESTERN MICHIGAN": "2711",
+      WISC: "275", WISCONSIN: "275",
+      WYO: "2751", WYOMING: "2751",
+      KENN: "338", "KENNESAW STATE": "338",
+      DEL: "48", DELAWARE: "48",
+      MOST: "2623", "MISSOURI STATE": "2623"
     },
     NHL: {
       ANA: "ana", BOS: "bos", BUF: "buf", CAR: "car", CBJ: "cbj", CGY: "cgy", CHI: "chi", COL: "col", DAL: "dal", DET: "det",
@@ -454,77 +699,26 @@ function TeamLogo({ sport, team }: { sport: "NFL" | "CFB" | "MLB" | "NHL"; team:
     }
   };
 
-  useEffect(() => {
-    let cancelled = false;
+  const key = team.trim().toUpperCase();
+  const normalizedCfbKey =
+    sport === "CFB"
+      ? key
+          .replace(/_/g, "-")
+          .replace(/\s+/g, " ")
+          .trim()
+      : key;
 
-    if (sport !== "CFB") {
-      setDynamicCfbLogo(null);
-      return;
-    }
+  const spacedCfbKey =
+    sport === "CFB"
+      ? normalizedCfbKey.replace(/-/g, " ")
+      : normalizedCfbKey;
 
-    const requested = normalizeCollegeTeamName(team);
-    const requestedWithoutSuffix = requested
-      .replace(/\bFL\b$/, "")
-      .replace(/\bOH\b$/, "")
-      .trim();
+  const mappedCode =
+    aliases[sport]?.[normalizedCfbKey] ||
+    aliases[sport]?.[spacedCfbKey];
 
-    loadESPNCollegeTeams().then((teams) => {
-      if (cancelled) return;
-
-      let match = teams.find((candidate) =>
-        collegeTeamKeys(candidate).includes(requested)
-      );
-
-      if (!match) {
-        match = teams.find((candidate) =>
-          collegeTeamKeys(candidate).includes(requestedWithoutSuffix)
-        );
-      }
-
-      if (!match) {
-        match = teams.find((candidate) => {
-          const keys = collegeTeamKeys(candidate);
-          return keys.some(
-            (key) =>
-              key.length >= 5 &&
-              (key === requested ||
-                key === requestedWithoutSuffix ||
-                key.startsWith(`${requested} `) ||
-                requested.startsWith(`${key} `))
-          );
-        });
-      }
-
-      const logo =
-        match?.logos?.find((item) => item?.href)?.href ||
-        (match?.id
-          ? `https://a.espncdn.com/i/teamlogos/ncaa/500/${match.id}.png`
-          : null);
-
-      setDynamicCfbLogo(logo);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [sport, team]);
-
-  if (sport === "CFB") {
-    if (dynamicCfbLogo) {
-      return (
-        <img
-          src={dynamicCfbLogo}
-          alt={`${team} logo`}
-          className="h-8 w-8 shrink-0 object-contain"
-          loading="lazy"
-          onError={(event) => {
-            event.currentTarget.style.display = "none";
-          }}
-        />
-      );
-    }
-
-    const initials = normalizeCollegeTeamName(team)
+  if (sport === "CFB" && !mappedCode) {
+    const initials = spacedCfbKey
       .split(" ")
       .filter(Boolean)
       .map((part) => part[0])
@@ -533,7 +727,7 @@ function TeamLogo({ sport, team }: { sport: "NFL" | "CFB" | "MLB" | "NHL"; team:
 
     return (
       <span
-        title={`${team} logo loading`}
+        title={`${team} logo unavailable`}
         className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-[9px] font-black text-slate-300"
       >
         {initials || "CFB"}
@@ -541,9 +735,11 @@ function TeamLogo({ sport, team }: { sport: "NFL" | "CFB" | "MLB" | "NHL"; team:
     );
   }
 
-  const key = team.trim().toUpperCase();
-  const code = aliases[sport]?.[key] || key.toLowerCase();
-  const url = `https://a.espncdn.com/i/teamlogos/${sport.toLowerCase()}/500/${code}.png`;
+  const code = mappedCode || key.toLowerCase();
+  const url =
+    sport === "CFB"
+      ? `https://a.espncdn.com/i/teamlogos/ncaa/500/${code}.png`
+      : `https://a.espncdn.com/i/teamlogos/${sport.toLowerCase()}/500/${code}.png`;
 
   return (
     <img
@@ -551,9 +747,7 @@ function TeamLogo({ sport, team }: { sport: "NFL" | "CFB" | "MLB" | "NHL"; team:
       alt={`${team} logo`}
       className="h-8 w-8 shrink-0 object-contain"
       loading="lazy"
-      onError={(event) => {
-        event.currentTarget.style.display = "none";
-      }}
+      onError={(event) => { event.currentTarget.style.display = "none"; }}
     />
   );
 }
