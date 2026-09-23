@@ -8,7 +8,7 @@ const MLB_API = "https://statsapi.mlb.com/api/v1";
 const SPORT_KEY = "baseball_mlb";
 const SEASON = 2026;
 
-// Keep V1 controlled. Raise this after we validate output/backtest.
+// Keep the live route fast and simple for Vercel.
 const MAX_EVENTS_TO_ANALYZE = 4;
 
 const MARKETS = [
@@ -255,32 +255,12 @@ async function loadPlayerHistory(
 
 function modelSettings(market: MarketKey) {
   if (market === "batter_hits") {
-    return {
-      marketWeight: 0.72,
-      historyWeight: 0.28,
-      maxAdjustment: 0.28,
-      passEdge: 0.10,
-      minGames: 12,
-    };
+    return { historyWeight: 0.28, maxAdjustment: 0.28, passEdge: 0.12, minGames: 30 };
   }
-
   if (market === "batter_total_bases") {
-    return {
-      marketWeight: 0.70,
-      historyWeight: 0.30,
-      maxAdjustment: 0.45,
-      passEdge: 0.18,
-      minGames: 12,
-    };
+    return { historyWeight: 0.30, maxAdjustment: 0.45, passEdge: 0.25, minGames: 30 };
   }
-
-  return {
-    marketWeight: 0.68,
-    historyWeight: 0.32,
-    maxAdjustment: 0.75,
-    passEdge: 0.30,
-    minGames: 5,
-  };
+  return { historyWeight: 0.32, maxAdjustment: 0.75, passEdge: 0.45, minGames: 10 };
 }
 
 function projectFromMarketAndHistory(
@@ -289,8 +269,6 @@ function projectFromMarketAndHistory(
   history: PlayerHistory
 ) {
   const settings = modelSettings(market);
-
-  // Market is the anchor. History only supplies a controlled correction.
   const rawHistoryDifference = history.weighted_history_avg - line;
   const controlledAdjustment = clamp(
     rawHistoryDifference * settings.historyWeight,
@@ -302,7 +280,6 @@ function projectFromMarketAndHistory(
   const edge = projection - line;
 
   let signal: Signal = "PASS";
-
   if (history.games >= settings.minGames) {
     if (edge >= settings.passEdge) signal = "OVER";
     if (edge <= -settings.passEdge) signal = "UNDER";
@@ -315,6 +292,25 @@ function projectFromMarketAndHistory(
     controlled_adjustment: round(controlledAdjustment),
     settings,
   };
+}
+
+function buildReasons(
+  signal: Signal,
+  line: number,
+  history: PlayerHistory
+) {
+  if (signal === "PASS") return [];
+
+  const recent = history.recent_values ?? [];
+  const cleared = recent.filter((v) =>
+    signal === "OVER" ? v > line : v < line
+  ).length;
+
+  return [
+    `Season average: ${history.season_avg}`,
+    `Last 10 average: ${history.last_10_avg}`,
+    `${signal === "OVER" ? "Cleared" : "Stayed under"} this line in ${cleared}/${recent.length || 0} recent games`,
+  ];
 }
 
 function buildLineGroups(event: EventOdds): LineGroup[] {
@@ -437,7 +433,7 @@ export async function GET() {
     if (!selectedEvents.length) {
       return NextResponse.json({
         success: true,
-        version: "1.0-rdg-mlb-market-anchored-player-props",
+        version: "2.0-rdg-mlb-simple-live-props",
         sport: "MLB",
         message: "No upcoming MLB events were found.",
         events_found: allEvents.length,
@@ -538,6 +534,13 @@ export async function GET() {
           history
         );
 
+        const sportsbookCount = new Set(
+          group.quotes.map((q) => q.sportsbook_key)
+        ).size;
+
+        const publicSignal: Signal =
+          sportsbookCount >= 2 ? model.signal : "PASS";
+
         return {
           event_id: group.event_id,
           commence_time: group.commence_time,
@@ -550,7 +553,8 @@ export async function GET() {
           market_baseline: group.line,
           rdg_projection: model.projection,
           edge: model.edge,
-          signal: model.signal,
+          signal: publicSignal,
+          reasons: buildReasons(publicSignal, group.line, history),
           controlled_adjustment: model.controlled_adjustment,
           history: {
             games: history.games,
@@ -562,7 +566,7 @@ export async function GET() {
           },
           market_data: quoteSummary,
           model_status:
-            "V1 market-anchored projection. Not yet historically calibrated or graded.",
+            "Simple live RDG suggestion based on sportsbook line plus MLB season/recent performance.",
         };
       })
     );
@@ -600,7 +604,7 @@ export async function GET() {
 
     return NextResponse.json({
       success: true,
-      version: "1.0-rdg-mlb-market-anchored-player-props",
+      version: "2.0-rdg-mlb-simple-live-props",
       sport: "MLB",
       season: SEASON,
       odds_provider: "The Odds API",
@@ -608,16 +612,14 @@ export async function GET() {
       markets: MARKETS,
       model: {
         philosophy:
-          "Sportsbook line is the baseline. MLB player history makes only a controlled adjustment around the market line.",
+          "Simple live suggestions: current sportsbook line plus season and recent MLB performance.",
         history_blend: {
           season: 0.55,
           last_10: 0.30,
           last_5: 0.15,
         },
+        minimum_sportsbooks_for_suggestion: 2,
         grading_enabled: false,
-        backtested: false,
-        warning:
-          "V1 thresholds and weights are provisional. Do not assign A+/A/B+/B until historical backtesting is complete.",
       },
       events: {
         returned: allEvents.length,
@@ -640,15 +642,15 @@ export async function GET() {
       actionable,
       pass,
       next_step:
-        "Inspect projections and player matching. If output is clean, build the controlled historical Odds API backtest before creating letter grades.",
+        "Use actionable OVER/UNDER suggestions on the website and ignore PASS rows.",
     });
   } catch (error) {
-    console.error("RDG MLB Props V1 Error:", error);
+    console.error("RDG MLB Simple Props Error:", error);
 
     return NextResponse.json(
       {
         success: false,
-        version: "1.0-rdg-mlb-market-anchored-player-props",
+        version: "2.0-rdg-mlb-simple-live-props",
         error: error instanceof Error ? error.message : String(error),
       },
       { status: 500 }
