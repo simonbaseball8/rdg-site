@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 900;
 export const maxDuration = 60;
 
-const VERSION = "6.0-rdg-unified-nfl-player-props";
+const VERSION = "6.1-rdg-letter-grade-player-props";
 const CACHE_SECONDS = 900;
 
 const CURRENT_SEASON = 2026;
@@ -30,6 +30,13 @@ const CORE_MARKETS = [
 ] as const;
 
 type CoreMarket = (typeof CORE_MARKETS)[number];
+
+type Grade =
+  | "A+"
+  | "A"
+  | "B+"
+  | "B"
+  | "PASS";
 
 type Row = Record<string, string>;
 
@@ -89,7 +96,7 @@ type OddsEvent = {
 };
 
 /* =========================================================
-   UTILITIES
+   BASIC UTILITIES
 ========================================================= */
 
 function num(value: unknown): number {
@@ -188,6 +195,7 @@ function parseCSVLine(line: string): string[] {
   }
 
   result.push(current);
+
   return result;
 }
 
@@ -408,7 +416,7 @@ function recencyWeighted(
 }
 
 /* =========================================================
-   FROZEN PASSING YARDS V2
+   PASSING YARDS
 ========================================================= */
 
 function yardsPerAttempt(
@@ -545,7 +553,7 @@ function projectPassingYardsV2(
   let efficiencyWeight = 0;
 
   if (current.length === 1) {
-    efficiencyWeight = 0.1;
+    efficiencyWeight = 0.10;
   } else if (current.length === 2) {
     efficiencyWeight = 0.18;
   } else if (current.length === 3) {
@@ -553,7 +561,7 @@ function projectPassingYardsV2(
   } else if (current.length === 4) {
     efficiencyWeight = 0.32;
   } else if (current.length >= 5) {
-    efficiencyWeight = 0.4;
+    efficiencyWeight = 0.40;
   }
 
   let expectedYPA:
@@ -618,8 +626,8 @@ function projectPassingYardsV2(
       225 * 0.35;
   } else if (totalHistory <= 10) {
     projection =
-      projection * 0.8 +
-      225 * 0.2;
+      projection * 0.80 +
+      225 * 0.20;
   }
 
   return {
@@ -651,12 +659,12 @@ function projectPassingYardsV2(
       totalHistory,
 
     model:
-      "Frozen RDG Passing V2",
+      "RDG Passing V2",
   };
 }
 
 /* =========================================================
-   GENERIC HISTORY MODEL
+   GENERIC HISTORY PROJECTION
 ========================================================= */
 
 function projectHistoryMetric(
@@ -841,7 +849,7 @@ function projectHistoryMetric(
 }
 
 /* =========================================================
-   RUSHING YARDS
+   RUSHING
 ========================================================= */
 
 function projectRushingYards(
@@ -1034,7 +1042,7 @@ function projectRushingYards(
 }
 
 /* =========================================================
-   RECEIVING / RECEPTIONS / PASSING TD
+   RECEIVING / RECEPTIONS / PASS TD
 ========================================================= */
 
 function projectReceivingYards(
@@ -1103,7 +1111,7 @@ function projectAnytimeTD(
           game.receptions > 0,
       );
 
-  if (all.length < 4) {
+  if (all.length < 6) {
     return null;
   }
 
@@ -1129,7 +1137,7 @@ function projectAnytimeTD(
         0,
     ).length;
 
-  const seasonRate =
+  const historicalRate =
     scored /
     window.length;
 
@@ -1137,26 +1145,45 @@ function projectAnytimeTD(
     recentScored /
     recent.length;
 
-  const blendedRate =
-    seasonRate * 0.65 +
-    recentRate * 0.35;
+  /*
+    TDs are extremely volatile.
+
+    We deliberately shrink historical scoring rates toward
+    a conservative baseline instead of treating raw TD rate
+    as a true probability.
+  */
+
+  const baseline =
+    0.20;
+
+  const sampleWeight =
+    clamp(
+      window.length / 17,
+      0.25,
+      1,
+    );
+
+  const blendedHistory =
+    historicalRate * 0.70 +
+    recentRate * 0.30;
+
+  const shrunkRate =
+    blendedHistory *
+      (0.55 * sampleWeight) +
+    baseline *
+      (1 -
+        0.55 * sampleWeight);
 
   return {
     projection:
       round(
-        blendedRate * 100,
+        shrunkRate * 100,
         1,
       ),
 
-    anytime_td_score_rate:
+    raw_historical_score_rate:
       round(
-        blendedRate * 100,
-        1,
-      ),
-
-    historical_score_rate:
-      round(
-        seasonRate * 100,
+        historicalRate * 100,
         1,
       ),
 
@@ -1166,11 +1193,17 @@ function projectAnytimeTD(
         1,
       ),
 
+    conservative_td_estimate:
+      round(
+        shrunkRate * 100,
+        1,
+      ),
+
     total_history_games:
       window.length,
 
     model:
-      "RDG Anytime TD Historical Rate",
+      "RDG Conservative Anytime TD",
   };
 }
 
@@ -1567,7 +1600,7 @@ function consensusLine(
 }
 
 /* =========================================================
-   ODDS / NO-VIG
+   ODDS / MARKET PRICING
 ========================================================= */
 
 function impliedProbability(
@@ -1751,8 +1784,50 @@ function noVig(
 }
 
 /* =========================================================
-   CONFIDENCE / PICK ENGINE
+   MARKET DISPERSION
 ========================================================= */
+
+function sportsbookLineSpread(
+  lines: SportsbookLine[],
+): number {
+  const values =
+    lines
+      .filter(
+        (line) =>
+          line.available &&
+          Number.isFinite(
+            line.line,
+          ),
+      )
+      .map(
+        (line) =>
+          line.line,
+      );
+
+  if (!values.length) {
+    return 0;
+  }
+
+  return (
+    Math.max(...values) -
+    Math.min(...values)
+  );
+}
+
+/* =========================================================
+   LETTER GRADE ENGINE
+========================================================= */
+
+/*
+  IMPORTANT:
+
+  This score is NOT a win probability.
+
+  It is only an internal ranking score used to convert
+  model evidence into RDG letter grades.
+
+  The numerical score is NOT returned to the public API.
+*/
 
 const MARKET_SCALE:
   Record<
@@ -1762,14 +1837,14 @@ const MARKET_SCALE:
     >,
     number
   > = {
-    player_pass_yds: 35,
+    player_pass_yds: 30,
     player_pass_tds: 0.75,
     player_rush_yds: 15,
     player_reception_yds: 15,
     player_receptions: 1.5,
   };
 
-const PASS_THRESHOLD:
+const MIN_EDGE:
   Record<
     Exclude<
       CoreMarket,
@@ -1784,76 +1859,62 @@ const PASS_THRESHOLD:
     player_receptions: 0.45,
   };
 
-function confidenceScore(
-  market:
+const MAX_GOOD_SPREAD:
+  Record<
     Exclude<
       CoreMarket,
       "player_anytime_td"
     >,
+    number
+  > = {
+    player_pass_yds: 8,
+    player_pass_tds: 1,
+    player_rush_yds: 6,
+    player_reception_yds: 6,
+    player_receptions: 1,
+  };
 
-  difference: number,
-
-  historyGamesCount: number,
-
-  sportsbookCount: number,
-
-  marketProbability:
-    number | null,
-) {
-  const scale =
-    MARKET_SCALE[market];
-
-  const strength =
-    clamp(
-      Math.abs(
-        difference,
-      ) / scale,
-      0,
-      1,
-    );
-
-  const historyStrength =
-    clamp(
-      historyGamesCount / 12,
-      0,
-      1,
-    );
-
-  const bookStrength =
-    clamp(
-      sportsbookCount / 5,
-      0,
-      1,
-    );
-
-  let score =
-    45 +
-    strength * 35 +
-    historyStrength * 10 +
-    bookStrength * 10;
-
-  if (
-    marketProbability !== null
-  ) {
-    if (
-      marketProbability >= 55
-    ) {
-      score += 3;
-    } else if (
-      marketProbability < 48
-    ) {
-      score -= 3;
-    }
+function gradeFromScore(
+  score: number,
+): Grade {
+  if (score >= 90) {
+    return "A+";
   }
 
-  return round(
-    clamp(
-      score,
-      0,
-      99,
-    ),
-    1,
-  );
+  if (score >= 80) {
+    return "A";
+  }
+
+  if (score >= 72) {
+    return "B+";
+  }
+
+  if (score >= 64) {
+    return "B";
+  }
+
+  return "PASS";
+}
+
+function gradeRank(
+  grade: Grade,
+): number {
+  switch (grade) {
+    case "A+":
+      return 5;
+
+    case "A":
+      return 4;
+
+    case "B+":
+      return 3;
+
+    case "B":
+      return 2;
+
+    case "PASS":
+      return 0;
+  }
 }
 
 function analyzeOverUnder(
@@ -1873,24 +1934,24 @@ function analyzeOverUnder(
     projection.projection -
     line;
 
-  const rawSide:
+  const directionalPick:
     "OVER" |
     "UNDER" =
       difference >= 0
         ? "OVER"
         : "UNDER";
 
+  const absoluteEdge =
+    Math.abs(
+      difference,
+    );
+
   const marketData =
     noVig(
       lines,
       line,
-      rawSide,
+      directionalPick,
     );
-
-  const threshold =
-    PASS_THRESHOLD[
-      market
-    ];
 
   const historyCount =
     Number(
@@ -1899,47 +1960,193 @@ function analyzeOverUnder(
       0,
     );
 
-  const confidence =
-    confidenceScore(
-      market,
-      difference,
-      historyCount,
+  const sportsbooks =
+    new Set(
+      lines.map(
+        (item) =>
+          item.sportsbook,
+      ),
+    ).size;
 
-      new Set(
-        lines.map(
-          (item) =>
-            item.sportsbook,
-        ),
-      ).size,
-
-      marketData.probability,
+  const lineSpread =
+    sportsbookLineSpread(
+      lines,
     );
 
-  let pick:
-    "OVER" |
-    "UNDER" |
-    "PASS" =
-      rawSide;
+  const normalizedEdge =
+    clamp(
+      absoluteEdge /
+        MARKET_SCALE[
+          market
+        ],
+      0,
+      1.5,
+    );
+
+  /*
+    Internal score components:
+
+    1. Projection edge = biggest factor
+    2. Sample size
+    3. Number of sportsbooks
+    4. Sportsbook line agreement
+    5. Market price agreement
+  */
+
+  let score = 35;
+
+  score +=
+    normalizedEdge * 32;
+
+  score +=
+    clamp(
+      historyCount / 15,
+      0,
+      1,
+    ) * 12;
+
+  score +=
+    clamp(
+      sportsbooks / 5,
+      0,
+      1,
+    ) * 8;
+
+  const goodSpread =
+    MAX_GOOD_SPREAD[
+      market
+    ];
 
   if (
-    Math.abs(
-      difference,
-    ) < threshold
+    lineSpread <=
+    goodSpread * 0.50
   ) {
-    pick = "PASS";
+    score += 8;
+  } else if (
+    lineSpread <=
+    goodSpread
+  ) {
+    score += 4;
+  } else {
+    score -= 5;
+  }
+
+  if (
+    marketData.probability !== null
+  ) {
+    if (
+      marketData.probability >= 57
+    ) {
+      score += 8;
+    } else if (
+      marketData.probability >= 53
+    ) {
+      score += 4;
+    } else if (
+      marketData.probability < 47
+    ) {
+      score -= 6;
+    }
+  }
+
+  /*
+    Hard safety gates.
+  */
+
+  if (
+    absoluteEdge <
+    MIN_EDGE[
+      market
+    ]
+  ) {
+    score = 0;
   }
 
   if (
     historyCount < 3
   ) {
-    pick = "PASS";
+    score = 0;
   }
+
+  /*
+    A+ should be difficult to reach.
+
+    Require a materially large projection edge,
+    sufficient history, and multiple sportsbooks.
+  */
+
+  const exceptionalEdge =
+    absoluteEdge >=
+    MARKET_SCALE[
+      market
+    ] *
+      0.75;
+
+  const strongHistory =
+    historyCount >= 10;
+
+  const strongMarket =
+    sportsbooks >= 3;
+
+  let grade =
+    gradeFromScore(
+      score,
+    );
+
+  if (
+    grade === "A+" &&
+    (
+      !exceptionalEdge ||
+      !strongHistory ||
+      !strongMarket
+    )
+  ) {
+    grade = "A";
+  }
+
+  /*
+    If the market itself strongly disagrees with our
+    direction, prevent an A grade.
+  */
+
+  if (
+    marketData.probability !== null &&
+    marketData.probability < 47 &&
+    (
+      grade === "A+" ||
+      grade === "A"
+    )
+  ) {
+    grade = "B+";
+  }
+
+  /*
+    Low-history projections cannot receive top grades.
+  */
+
+  if (
+    historyCount < 6 &&
+    (
+      grade === "A+" ||
+      grade === "A"
+    )
+  ) {
+    grade = "B+";
+  }
+
+  const pick:
+    "OVER" |
+    "UNDER" |
+    "PASS" =
+      grade === "PASS"
+        ? "PASS"
+        : directionalPick;
 
   return {
     pick,
 
     directional_pick:
-      rawSide,
+      directionalPick,
 
     difference:
       round(
@@ -1947,19 +2154,249 @@ function analyzeOverUnder(
         2,
       ),
 
-    confidence:
-      pick === "PASS"
-        ? Math.min(
-            confidence,
-            59,
-          )
-        : confidence,
+    absolute_edge:
+      round(
+        absoluteEdge,
+        2,
+      ),
+
+    grade,
 
     market_no_vig_probability:
       marketData.probability,
 
+    sportsbook_count:
+      sportsbooks,
+
+    sportsbook_line_spread:
+      round(
+        lineSpread,
+        2,
+      ),
+
     paired_market_books:
       marketData.paired_books,
+  };
+}
+
+/* =========================================================
+   ANYTIME TD GRADING
+========================================================= */
+
+function analyzeAnytimeTD(
+  projection: any,
+  lines: AnytimeTDLine[],
+) {
+  const impliedValues =
+    lines
+      .map(
+        (line) =>
+          impliedProbability(
+            line.odds,
+          ),
+      )
+      .filter(
+        (
+          value,
+        ): value is number =>
+          value !== null,
+      );
+
+  const marketImplied =
+    impliedValues.length
+      ? (
+          impliedValues.reduce(
+            (
+              sum,
+              value,
+            ) =>
+              sum +
+              value,
+            0,
+          ) /
+          impliedValues.length
+        ) *
+        100
+      : null;
+
+  const rdgEstimate =
+    Number(
+      projection.projection,
+    );
+
+  const tdEdge:
+    number | null =
+      marketImplied === null
+        ? null
+        : rdgEstimate -
+          marketImplied;
+
+  const historyCount =
+    Number(
+      projection
+        ?.total_history_games ??
+      0,
+    );
+
+  const sportsbooks =
+    new Set(
+      lines.map(
+        (line) =>
+          line.sportsbook,
+      ),
+    ).size;
+
+  /*
+    TD props are high variance.
+
+    Therefore they need:
+    - at least 8 historical games
+    - at least 3 sportsbooks
+    - positive model-vs-market edge
+    - stronger thresholds than yardage props
+  */
+
+  if (
+    tdEdge === null ||
+    historyCount < 8 ||
+    sportsbooks < 3
+  ) {
+    return {
+      pick:
+        "PASS" as const,
+
+      grade:
+        "PASS" as Grade,
+
+      market_implied_probability:
+        marketImplied === null
+          ? null
+          : round(
+              marketImplied,
+              2,
+            ),
+
+      edge:
+        tdEdge === null
+          ? null
+          : round(
+              tdEdge,
+              2,
+            ),
+
+      sportsbook_count:
+        sportsbooks,
+    };
+  }
+
+  let score = 25;
+
+  score +=
+    clamp(
+      tdEdge / 20,
+      0,
+      1.5,
+    ) * 30;
+
+  score +=
+    clamp(
+      historyCount / 17,
+      0,
+      1,
+    ) * 15;
+
+  score +=
+    clamp(
+      sportsbooks / 6,
+      0,
+      1,
+    ) * 10;
+
+  /*
+    Require a meaningful edge.
+  */
+
+  if (tdEdge < 5) {
+    score = 0;
+  }
+
+  /*
+    Market implied probability matters.
+
+    Very long-shot TD props should not receive
+    elite grades simply because historical TD rate
+    was high.
+  */
+
+  if (
+    marketImplied < 15
+  ) {
+    score -= 12;
+  } else if (
+    marketImplied < 20
+  ) {
+    score -= 7;
+  }
+
+  /*
+    Prevent extremely aggressive TD grades.
+  */
+
+  let grade =
+    gradeFromScore(
+      score,
+    );
+
+  /*
+    TD props cannot receive A+ yet because this
+    model has not been validated strongly enough
+    for that classification.
+  */
+
+  if (
+    grade === "A+"
+  ) {
+    grade = "A";
+  }
+
+  /*
+    Require at least a 10 percentage-point model
+    edge for A.
+  */
+
+  if (
+    grade === "A" &&
+    tdEdge < 10
+  ) {
+    grade = "B+";
+  }
+
+  const pick:
+    "YES" |
+    "PASS" =
+      grade === "PASS"
+        ? "PASS"
+        : "YES";
+
+  return {
+    pick,
+
+    grade,
+
+    market_implied_probability:
+      round(
+        marketImplied,
+        2,
+      ),
+
+    edge:
+      round(
+        tdEdge,
+        2,
+      ),
+
+    sportsbook_count:
+      sportsbooks,
   };
 }
 
@@ -2283,123 +2720,11 @@ export async function GET() {
 
             matchedPlayers++;
 
-            const impliedValues =
-              tdLines
-                .map(
-                  (line) =>
-                    impliedProbability(
-                      line.odds,
-                    ),
-                )
-                .filter(
-                  (
-                    value,
-                  ): value is number =>
-                    value !== null,
-                );
-
-            const marketImplied =
-              impliedValues.length
-                ? (
-                    impliedValues.reduce(
-                      (
-                        sum,
-                        value,
-                      ) =>
-                        sum +
-                        value,
-                      0,
-                    ) /
-                    impliedValues.length
-                  ) *
-                  100
-                : null;
-
-            const rdgTD =
-              Number(
-                projection.projection,
+            const analysis =
+              analyzeAnytimeTD(
+                projection,
+                tdLines,
               );
-
-            const tdEdge:
-              number | null =
-                marketImplied === null
-                  ? null
-                  : rdgTD -
-                    marketImplied;
-
-            let pick:
-              "YES" |
-              "PASS" =
-                "PASS";
-
-            /*
-              FIX:
-              Explicitly confirm tdEdge is not null before
-              comparing it to 5.
-            */
-
-            if (
-              marketImplied !== null &&
-              tdEdge !== null &&
-              rdgTD >= 35 &&
-              tdEdge >= 5
-            ) {
-              pick = "YES";
-            }
-
-            let confidence =
-              45;
-
-            if (
-              tdEdge !== null
-            ) {
-              confidence +=
-                clamp(
-                  tdEdge,
-                  0,
-                  20,
-                ) *
-                1.5;
-            }
-
-            confidence +=
-              clamp(
-                (
-                  projection
-                    .total_history_games ??
-                  0
-                ) / 12,
-                0,
-                1,
-              ) * 10;
-
-            confidence +=
-              clamp(
-                tdLines.length /
-                  5,
-                0,
-                1,
-              ) * 10;
-
-            confidence =
-              round(
-                clamp(
-                  confidence,
-                  0,
-                  99,
-                ),
-                1,
-              );
-
-            if (
-              pick === "PASS"
-            ) {
-              confidence =
-                Math.min(
-                  confidence,
-                  59,
-                );
-            }
 
             props.push({
               event_id:
@@ -2446,30 +2771,33 @@ export async function GET() {
                 null,
 
               sportsbook_implied_probability:
-                marketImplied === null
-                  ? null
-                  : round(
-                      marketImplied,
-                      2,
-                    ),
+                analysis.market_implied_probability,
 
               rdg_projection:
-                rdgTD,
+                projection.projection,
 
               edge:
-                tdEdge === null
-                  ? null
-                  : round(
-                      tdEdge,
-                      2,
-                    ),
+                analysis.edge,
 
-              pick,
+              pick:
+                analysis.pick,
 
-              confidence,
+              grade:
+                analysis.grade,
 
-              confidence_type:
-                "RDG ranking score - not validated win probability",
+              grade_meaning:
+                analysis.grade === "A+"
+                  ? "Exceptional RDG edge"
+                  : analysis.grade === "A"
+                    ? "Strong RDG edge"
+                    : analysis.grade === "B+"
+                      ? "Good RDG edge"
+                      : analysis.grade === "B"
+                        ? "Moderate RDG edge"
+                        : "No qualifying RDG edge",
+
+              sportsbook_count:
+                analysis.sportsbook_count,
 
               projection_details:
                 projection,
@@ -2572,20 +2900,37 @@ export async function GET() {
             difference:
               analysis.difference,
 
+            edge:
+              analysis.absolute_edge,
+
             pick:
               analysis.pick,
 
             directional_pick:
               analysis.directional_pick,
 
-            confidence:
-              analysis.confidence,
+            grade:
+              analysis.grade,
 
-            confidence_type:
-              "RDG ranking score - not validated win probability",
+            grade_meaning:
+              analysis.grade === "A+"
+                ? "Exceptional RDG edge"
+                : analysis.grade === "A"
+                  ? "Strong RDG edge"
+                  : analysis.grade === "B+"
+                    ? "Good RDG edge"
+                    : analysis.grade === "B"
+                      ? "Moderate RDG edge"
+                      : "No qualifying RDG edge",
 
             market_no_vig_probability:
               analysis.market_no_vig_probability,
+
+            sportsbook_count:
+              analysis.sportsbook_count,
+
+            sportsbook_line_spread:
+              analysis.sportsbook_line_spread,
 
             projection_details:
               projection,
@@ -2601,34 +2946,32 @@ export async function GET() {
     }
 
     /* =====================================================
-       SORT PROPS
+       SORT RESULTS BY LETTER GRADE
     ===================================================== */
 
     props.sort(
       (a, b) => {
-        const aPass =
-          a.pick ===
-          "PASS";
-
-        const bPass =
-          b.pick ===
-          "PASS";
+        const gradeDifference =
+          gradeRank(
+            b.grade,
+          ) -
+          gradeRank(
+            a.grade,
+          );
 
         if (
-          aPass !== bPass
+          gradeDifference !== 0
         ) {
-          return aPass
-            ? 1
-            : -1;
+          return gradeDifference;
         }
 
         return (
           Number(
-            b.confidence ??
+            b.edge ??
             0,
           ) -
           Number(
-            a.confidence ??
+            a.edge ??
             0,
           )
         );
@@ -2636,29 +2979,51 @@ export async function GET() {
     );
 
     /*
-      No separate eligible YES/NO field.
+      Parlay pool:
 
-      The parlay builder simply receives every non-PASS play
-      ordered from highest confidence to lowest confidence.
+      A+, A, B+, and B are eligible.
+
+      PASS is excluded automatically.
+
+      There is no separate eligibility boolean.
     */
 
     const parlayPool =
       props
         .filter(
           (prop) =>
+            prop.grade !==
+              "PASS" &&
             prop.pick !==
-            "PASS",
+              "PASS",
         )
         .sort(
-          (a, b) =>
-            Number(
-              b.confidence ??
-              0,
-            ) -
-            Number(
-              a.confidence ??
-              0,
-            ),
+          (a, b) => {
+            const gradeDifference =
+              gradeRank(
+                b.grade,
+              ) -
+              gradeRank(
+                a.grade,
+              );
+
+            if (
+              gradeDifference !== 0
+            ) {
+              return gradeDifference;
+            }
+
+            return (
+              Number(
+                b.edge ??
+                0,
+              ) -
+              Number(
+                a.edge ??
+                0,
+              )
+            );
+          },
         );
 
     const usage =
@@ -2670,6 +3035,43 @@ export async function GET() {
         )
         ?.usage ??
       eventResult.usage;
+
+    const gradeCounts = {
+      "A+":
+        props.filter(
+          (prop) =>
+            prop.grade ===
+            "A+",
+        ).length,
+
+      A:
+        props.filter(
+          (prop) =>
+            prop.grade ===
+            "A",
+        ).length,
+
+      "B+":
+        props.filter(
+          (prop) =>
+            prop.grade ===
+            "B+",
+        ).length,
+
+      B:
+        props.filter(
+          (prop) =>
+            prop.grade ===
+            "B",
+        ).length,
+
+      PASS:
+        props.filter(
+          (prop) =>
+            prop.grade ===
+            "PASS",
+        ).length,
+    };
 
     return NextResponse.json(
       {
@@ -2701,12 +3103,45 @@ export async function GET() {
             CORE_MARKETS,
 
           workflow:
-            "Sportsbook line -> RDG projection -> edge -> OVER/UNDER/YES/PASS -> RDG confidence -> parlay pool",
+            "Sportsbook line -> RDG projection -> edge -> pick -> letter grade -> parlay pool",
+        },
+
+        grading_system: {
+          percentage_confidence_removed:
+            true,
+
+          public_grades: [
+            "A+",
+            "A",
+            "B+",
+            "B",
+            "PASS",
+          ],
+
+          meanings: {
+            "A+":
+              "Exceptional RDG edge",
+
+            A:
+              "Strong RDG edge",
+
+            "B+":
+              "Good RDG edge",
+
+            B:
+              "Moderate RDG edge",
+
+            PASS:
+              "No qualifying RDG edge",
+          },
+
+          disclaimer:
+            "RDG grades rank model evidence and are not win probabilities or guarantees.",
         },
 
         model_status: {
           passing_yards:
-            "Frozen RDG Passing V2",
+            "RDG Passing V2",
 
           rushing_yards:
             "RDG role-aware historical projection",
@@ -2721,10 +3156,10 @@ export async function GET() {
             "RDG historical projection",
 
           anytime_td:
-            "RDG historical scoring-rate projection",
+            "RDG conservative historical scoring model",
 
-          confidence:
-            "Ranking score only. Not a claimed historical win probability.",
+          grading:
+            "Letter-grade evidence ranking. No public confidence percentage.",
         },
 
         api_usage: {
@@ -2762,24 +3197,11 @@ export async function GET() {
         actionable_props:
           parlayPool.length,
 
-        pass_count:
-          props.filter(
-            (prop) =>
-              prop.pick ===
-              "PASS",
-          ).length,
-
-        /*
-          This is the list the parlay builder should eventually
-          consume.
-        */
+        grade_counts:
+          gradeCounts,
 
         parlay_pool:
           parlayPool,
-
-        /*
-          Full analysis including PASS results.
-        */
 
         props,
 
