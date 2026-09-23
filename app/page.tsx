@@ -1672,57 +1672,115 @@ const [cfbError, setCfbError] =
       </header>
 
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
-        <section className="relative mb-6 overflow-hidden rounded-2xl border border-white/10 bg-[radial-gradient(circle_at_78%_20%,rgba(30,64,175,0.22),transparent_34%),radial-gradient(circle_at_12%_15%,rgba(16,185,129,0.12),transparent_30%),linear-gradient(135deg,#07131d_0%,#071019_55%,#061018_100%)] px-6 py-8 shadow-[0_22px_60px_rgba(0,0,0,0.28)] sm:px-8 sm:py-10">
-          <div className="relative z-10 max-w-3xl">
-            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-emerald-400">RDG SPORTS ANALYTICS</p>
-            <h1 className="mt-3 text-4xl font-black tracking-tight text-white sm:text-5xl">Better data. Smarter parlays.</h1>
-            <p className="mt-3 max-w-2xl text-base text-slate-400 sm:text-lg">Explore RDG model picks, player props, current sportsbook lines, and automatically built parlays without digging through a wall of data.</p>
-          </div>
+        <section className="mb-7 overflow-hidden rounded-2xl border border-white/10 bg-[#071019] shadow-[0_22px_60px_rgba(0,0,0,0.28)]">
+          <div className="grid lg:grid-cols-[1.35fr_0.65fr]">
+            <div className="relative overflow-hidden border-b border-white/10 p-6 sm:p-8 lg:border-b-0 lg:border-r">
+              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_20%,rgba(16,185,129,0.14),transparent_32%),radial-gradient(circle_at_85%_10%,rgba(37,99,235,0.16),transparent_34%)]" />
+              <div className="relative z-10">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-emerald-300">RDG Today</span>
+                  <span className="text-xs font-semibold text-slate-500">Updated {lastUpdatedDisplay}</span>
+                </div>
 
-          <div className="relative z-10 mt-7 flex gap-2 overflow-x-auto pb-1">
-            {[
-              ["ALL", "All Sports"],
-              ["NFL", "NFL"],
-              ["CFB", "College Football"],
-              ["MLB", "MLB"],
-              ["NHL", "NHL"],
-              ["NBA", "NBA"],
-            ].map(([value, label]) => (
-              <button
-                key={value}
-                onClick={() => setActiveSport(value as "ALL" | "NFL" | "CFB" | "MLB" | "NHL" | "NBA")}
-                className={
-                  activeSport === value
-                    ? "whitespace-nowrap rounded-full border border-emerald-400 bg-emerald-400/15 px-5 py-2 text-xs font-black text-emerald-300"
-                    : "whitespace-nowrap rounded-full border border-white/15 bg-black/15 px-5 py-2 text-xs font-bold text-slate-300 transition hover:border-emerald-400/40 hover:text-white"
-                }
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+                {(() => {
+                  const topProp = (nflPlayerProps?.parlay_pool || [])
+                    .filter((prop) => prop.pick !== "PASS" && prop.grade !== "PASS")
+                    .sort((a, b) => {
+                      const ranks: Record<string, number> = { "A+": 5, A: 4, "B+": 3, B: 2, PASS: 0 };
+                      const rankDiff = (ranks[b.grade] || 0) - (ranks[a.grade] || 0);
+                      if (rankDiff !== 0) return rankDiff;
+                      return Math.abs(b.edge || 0) - Math.abs(a.edge || 0);
+                    })[0];
 
-          <div className="relative z-10 mt-7 grid gap-3 sm:grid-cols-3">
-            <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-              <p className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-500">NFL Props</p>
-              <p className="mt-1 text-xl font-black text-white">{nflPlayerProps?.actionable_props ?? "—"}</p>
-              <p className="mt-1 text-[10px] text-slate-500">Current qualifying plays</p>
+                  if (!topProp) {
+                    return (
+                      <div className="py-10">
+                        <p className="text-sm font-bold text-slate-400">TOP RDG PLAY</p>
+                        <h1 className="mt-3 text-3xl font-black text-white sm:text-4xl">Scanning today&apos;s board...</h1>
+                        <p className="mt-3 text-sm text-slate-400">RDG is waiting for qualifying sportsbook lines and model edges.</p>
+                      </div>
+                    );
+                  }
+
+                  const lineText = topProp.sportsbook_line !== null ? ` ${topProp.sportsbook_line}` : "";
+                  const unit = topProp.provider_market.includes("yds") ? " yds" : topProp.provider_market === "player_receptions" ? " rec" : topProp.provider_market === "player_pass_tds" ? " TD" : "";
+
+                  return (
+                    <div className="mt-6">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <span className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">Top RDG Play</span>
+                        <span className="rounded-lg border border-emerald-400/40 bg-emerald-400/10 px-2.5 py-1 text-sm font-black text-emerald-300">{topProp.grade}</span>
+                        <span className="text-xs font-bold text-slate-500">{topProp.market}</span>
+                      </div>
+
+                      <h1 className="mt-4 text-3xl font-black tracking-tight text-white sm:text-5xl">{topProp.player_name}</h1>
+                      <p className="mt-2 text-xl font-black text-emerald-300 sm:text-2xl">{topProp.pick}{lineText} {topProp.market}</p>
+                      <p className="mt-2 text-sm font-semibold text-slate-400">{topProp.matchup.away} @ {topProp.matchup.home}</p>
+
+                      <div className="mt-6 grid max-w-2xl grid-cols-2 gap-3 sm:grid-cols-4">
+                        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                          <p className="text-[9px] font-black uppercase tracking-[0.15em] text-slate-500">RDG Projection</p>
+                          <p className="mt-1 text-lg font-black text-white">{Number(topProp.rdg_projection).toFixed(1)}{unit}</p>
+                        </div>
+                        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                          <p className="text-[9px] font-black uppercase tracking-[0.15em] text-slate-500">Model Edge</p>
+                          <p className="mt-1 text-lg font-black text-emerald-300">{Math.abs(topProp.edge || 0).toFixed(1)}{unit}</p>
+                        </div>
+                        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                          <p className="text-[9px] font-black uppercase tracking-[0.15em] text-slate-500">Sportsbooks</p>
+                          <p className="mt-1 text-lg font-black text-white">{topProp.sportsbook_count || 0}</p>
+                        </div>
+                        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                          <p className="text-[9px] font-black uppercase tracking-[0.15em] text-slate-500">Role Check</p>
+                          <p className="mt-1 text-lg font-black text-white">{topProp.role_change_protection?.severity || "CLEAR"}</p>
+                        </div>
+                      </div>
+
+                      <div className="mt-6 flex flex-wrap gap-3">
+                        <button onClick={() => document.getElementById("rdg-picks")?.scrollIntoView({ behavior: "smooth" })} className="rounded-xl bg-emerald-400 px-5 py-3 text-sm font-black text-[#04110c] transition hover:bg-emerald-300">View Today&apos;s Picks →</button>
+                        <button onClick={() => setActiveSport("NFL")} className="rounded-xl border border-white/15 bg-white/[0.03] px-5 py-3 text-sm font-bold text-white transition hover:border-emerald-400/40">Explore NFL</button>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
             </div>
-            <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-              <p className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-500">NFL Games</p>
-              <p className="mt-1 text-xl font-black text-white">{nfl?.games_found ?? "—"}</p>
-              <p className="mt-1 text-[10px] text-slate-500">Current board</p>
-            </div>
-            <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/[0.06] px-4 py-3">
-              <p className="text-[9px] font-black uppercase tracking-[0.18em] text-emerald-400">Elite A+ Props</p>
-              <p className="mt-1 text-xl font-black text-white">{nflPlayerProps?.grade_counts?.["A+"] ?? "—"}</p>
-              <p className="mt-1 text-[10px] text-slate-500">V6.3 elite grade</p>
+
+            <div className="p-6 sm:p-8">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-400">Live Board</p>
+                  <h2 className="mt-1 text-xl font-black text-white">What RDG sees now</h2>
+                </div>
+                <span className="relative flex h-3 w-3"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-40"></span><span className="relative inline-flex h-3 w-3 rounded-full bg-emerald-400"></span></span>
+              </div>
+
+              <div className="mt-5 space-y-3">
+                <button onClick={() => setActiveSport("NFL")} className="flex w-full items-center justify-between rounded-xl border border-white/10 bg-white/[0.025] p-4 text-left transition hover:border-emerald-400/30 hover:bg-emerald-400/[0.04]">
+                  <div><p className="text-xs font-black text-white">NFL Player Props</p><p className="mt-1 text-[10px] text-slate-500">Qualifying V6.3 plays</p></div>
+                  <div className="text-right"><p className="text-2xl font-black text-white">{nflPlayerProps?.actionable_props ?? "—"}</p><p className="text-[10px] font-bold text-emerald-400">{nflPlayerProps?.grade_counts?.["A+"] ?? 0} A+</p></div>
+                </button>
+
+                <button onClick={() => setActiveSport("NFL")} className="flex w-full items-center justify-between rounded-xl border border-white/10 bg-white/[0.025] p-4 text-left transition hover:border-emerald-400/30 hover:bg-emerald-400/[0.04]">
+                  <div><p className="text-xs font-black text-white">NFL Game Board</p><p className="mt-1 text-[10px] text-slate-500">Current games analyzed</p></div>
+                  <p className="text-2xl font-black text-white">{nfl?.games_found ?? "—"}</p>
+                </button>
+
+                <div className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
+                  <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Browse by sport</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {[["ALL","All"],["NFL","NFL"],["CFB","CFB"],["MLB","MLB"],["NHL","NHL"]].map(([value,label]) => (
+                      <button key={value} onClick={() => setActiveSport(value as "ALL" | "NFL" | "CFB" | "MLB" | "NHL" | "NBA")} className={activeSport === value ? "rounded-lg bg-emerald-400 px-3 py-2 text-[11px] font-black text-[#04110c]" : "rounded-lg border border-white/10 px-3 py-2 text-[11px] font-bold text-slate-300 transition hover:border-emerald-400/40 hover:text-white"}>{label}</button>
+                    ))}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </section>
 
         {activeSport === "ALL" && (
-          <section className="mb-10">
+          <section id="rdg-picks" className="mb-10">
             <div className="overflow-hidden rounded-2xl border border-amber-400/25 bg-[radial-gradient(circle_at_top_left,rgba(251,191,36,0.10),transparent_34%),linear-gradient(135deg,rgba(16,185,129,0.05),rgba(255,255,255,0.015))] p-6 shadow-[0_18px_55px_rgba(0,0,0,0.24)] sm:p-8">
               <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
                 <div>
