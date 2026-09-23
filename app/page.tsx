@@ -430,7 +430,7 @@ export default function Home() {
   const [nflPassingPropsError, setNflPassingPropsError] =
     useState("");
 const [activeSport, setActiveSport] =
-  useState<"ALL" | "NFL" | "CFB" | "MLB" | "NHL">("NFL");
+  useState<"ALL" | "NFL" | "CFB" | "MLB" | "NHL" | "NBA">("NFL");
 
 const [cfb, setCfb] =
   useState<CFBAnalysis | null>(null);
@@ -1403,6 +1403,13 @@ const [cfbError, setCfbError] =
   >
     NHL
   </button>
+
+  <button
+    onClick={() => setActiveSport("NBA")}
+    className={activeSport === "NBA" ? "whitespace-nowrap rounded-xl border border-emerald-300/50 bg-emerald-400 px-6 py-3 text-sm font-black text-black shadow-[0_0_22px_rgba(52,211,153,0.18)]" : "whitespace-nowrap rounded-xl border border-white/10 bg-white/[0.035] px-6 py-3 text-sm font-bold text-slate-300 transition hover:border-emerald-500/30 hover:bg-emerald-500/[0.06] hover:text-white"}
+  >
+    NBA
+  </button>
 </div>
 
         {activeSport === "ALL" && (
@@ -1568,6 +1575,26 @@ const [cfbError, setCfbError] =
             </div>
           </div>
         )}
+        {activeSport === "NBA" && (
+          <section className="mb-10 overflow-hidden rounded-2xl border border-emerald-500/20 bg-[linear-gradient(135deg,rgba(16,185,129,0.07),rgba(255,255,255,0.015))] p-6 shadow-[0_18px_55px_rgba(0,0,0,0.22)] sm:p-8">
+            <span className="inline-flex rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-emerald-300">
+              RDG NBA MODEL
+            </span>
+            <h2 className="mt-4 text-3xl font-black tracking-tight text-white">
+              NBA Command Center
+            </h2>
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400">
+              NBA moneylines, spreads, totals, and player props will be added here as the RDG NBA models and odds pipeline are built and validated.
+            </p>
+            <div className="mt-6 rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-5">
+              <p className="text-sm font-black text-amber-300">NBA MODEL BUILD IN PROGRESS</p>
+              <p className="mt-2 text-xs leading-5 text-slate-400">
+                NBA selections will not enter Best Parlays Across All Sports until the underlying markets have been tested and meet RDG qualification standards.
+              </p>
+            </div>
+          </section>
+        )}
+
         {activeSport === "MLB" && (
           <MLBSection mlb={mlb} loading={mlbLoading} error={mlbError} />
         )}
