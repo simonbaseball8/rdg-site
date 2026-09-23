@@ -1642,101 +1642,84 @@ const [cfbError, setCfbError] =
   const crossSportFive = buildCrossSportParlay(5, 3);
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_50%_18%,rgba(16,185,129,0.07),transparent_28%),linear-gradient(180deg,#020a07_0%,#020806_42%,#010403_100%)] text-white">
-      <header className="border-b border-emerald-500/20 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.16),transparent_38%),linear-gradient(180deg,#03110c_0%,#020806_100%)]">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-5 px-4 py-3 sm:px-6 sm:py-4">
-          <div className="flex min-w-0 items-center gap-5">
-            <div className="relative flex shrink-0 items-center justify-center">
-              <div className="pointer-events-none absolute h-24 w-40 rounded-full bg-emerald-500/15 blur-3xl sm:h-28 sm:w-52" />
-              <img
-                src="/rdg-logo.png"
-                alt="Responsible Degenerate Gambling"
-                className="relative h-20 w-auto max-w-[260px] object-contain drop-shadow-[0_0_14px_rgba(34,197,94,0.18)] sm:h-28 sm:max-w-[390px] lg:h-32 lg:max-w-[440px]"
-              />
-            </div>
-
-            <div className="hidden border-l border-white/10 pl-5 md:block">
-              <p className="text-3xl font-black italic uppercase tracking-tight text-white lg:text-4xl">
-                RDG <span className="text-emerald-400">SPORTS</span>
-              </p>
-              <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400 lg:text-xs">
-                Data-Driven Betting Dashboard
-              </p>
+    <main className="min-h-screen bg-[#050b10] text-white">
+      <header className="sticky top-0 z-40 border-b border-white/10 bg-[#071019]/95 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-5 px-4 py-3 sm:px-6">
+          <div className="flex items-center gap-3">
+            <img
+              src="/rdg-logo.png"
+              alt="Responsible Degenerate Gambling"
+              className="h-11 w-auto object-contain sm:h-12"
+            />
+            <div className="hidden border-l border-white/10 pl-3 sm:block">
+              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">Responsible</p>
+              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">Degenerate Gambling</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-4">
-            <div className="hidden rounded-xl border border-white/10 bg-black/20 px-5 py-3 text-right lg:block">
-              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">
-                Responsible Betting
-              </p>
-              <p className="mt-1 text-xs font-bold text-white">
-                Data • Discipline • Tracking
-              </p>
-            </div>
-            <div className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[11px] font-black uppercase tracking-wider text-emerald-400">
-              ● LIVE
-            </div>
+          <div className="hidden items-center gap-7 text-sm font-semibold text-slate-400 md:flex">
+            <button onClick={() => setActiveSport("ALL")} className={activeSport === "ALL" ? "text-emerald-400" : "transition hover:text-white"}>Home</button>
+            <button onClick={() => setActiveSport("NFL")} className={activeSport === "NFL" ? "text-emerald-400" : "transition hover:text-white"}>NFL</button>
+            <button onClick={() => setActiveSport("CFB")} className={activeSport === "CFB" ? "text-emerald-400" : "transition hover:text-white"}>College Football</button>
+            <button onClick={() => setActiveSport("MLB")} className={activeSport === "MLB" ? "text-emerald-400" : "transition hover:text-white"}>MLB</button>
+            <button onClick={() => setActiveSport("NHL")} className={activeSport === "NHL" ? "text-emerald-400" : "transition hover:text-white"}>NHL</button>
+          </div>
+
+          <div className="rounded-lg border border-emerald-400/70 px-4 py-2 text-xs font-black text-white shadow-[0_0_20px_rgba(52,211,153,0.08)]">
+            RDG LIVE
           </div>
         </div>
       </header>
 
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
-        <div className="sticky top-0 z-30 -mx-4 mb-8 flex gap-2 overflow-x-auto border-y border-emerald-500/15 bg-[#020806]/95 px-4 py-4 shadow-[0_12px_30px_rgba(0,0,0,0.25)] backdrop-blur sm:-mx-6 sm:px-6">
-  <button
-    onClick={() => setActiveSport("ALL")}
-    className={
-      activeSport === "ALL"
-        ? "whitespace-nowrap rounded-xl border border-amber-300/60 bg-amber-400 px-6 py-3 text-sm font-black text-black shadow-[0_0_22px_rgba(251,191,36,0.22)]"
-        : "whitespace-nowrap rounded-xl border border-amber-400/25 bg-amber-400/[0.06] px-6 py-3 text-sm font-black text-amber-300 transition hover:border-amber-300/50 hover:bg-amber-400/[0.12] hover:text-amber-200"
-    }
-  >
-    🏆 BEST PARLAYS ACROSS ALL SPORTS
-  </button>
+        <section className="relative mb-6 overflow-hidden rounded-2xl border border-white/10 bg-[radial-gradient(circle_at_78%_20%,rgba(30,64,175,0.22),transparent_34%),radial-gradient(circle_at_12%_15%,rgba(16,185,129,0.12),transparent_30%),linear-gradient(135deg,#07131d_0%,#071019_55%,#061018_100%)] px-6 py-8 shadow-[0_22px_60px_rgba(0,0,0,0.28)] sm:px-8 sm:py-10">
+          <div className="relative z-10 max-w-3xl">
+            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-emerald-400">RDG SPORTS ANALYTICS</p>
+            <h1 className="mt-3 text-4xl font-black tracking-tight text-white sm:text-5xl">Better data. Smarter parlays.</h1>
+            <p className="mt-3 max-w-2xl text-base text-slate-400 sm:text-lg">Explore RDG model picks, player props, current sportsbook lines, and automatically built parlays without digging through a wall of data.</p>
+          </div>
 
-  <button
-    onClick={() => setActiveSport("NFL")}
-    className={
-      activeSport === "NFL"
-        ? "rounded-xl border border-emerald-300/50 bg-emerald-400 px-6 py-3 text-sm font-black text-black shadow-[0_0_22px_rgba(52,211,153,0.18)]"
-        : "rounded-xl border border-white/10 bg-white/[0.035] px-6 py-3 text-sm font-bold text-slate-300 transition hover:border-emerald-500/30 hover:bg-emerald-500/[0.06] hover:text-white"
-    }
-  >
-    NFL
-  </button>
+          <div className="relative z-10 mt-7 flex gap-2 overflow-x-auto pb-1">
+            {[
+              ["ALL", "All Sports"],
+              ["NFL", "NFL"],
+              ["CFB", "College Football"],
+              ["MLB", "MLB"],
+              ["NHL", "NHL"],
+              ["NBA", "NBA"],
+            ].map(([value, label]) => (
+              <button
+                key={value}
+                onClick={() => setActiveSport(value as "ALL" | "NFL" | "CFB" | "MLB" | "NHL" | "NBA")}
+                className={
+                  activeSport === value
+                    ? "whitespace-nowrap rounded-full border border-emerald-400 bg-emerald-400/15 px-5 py-2 text-xs font-black text-emerald-300"
+                    : "whitespace-nowrap rounded-full border border-white/15 bg-black/15 px-5 py-2 text-xs font-bold text-slate-300 transition hover:border-emerald-400/40 hover:text-white"
+                }
+              >
+                {label}
+              </button>
+            ))}
+          </div>
 
-  <button
-    onClick={() => setActiveSport("CFB")}
-    className={
-      activeSport === "CFB"
-        ? "rounded-xl border border-emerald-300/50 bg-emerald-400 px-6 py-3 text-sm font-black text-black shadow-[0_0_22px_rgba(52,211,153,0.18)]"
-        : "rounded-xl border border-white/10 bg-white/[0.035] px-6 py-3 text-sm font-bold text-slate-300 transition hover:border-emerald-500/30 hover:bg-emerald-500/[0.06] hover:text-white"
-    }
-  >
-    COLLEGE FOOTBALL
-  </button>
-
-  <button
-    onClick={() => setActiveSport("MLB")}
-    className={activeSport === "MLB" ? "rounded-xl border border-emerald-300/50 bg-emerald-400 px-6 py-3 text-sm font-black text-black shadow-[0_0_22px_rgba(52,211,153,0.18)]" : "rounded-xl border border-white/10 bg-white/[0.035] px-6 py-3 text-sm font-bold text-slate-300 transition hover:border-emerald-500/30 hover:bg-emerald-500/[0.06] hover:text-white"}
-  >
-    MLB
-  </button>
-
-  <button
-    onClick={() => setActiveSport("NHL")}
-    className={activeSport === "NHL" ? "rounded-xl border border-emerald-300/50 bg-emerald-400 px-6 py-3 text-sm font-black text-black shadow-[0_0_22px_rgba(52,211,153,0.18)]" : "rounded-xl border border-white/10 bg-white/[0.035] px-6 py-3 text-sm font-bold text-slate-300 transition hover:border-emerald-500/30 hover:bg-emerald-500/[0.06] hover:text-white"}
-  >
-    NHL
-  </button>
-
-  <button
-    onClick={() => setActiveSport("NBA")}
-    className={activeSport === "NBA" ? "whitespace-nowrap rounded-xl border border-emerald-300/50 bg-emerald-400 px-6 py-3 text-sm font-black text-black shadow-[0_0_22px_rgba(52,211,153,0.18)]" : "whitespace-nowrap rounded-xl border border-white/10 bg-white/[0.035] px-6 py-3 text-sm font-bold text-slate-300 transition hover:border-emerald-500/30 hover:bg-emerald-500/[0.06] hover:text-white"}
-  >
-    NBA
-  </button>
-</div>
+          <div className="relative z-10 mt-7 grid gap-3 sm:grid-cols-3">
+            <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
+              <p className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-500">NFL Props</p>
+              <p className="mt-1 text-xl font-black text-white">{nflPlayerProps?.actionable_props ?? "—"}</p>
+              <p className="mt-1 text-[10px] text-slate-500">Current qualifying plays</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
+              <p className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-500">NFL Games</p>
+              <p className="mt-1 text-xl font-black text-white">{nfl?.games_found ?? "—"}</p>
+              <p className="mt-1 text-[10px] text-slate-500">Current board</p>
+            </div>
+            <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/[0.06] px-4 py-3">
+              <p className="text-[9px] font-black uppercase tracking-[0.18em] text-emerald-400">Elite A+ Props</p>
+              <p className="mt-1 text-xl font-black text-white">{nflPlayerProps?.grade_counts?.["A+"] ?? "—"}</p>
+              <p className="mt-1 text-[10px] text-slate-500">V6.3 elite grade</p>
+            </div>
+          </div>
+        </section>
 
         {activeSport === "ALL" && (
           <section className="mb-10">
