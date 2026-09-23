@@ -1592,6 +1592,45 @@ const [cfbError, setCfbError] =
                 NBA selections will not enter Best Parlays Across All Sports until the underlying markets have been tested and meet RDG qualification standards.
               </p>
             </div>
+
+            <div className="mt-8">
+              <p className="text-xs font-black uppercase tracking-[0.20em] text-emerald-400">
+                NBA TEAMS
+              </p>
+              <h3 className="mt-2 text-2xl font-black text-white">All 30 Teams</h3>
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+                {[
+                  ["ATL", "Atlanta Hawks"], ["BOS", "Boston Celtics"], ["BKN", "Brooklyn Nets"],
+                  ["CHA", "Charlotte Hornets"], ["CHI", "Chicago Bulls"], ["CLE", "Cleveland Cavaliers"],
+                  ["DAL", "Dallas Mavericks"], ["DEN", "Denver Nuggets"], ["DET", "Detroit Pistons"],
+                  ["GS", "Golden State Warriors"], ["HOU", "Houston Rockets"], ["IND", "Indiana Pacers"],
+                  ["LAC", "LA Clippers"], ["LAL", "Los Angeles Lakers"], ["MEM", "Memphis Grizzlies"],
+                  ["MIA", "Miami Heat"], ["MIL", "Milwaukee Bucks"], ["MIN", "Minnesota Timberwolves"],
+                  ["NO", "New Orleans Pelicans"], ["NY", "New York Knicks"], ["OKC", "Oklahoma City Thunder"],
+                  ["ORL", "Orlando Magic"], ["PHI", "Philadelphia 76ers"], ["PHX", "Phoenix Suns"],
+                  ["POR", "Portland Trail Blazers"], ["SAC", "Sacramento Kings"], ["SA", "San Antonio Spurs"],
+                  ["TOR", "Toronto Raptors"], ["UTA", "Utah Jazz"], ["WSH", "Washington Wizards"],
+                ].map(([code, team]) => (
+                  <div
+                    key={team}
+                    className="flex items-center gap-3 rounded-xl border border-white/10 bg-black/20 p-3"
+                  >
+                    <img
+                      src={`https://a.espncdn.com/i/teamlogos/nba/500/${code.toLowerCase()}.png`}
+                      alt={`${team} logo`}
+                      className="h-10 w-10 shrink-0 object-contain"
+                      loading="lazy"
+                      onError={(event) => { event.currentTarget.style.display = "none"; }}
+                    />
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-black text-white">{team}</p>
+                      <p className="mt-0.5 text-[10px] font-bold text-slate-500">{code}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </section>
         )}
 
