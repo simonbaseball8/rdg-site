@@ -383,7 +383,9 @@ export async function GET(request: Request) {
       lastUsage = r.usage;
       const events = Array.isArray(r.data?.data) ? r.data.data : [];
       for (const e of events) {
-        if (String(e.commence_time || "").startsWith("2025-09-")) {
+        const commenceMs = new Date(String(e.commence_time || "")).getTime();
+        const weekEndMs = new Date(window.end).getTime();
+        if (Number.isFinite(commenceMs) && commenceMs >= weekStartMs && commenceMs <= weekEndMs) {
           eventsById.set(e.id, e);
         }
       }
@@ -502,7 +504,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       success:true,
-      version:"2.2-rushing-v5-historical-sportsbook-week-runner",
+      version:"2.3-rushing-v5-historical-sportsbook-week-runner",
       purpose:"Verify frozen Rushing V5 against real pregame 2025 historical player_rush_yds lines before running a full-season sportsbook backtest.",
       model:"Frozen 5.0-rushing-v5-direct-yards",
       test_scope:{season:TEST_SEASON,week:TEST_WEEK,snapshot_minutes_before_kickoff:SNAPSHOT_MINUTES_BEFORE_KICKOFF,market:MARKET,region:"us"},
@@ -515,6 +517,6 @@ export async function GET(request: Request) {
       bets:results
     });
   } catch (error:any) {
-    return NextResponse.json({success:false,version:"2.2-rushing-v5-historical-sportsbook-week-runner",error:error?.message||String(error)},{status:500});
+    return NextResponse.json({success:false,version:"2.3-rushing-v5-historical-sportsbook-week-runner",error:error?.message||String(error)},{status:500});
   }
 }
