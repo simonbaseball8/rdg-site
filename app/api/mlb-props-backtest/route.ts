@@ -65,9 +65,7 @@ function dateOnly(iso: string) {
 }
 
 function isoHoursBefore(iso: string, hours: number) {
-  return new Date(
-    new Date(iso).getTime() - hours * 60 * 60 * 1000
-  )
+  return new Date(new Date(iso).getTime() - hours * 60 * 60 * 1000)
     .toISOString()
     .replace(".000Z", "Z");
 }
@@ -428,30 +426,47 @@ export async function GET(request: Request) {
 
     // Default historical anchor. You can override:
     // /api/mlb-props-backtest?date=2026-09-14&games=10
-    const targetDate = searchParams.get("date") ?? "2026-09-14";
-    const noonSnapshot = `${targetDate}T12:00:00Z`;
+    const datesParam = searchParams.get("dates");
+    const singleDate = searchParams.get("date");
+    const targetDates = datesParam
+      ? datesParam.split(",").map((d) => d.trim()).filter(Boolean).slice(0, 10)
+      : singleDate
+        ? [singleDate]
+        : ["2026-09-08", "2026-09-10", "2026-09-12", "2026-09-14"];
 
-    const eventLookup = await getHistoricalEvents(apiKey, noonSnapshot);
+    const historicalEventUsage: any[] = [];
+    const allEvents: HistoricalEvent[] = [];
 
-    const allEvents: HistoricalEvent[] = (eventLookup.data?.data ?? [])
-      .map((event: any) => ({
-        id: String(event.id),
-        commence_time: String(event.commence_time),
-        home_team: String(event.home_team),
-        away_team: String(event.away_team),
-      }))
-      .filter(
-        (event: HistoricalEvent) =>
-          event.id &&
-          event.commence_time &&
-          dateOnly(event.commence_time) === targetDate
-      )
-      .sort(
-        (a: HistoricalEvent, b: HistoricalEvent) =>
-          new Date(a.commence_time).getTime() -
-          new Date(b.commence_time).getTime()
-      )
-      .slice(0, requestedGames);
+    for (const targetDate of targetDates) {
+      const noonSnapshot = `${targetDate}T12:00:00Z`;
+      const eventLookup = await getHistoricalEvents(apiKey, noonSnapshot);
+      historicalEventUsage.push({
+        dates: targetDates,
+        usage: eventLookup.usage,
+      });
+
+      const dateEvents: HistoricalEvent[] = (eventLookup.data?.data ?? [])
+        .map((event: any) => ({
+          id: String(event.id),
+          commence_time: String(event.commence_time),
+          home_team: String(event.home_team),
+          away_team: String(event.away_team),
+        }))
+        .filter(
+          (event: HistoricalEvent) =>
+            event.id &&
+            event.commence_time &&
+            dateOnly(event.commence_time) === targetDate
+        )
+        .sort(
+          (a: HistoricalEvent, b: HistoricalEvent) =>
+            new Date(a.commence_time).getTime() -
+            new Date(b.commence_time).getTime()
+        )
+        .slice(0, requestedGames);
+
+      allEvents.push(...dateEvents);
+    }
 
     const playersByName = await getMlbPlayers();
 
@@ -538,6 +553,11 @@ export async function GET(request: Request) {
             ) {
               completeBooks.add(q.sportsbook_key);
             }
+          }
+
+          // V1.1: Do not score one-sided alternate lines.
+          if (completeBooks.size === 0) {
+            continue;
           }
 
           const rawDifference =
@@ -646,10 +666,10 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       success: true,
-      version: "1.0-rdg-mlb-props-historical-backtest",
+      version: "1.1-rdg-mlb-props-multidate-backtest",
       sport: "MLB",
       season: SEASON,
-      date: targetDate,
+      dates: targetDates,
       leakage_protection: {
         historical_odds_snapshot_before_game: true,
         snapshot_offset_minutes: 90,
@@ -674,12 +694,14 @@ export async function GET(request: Request) {
         },
         grading_enabled: false,
         purpose:
-          "Validate V1 before creating A+/A/B+/B grades.",
+          "Validate V1 across multiple dates using only two-sided sportsbook markets before creating A+/A/B+/B grades.",
       },
       sample: {
-        requested_games: requestedGames,
+        requested_games_per_date: requestedGames,
+        requested_dates: targetDates.length,
         historical_events_found: allEvents.length,
         rows_scored: rows.length,
+        two_sided_market_required: true,
       },
       summary: {
         overall: summarize(rows),
@@ -697,7 +719,7 @@ export async function GET(request: Request) {
         by_edge: summarizeEdges(rows),
       },
       odds_api_usage: {
-        historical_events_request: eventLookup.usage,
+        historical_events_requests: historicalEventUsage,
         historical_prop_requests: eventUsage,
       },
       errors,
