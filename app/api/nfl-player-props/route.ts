@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 900;
 export const maxDuration = 60;
 
-const VERSION = "6.1-rdg-letter-grade-player-props";
+const VERSION = "6.1.1-rdg-letter-grade-player-props";
 const CACHE_SECONDS = 900;
 
 const CURRENT_SEASON = 2026;
@@ -1145,14 +1145,6 @@ function projectAnytimeTD(
     recentScored /
     recent.length;
 
-  /*
-    TDs are extremely volatile.
-
-    We deliberately shrink historical scoring rates toward
-    a conservative baseline instead of treating raw TD rate
-    as a true probability.
-  */
-
   const baseline =
     0.20;
 
@@ -1983,16 +1975,6 @@ function analyzeOverUnder(
       1.5,
     );
 
-  /*
-    Internal score components:
-
-    1. Projection edge = biggest factor
-    2. Sample size
-    3. Number of sportsbooks
-    4. Sportsbook line agreement
-    5. Market price agreement
-  */
-
   let score = 35;
 
   score +=
@@ -2070,9 +2052,6 @@ function analyzeOverUnder(
 
   /*
     A+ should be difficult to reach.
-
-    Require a materially large projection edge,
-    sufficient history, and multiple sportsbooks.
   */
 
   const exceptionalEdge =
@@ -2105,8 +2084,7 @@ function analyzeOverUnder(
   }
 
   /*
-    If the market itself strongly disagrees with our
-    direction, prevent an A grade.
+    Market disagreement protection.
   */
 
   if (
@@ -2121,7 +2099,7 @@ function analyzeOverUnder(
   }
 
   /*
-    Low-history projections cannot receive top grades.
+    Low history cannot receive top grades.
   */
 
   if (
@@ -2202,22 +2180,23 @@ function analyzeAnytimeTD(
           value !== null,
       );
 
-  const marketImplied =
-    impliedValues.length
-      ? (
-          impliedValues.reduce(
-            (
-              sum,
-              value,
-            ) =>
-              sum +
-              value,
-            0,
-          ) /
-          impliedValues.length
-        ) *
-        100
-      : null;
+  const marketImplied:
+    number | null =
+      impliedValues.length
+        ? (
+            impliedValues.reduce(
+              (
+                sum,
+                value,
+              ) =>
+                sum +
+                value,
+              0,
+            ) /
+            impliedValues.length
+          ) *
+          100
+        : null;
 
   const rdgEstimate =
     Number(
@@ -2249,14 +2228,15 @@ function analyzeAnytimeTD(
   /*
     TD props are high variance.
 
-    Therefore they need:
+    Require:
     - at least 8 historical games
     - at least 3 sportsbooks
-    - positive model-vs-market edge
-    - stronger thresholds than yardage props
+    - valid market implied probability
+    - valid model edge
   */
 
   if (
+    marketImplied === null ||
     tdEdge === null ||
     historyCount < 8 ||
     sportsbooks < 3
@@ -2313,34 +2293,32 @@ function analyzeAnytimeTD(
     ) * 10;
 
   /*
-    Require a meaningful edge.
+    Require meaningful TD edge.
   */
 
-  if (tdEdge < 5) {
+  if (
+    tdEdge < 5
+  ) {
     score = 0;
   }
 
   /*
-    Market implied probability matters.
-
-    Very long-shot TD props should not receive
-    elite grades simply because historical TD rate
-    was high.
+    FIX:
+    Explicit null checks are retained here so TypeScript
+    never treats marketImplied as possibly null.
   */
 
   if (
+    marketImplied !== null &&
     marketImplied < 15
   ) {
     score -= 12;
   } else if (
+    marketImplied !== null &&
     marketImplied < 20
   ) {
     score -= 7;
   }
-
-  /*
-    Prevent extremely aggressive TD grades.
-  */
 
   let grade =
     gradeFromScore(
@@ -2348,9 +2326,7 @@ function analyzeAnytimeTD(
     );
 
   /*
-    TD props cannot receive A+ yet because this
-    model has not been validated strongly enough
-    for that classification.
+    Anytime TD cannot receive A+ yet.
   */
 
   if (
@@ -2360,8 +2336,8 @@ function analyzeAnytimeTD(
   }
 
   /*
-    Require at least a 10 percentage-point model
-    edge for A.
+    Require at least 10 percentage points
+    of model edge for an A.
   */
 
   if (
@@ -2981,11 +2957,10 @@ export async function GET() {
     /*
       Parlay pool:
 
-      A+, A, B+, and B are eligible.
+      A+, A, B+, and B are included.
+      PASS is automatically excluded.
 
-      PASS is excluded automatically.
-
-      There is no separate eligibility boolean.
+      No separate eligibility boolean.
     */
 
     const parlayPool =
