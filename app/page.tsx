@@ -1819,35 +1819,57 @@ const [cfbError, setCfbError] =
                       </div>
 
                       <div className="mt-6 space-y-3">
-                        {selections.map((pick, index) => (
-                          <div key={pick.id} className="rounded-xl border border-white/10 bg-black/25 p-4">
-                            <div className="flex items-center justify-between gap-3">
-                              <span className="rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-black text-emerald-300">
-                                {pick.sport}
-                              </span>
-                              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                                LEG {index + 1}
-                              </span>
+                        {selections.map((pick, index) => {
+                          const [awayTeamRaw, homeTeamRaw] = pick.matchup.split(" @ ");
+                          const awayTeam = (awayTeamRaw || "").trim();
+                          const homeTeam = (homeTeamRaw || "").trim();
+
+                          return (
+                            <div key={pick.id} className="rounded-xl border border-white/10 bg-black/25 p-4">
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="flex items-center gap-2">
+                                  {awayTeam && (
+                                    <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04]">
+                                      <TeamLogo sport={pick.sport} team={awayTeam} />
+                                    </div>
+                                  )}
+                                  {homeTeam && (
+                                    <div className="-ml-1 flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04]">
+                                      <TeamLogo sport={pick.sport} team={homeTeam} />
+                                    </div>
+                                  )}
+                                  <span className="ml-1 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-black text-emerald-300">
+                                    {pick.sport}
+                                  </span>
+                                </div>
+                                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                                  LEG {index + 1}
+                                </span>
+                              </div>
+
+                              <div className="mt-3">
+                                <p className="text-lg font-black text-white">{pick.display_bet}</p>
+                                <p className="mt-1 text-xs text-slate-500">{pick.matchup}</p>
+                              </div>
+
+                              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+                                <span className="text-slate-400">{pick.detail}</span>
+                                <span className="font-bold text-emerald-400">
+                                  {pick.odds ? `${Number(pick.odds) > 0 ? "+" : ""}${pick.odds}` : "Odds —"}
+                                </span>
+                              </div>
+                              <p className="mt-2 text-[10px] uppercase tracking-wider text-slate-600">
+                                {new Intl.DateTimeFormat("en-US", {
+                                  weekday: "short",
+                                  month: "short",
+                                  day: "numeric",
+                                  hour: "numeric",
+                                  minute: "2-digit",
+                                }).format(new Date(pick.start_time))}
+                              </p>
                             </div>
-                            <p className="mt-3 text-lg font-black text-white">{pick.display_bet}</p>
-                            <p className="mt-1 text-xs text-slate-500">{pick.matchup}</p>
-                            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs">
-                              <span className="text-slate-400">{pick.detail}</span>
-                              <span className="font-bold text-emerald-400">
-                                {pick.odds ? `${Number(pick.odds) > 0 ? "+" : ""}${pick.odds}` : "Odds —"}
-                              </span>
-                            </div>
-                            <p className="mt-2 text-[10px] uppercase tracking-wider text-slate-600">
-                              {new Intl.DateTimeFormat("en-US", {
-                                weekday: "short",
-                                month: "short",
-                                day: "numeric",
-                                hour: "numeric",
-                                minute: "2-digit",
-                              }).format(new Date(pick.start_time))}
-                            </p>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </article>
                   );
