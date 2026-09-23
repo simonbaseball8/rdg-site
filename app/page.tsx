@@ -430,7 +430,7 @@ export default function Home() {
   const [nflPassingPropsError, setNflPassingPropsError] =
     useState("");
 const [activeSport, setActiveSport] =
-  useState<"NFL" | "CFB" | "MLB" | "NHL">("NFL");
+  useState<"ALL" | "NFL" | "CFB" | "MLB" | "NHL">("NFL");
 
 const [cfb, setCfb] =
   useState<CFBAnalysis | null>(null);
@@ -1057,6 +1057,17 @@ const [cfbError, setCfbError] =
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
         <div className="sticky top-0 z-30 -mx-4 mb-8 flex gap-2 overflow-x-auto border-y border-emerald-500/15 bg-[#020806]/95 px-4 py-4 shadow-[0_12px_30px_rgba(0,0,0,0.25)] backdrop-blur sm:-mx-6 sm:px-6">
   <button
+    onClick={() => setActiveSport("ALL")}
+    className={
+      activeSport === "ALL"
+        ? "whitespace-nowrap rounded-xl border border-amber-300/60 bg-amber-400 px-6 py-3 text-sm font-black text-black shadow-[0_0_22px_rgba(251,191,36,0.22)]"
+        : "whitespace-nowrap rounded-xl border border-amber-400/25 bg-amber-400/[0.06] px-6 py-3 text-sm font-black text-amber-300 transition hover:border-amber-300/50 hover:bg-amber-400/[0.12] hover:text-amber-200"
+    }
+  >
+    🏆 BEST PARLAYS ACROSS ALL SPORTS
+  </button>
+
+  <button
     onClick={() => setActiveSport("NFL")}
     className={
       activeSport === "NFL"
@@ -1092,6 +1103,57 @@ const [cfbError, setCfbError] =
     NHL
   </button>
 </div>
+
+        {activeSport === "ALL" && (
+          <section className="mb-10 overflow-hidden rounded-2xl border border-amber-400/25 bg-[radial-gradient(circle_at_top_left,rgba(251,191,36,0.10),transparent_34%),linear-gradient(135deg,rgba(16,185,129,0.05),rgba(255,255,255,0.015))] p-6 shadow-[0_18px_55px_rgba(0,0,0,0.24)] sm:p-8">
+            <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <span className="inline-flex rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-amber-300">
+                  RDG CROSS-SPORT COMMAND CENTER
+                </span>
+                <h2 className="mt-4 text-3xl font-black tracking-tight text-white sm:text-4xl">
+                  🏆 Best Parlays Across All Sports
+                </h2>
+                <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400">
+                  One place for RDG&apos;s strongest qualifying plays across NFL, College Football, MLB, and NHL.
+                  This section will combine only plays that pass each sport&apos;s model filters instead of forcing weak legs.
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.07] px-5 py-4">
+                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-amber-300">
+                  Cross-Sport Builder
+                </p>
+                <p className="mt-1 text-sm font-bold text-white">
+                  Ready for 5M-credit odds integration
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-7 grid gap-4 md:grid-cols-4">
+              {[
+                ["NFL", "Spreads • Moneylines • Player Props"],
+                ["COLLEGE FOOTBALL", "Spreads • Moneylines • Totals"],
+                ["MLB", "Moneylines • Run Lines • Totals • Player Props"],
+                ["NHL", "Moneylines • Puck Lines • Totals • Player Props"],
+              ].map(([sport, markets]) => (
+                <div key={sport} className="rounded-xl border border-white/10 bg-black/20 p-4">
+                  <p className="text-xs font-black uppercase tracking-[0.16em] text-white">{sport}</p>
+                  <p className="mt-2 text-xs leading-5 text-slate-500">{markets}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-6 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] p-5">
+              <p className="text-sm font-black text-emerald-300">Cross-sport parlay engine is staged.</p>
+              <p className="mt-2 text-xs leading-5 text-slate-400">
+                As we move RDG to the 5M-credit odds plan, this tab will rank qualified plays from every sport together
+                and generate the best mixed-sport combinations from the same live odds source.
+              </p>
+            </div>
+          </section>
+        )}
+
         {activeSport === "NFL" && (
           <div className="mb-10 overflow-hidden rounded-2xl border border-emerald-500/20 bg-[linear-gradient(135deg,rgba(16,185,129,0.07),rgba(255,255,255,0.015))] shadow-[0_18px_55px_rgba(0,0,0,0.22)]">
             <div className="flex flex-col gap-5 p-5 sm:p-6 lg:flex-row lg:items-center lg:justify-between">
