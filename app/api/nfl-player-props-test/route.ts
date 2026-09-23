@@ -4,7 +4,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const VERSION = "1.1-rushing-v1-backtest";
+const VERSION = "1.2-rushing-v1-backtest";
 const MIN_CARRIES = 5;
 const MIN_PRIOR_GAMES = 2;
 
@@ -67,10 +67,10 @@ async function loadSeason(season: number): Promise<PlayerGame[]> {
   // nflverse changed the player-stats release layout before the 2025 season.
   // Use the season-specific weekly file instead of the old combined player_stats.csv.
   const url =
-    `https://github.com/nflverse/nflverse-data/releases/download/player_stats/stats_player_week_${season}.csv`;
+    `https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_${season}.csv`;
 
   const res = await fetch(url, {
-    headers: { "User-Agent": "RDG-NFL-Rushing-Backtest/1.1" },
+    headers: { "User-Agent": "RDG-NFL-Rushing-Backtest/1.2" },
     next: { revalidate: 3600 },
   });
 
