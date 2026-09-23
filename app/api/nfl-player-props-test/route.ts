@@ -2,12 +2,11 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
+export const maxDuration = 60;
 
-const VERSION = "5.0-rushing-v5-direct-yards";
+const VERSION = "6.0-rushing-v6-role-aware-development";
 const MIN_CARRIES = 5;
 const MIN_PRIOR_GAMES = 3;
-const RECENT_GAMES = 4;
 
 type PlayerGame = {
   season: number;
@@ -27,595 +26,263 @@ function num(v: unknown): number {
   const x = Number(v);
   return Number.isFinite(x) ? x : 0;
 }
-
-function avg(values: number[]): number {
-  return values.length
-    ? values.reduce((sum, x) => sum + x, 0) / values.length
-    : 0;
+function avg(v: number[]): number {
+  return v.length ? v.reduce((a,b)=>a+b,0)/v.length : 0;
 }
-
-function clamp(x: number, low: number, high: number): number {
-  return Math.max(low, Math.min(high, x));
+function clamp(x:number, lo:number, hi:number) {
+  return Math.max(lo, Math.min(hi,x));
 }
-
-function parseCSV(text: string): Record<string, string>[] {
-  const lines = text.split(/\r?\n/).filter(Boolean);
-  if (!lines.length) return [];
-
-  const split = (line: string): string[] => {
-    const out: string[] = [];
-    let current = "";
-    let quoted = false;
-
-    for (let i = 0; i < line.length; i++) {
-      const c = line[i];
-
-      if (c === '"') {
-        if (quoted && line[i + 1] === '"') {
-          current += '"';
-          i++;
-        } else {
-          quoted = !quoted;
-        }
-      } else if (c === "," && !quoted) {
-        out.push(current);
-        current = "";
-      } else {
-        current += c;
-      }
+function parseCSV(text:string): Record<string,string>[] {
+  const lines=text.split(/\r?\n/).filter(Boolean);
+  if(!lines.length) return [];
+  const split=(line:string)=>{
+    const out:string[]=[]; let cur=""; let quoted=false;
+    for(let i=0;i<line.length;i++){
+      const c=line[i];
+      if(c === '"'){
+        if(quoted && line[i+1] === '"'){cur+='"';i++;}
+        else quoted=!quoted;
+      } else if(c==="," && !quoted){out.push(cur);cur="";}
+      else cur+=c;
     }
-
-    out.push(current);
-    return out;
+    out.push(cur); return out;
   };
-
-  const headers = split(lines[0]);
-
-  return lines.slice(1).map((line) => {
-    const values = split(line);
-    const row: Record<string, string> = {};
-
-    headers.forEach((header, i) => {
-      row[header] = values[i] ?? "";
-    });
-
+  const headers=split(lines[0]);
+  return lines.slice(1).map(line=>{
+    const vals=split(line); const row:Record<string,string>={};
+    headers.forEach((h,i)=>row[h]=vals[i]??"");
     return row;
   });
 }
 
-async function loadSeason(season: number, minCarries = MIN_CARRIES): Promise<PlayerGame[]> {
-  const url =
-    `https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_${season}.csv`;
-
-  const response = await fetch(url, {
-    headers: {
-      "User-Agent": "RDG-Rushing-V5/5.0",
-    },
-    next: { revalidate: 3600 },
+async function loadSeason(season:number):Promise<PlayerGame[]> {
+  const url=`https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_${season}.csv`;
+  const r=await fetch(url,{
+    headers:{"User-Agent":"RDG-Rushing-V6/6.0"},
+    next:{revalidate:3600},
   });
-
-  if (!response.ok) {
-    throw new Error(
-      `nflverse ${season} weekly player stats failed: ${response.status}`,
-    );
-  }
-
-  const rows = parseCSV(await response.text());
-  const games: PlayerGame[] = [];
-
-  for (const row of rows) {
-    const seasonType = (row.season_type || "").toUpperCase();
-    if (seasonType && seasonType !== "REG") continue;
-
-    const carries = num(row.carries);
-
-    // Historical model inputs keep the frozen V5 >=5-carry definition.
-    // For the evaluation season we can pass minCarries=0 so sportsbook-offered
-    // players are graded regardless of how many carries they ultimately record.
-    if (carries < minCarries) continue;
-
-    const playerId =
-      row.player_id ||
-      row.player_display_name ||
-      row.player_name ||
-      "";
-
-    if (!playerId) continue;
-
+  if(!r.ok) throw new Error(`nflverse ${season} failed: ${r.status}`);
+  const rows=parseCSV(await r.text());
+  const games:PlayerGame[]=[];
+  for(const row of rows){
+    const seasonType=(row.season_type||"").toUpperCase();
+    if(seasonType && seasonType!=="REG") continue;
+    const carries=num(row.carries);
+    if(carries<MIN_CARRIES) continue;
+    const playerId=row.player_id||row.player_display_name||row.player_name||"";
+    if(!playerId) continue;
     games.push({
       season,
-      week: num(row.week),
-      gameId:
-        row.game_id ||
-        `${season}-${row.week}-${row.recent_team || row.team}-${playerId}`,
+      week:num(row.week),
+      gameId:row.game_id||`${season}-${row.week}-${row.recent_team||row.team}-${playerId}`,
       playerId,
-      playerName:
-        row.player_display_name ||
-        row.player_name ||
-        playerId,
-      position: (
-        row.position ||
-        row.position_group ||
-        ""
-      ).toUpperCase(),
-      team: row.recent_team || row.team || "",
+      playerName:row.player_display_name||row.player_name||playerId,
+      position:(row.position||row.position_group||"").toUpperCase(),
+      team:row.recent_team||row.team||"",
       carries,
-      rushYards: num(row.rushing_yards),
+      rushYards:num(row.rushing_yards),
     });
   }
-
-  return games.sort(
-    (a, b) =>
-      a.week - b.week ||
-      a.gameId.localeCompare(b.gameId),
-  );
+  return games.sort((a,b)=>a.week-b.week||a.gameId.localeCompare(b.gameId));
 }
 
-function addHistory(
-  map: Map<string, History>,
-  game: PlayerGame,
-) {
-  const history = map.get(game.playerId) ?? { games: [] };
-  history.games.push(game);
-  map.set(game.playerId, history);
+function addHistory(map:Map<string,History>, g:PlayerGame){
+  const h=map.get(g.playerId)??{games:[]};
+  h.games.push(g); map.set(g.playerId,h);
+}
+function metrics(errors:number[]){
+  if(!errors.length) return {n:0,mae:null,rmse:null,mean_error:null};
+  return {
+    n:errors.length,
+    mae:Number(avg(errors.map(Math.abs)).toFixed(2)),
+    rmse:Number(Math.sqrt(avg(errors.map(e=>e*e))).toFixed(2)),
+    mean_error:Number(avg(errors).toFixed(2)),
+  };
 }
 
-function metrics(errors: number[]) {
-  if (!errors.length) {
+function projectV5(all:PlayerGame[], position:string){
+  const recent=all.slice(-4), lastTwo=all.slice(-2);
+  const careerYpg=avg(all.map(g=>g.rushYards));
+  const recentYpg=avg(recent.map(g=>g.rushYards));
+  const lastTwoYpg=avg(lastTwo.map(g=>g.rushYards));
+  const careerCarries=avg(all.map(g=>g.carries));
+  const recentCarries=avg(recent.map(g=>g.carries));
+  const trend=clamp(careerCarries>0?recentCarries/careerCarries:1,.80,1.20);
+  const qb=position==="QB";
+  let yards=qb
+    ?.80*careerYpg+.15*recentYpg+.05*lastTwoYpg
+    :.65*careerYpg+.25*recentYpg+.10*lastTwoYpg;
+  yards*=qb?1+.10*(trend-1):1+.20*(trend-1);
+  return clamp(yards,careerYpg*(qb?.80:.70),careerYpg*(qb?1.20:1.30));
+}
+
+function projectV6(all:PlayerGame[], position:string){
+  const qb=position==="QB";
+  const recent4=all.slice(-4);
+  const last2=all.slice(-2);
+  const last1=all.slice(-1);
+
+  const careerYpg=avg(all.map(g=>g.rushYards));
+  const recent4Ypg=avg(recent4.map(g=>g.rushYards));
+  const last2Ypg=avg(last2.map(g=>g.rushYards));
+
+  if(qb){
+    // Keep QB conservative; clean sportsbook test suggested QB was not V5's main problem.
+    const careerCarries=avg(all.map(g=>g.carries));
+    const recentCarries=avg(recent4.map(g=>g.carries));
+    const trend=clamp(careerCarries>0?recentCarries/careerCarries:1,.80,1.20);
+    let p=.80*careerYpg+.15*recent4Ypg+.05*last2Ypg;
+    p*=1+.10*(trend-1);
     return {
-      n: 0,
-      mae: null,
-      rmse: null,
-      mean_error: null,
+      projection:clamp(p,careerYpg*.80,careerYpg*1.20),
+      expectedCarries:null,
+      stableYpc:null,
+      roleTrend:trend,
     };
   }
 
-  return {
-    n: errors.length,
-    mae: Number(
-      avg(errors.map((e) => Math.abs(e))).toFixed(2),
-    ),
-    rmse: Number(
-      Math.sqrt(avg(errors.map((e) => e * e))).toFixed(2),
-    ),
-    mean_error: Number(avg(errors).toFixed(2)),
-  };
-}
+  // V6 RB/non-QB: predict workload first, but shrink efficiency heavily.
+  // This reacts to role changes without allowing volatile recent YPC to dominate.
+  const careerCarries=avg(all.map(g=>g.carries));
+  const recent4Carries=avg(recent4.map(g=>g.carries));
+  const last2Carries=avg(last2.map(g=>g.carries));
+  const last1Carries=avg(last1.map(g=>g.carries));
 
+  const roleTrendRaw=careerCarries>0
+    ? (.45*recent4Carries+.35*last2Carries+.20*last1Carries)/careerCarries
+    : 1;
+  const roleTrend=clamp(roleTrendRaw,.55,1.45);
 
-const ODDS_BASE = "https://api.the-odds-api.com/v4";
-const SPORT = "americanfootball_nfl";
-const MARKET = "player_rush_yds";
-const TEST_SEASON = 2025;
-const DEFAULT_START_WEEK = 7;
-const DEFAULT_END_WEEK = 18;
-const SNAPSHOT_MINUTES_BEFORE_KICKOFF = 30;
+  // Workload reacts faster than V5, but is still anchored.
+  let expectedCarries =
+    .35*careerCarries+
+    .35*recent4Carries+
+    .20*last2Carries+
+    .10*last1Carries;
 
-const WEEK_WINDOWS_2025: Record<number, { start: string; end: string; discovery: string }> = {
-  1:{start:"2025-09-04T00:00:00Z",end:"2025-09-09T12:00:00Z",discovery:"2025-09-03T12:00:00Z"},
-  2:{start:"2025-09-11T00:00:00Z",end:"2025-09-16T12:00:00Z",discovery:"2025-09-10T12:00:00Z"},
-  3:{start:"2025-09-18T00:00:00Z",end:"2025-09-23T12:00:00Z",discovery:"2025-09-17T12:00:00Z"},
-  4:{start:"2025-09-25T00:00:00Z",end:"2025-09-30T12:00:00Z",discovery:"2025-09-24T12:00:00Z"},
-  5:{start:"2025-10-02T00:00:00Z",end:"2025-10-07T12:00:00Z",discovery:"2025-10-01T12:00:00Z"},
-  6:{start:"2025-10-09T00:00:00Z",end:"2025-10-14T12:00:00Z",discovery:"2025-10-08T12:00:00Z"},
-  7:{start:"2025-10-16T00:00:00Z",end:"2025-10-21T12:00:00Z",discovery:"2025-10-15T12:00:00Z"},
-  8:{start:"2025-10-23T00:00:00Z",end:"2025-10-28T12:00:00Z",discovery:"2025-10-22T12:00:00Z"},
-  9:{start:"2025-10-30T00:00:00Z",end:"2025-11-04T12:00:00Z",discovery:"2025-10-29T12:00:00Z"},
-  10:{start:"2025-11-06T00:00:00Z",end:"2025-11-11T12:00:00Z",discovery:"2025-11-05T12:00:00Z"},
-  11:{start:"2025-11-13T00:00:00Z",end:"2025-11-18T12:00:00Z",discovery:"2025-11-12T12:00:00Z"},
-  12:{start:"2025-11-20T00:00:00Z",end:"2025-11-25T12:00:00Z",discovery:"2025-11-19T12:00:00Z"},
-  13:{start:"2025-11-27T00:00:00Z",end:"2025-12-02T12:00:00Z",discovery:"2025-11-26T12:00:00Z"},
-  14:{start:"2025-12-04T00:00:00Z",end:"2025-12-09T12:00:00Z",discovery:"2025-12-03T12:00:00Z"},
-  15:{start:"2025-12-11T00:00:00Z",end:"2025-12-16T12:00:00Z",discovery:"2025-12-10T12:00:00Z"},
-  16:{start:"2025-12-18T00:00:00Z",end:"2025-12-23T12:00:00Z",discovery:"2025-12-17T12:00:00Z"},
-  17:{start:"2025-12-24T00:00:00Z",end:"2025-12-30T12:00:00Z",discovery:"2025-12-23T12:00:00Z"},
-  18:{start:"2026-01-01T00:00:00Z",end:"2026-01-05T12:00:00Z",discovery:"2025-12-31T12:00:00Z"},
-};
+  // Extra controlled response when the role has clearly changed.
+  if(roleTrend < .80 || roleTrend > 1.20){
+    expectedCarries =
+      .20*careerCarries+
+      .40*recent4Carries+
+      .25*last2Carries+
+      .15*last1Carries;
+  }
+  expectedCarries=clamp(expectedCarries,careerCarries*.55,careerCarries*1.45);
 
+  const careerYpc=careerCarries>0?careerYpg/careerCarries:0;
+  const recentCarriesTotal=recent4.reduce((s,g)=>s+g.carries,0);
+  const recentYardsTotal=recent4.reduce((s,g)=>s+g.rushYards,0);
+  const recentYpc=recentCarriesTotal>0?recentYardsTotal/recentCarriesTotal:careerYpc;
 
-function normalizeName(value: string): string {
-  return String(value || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]/g, "");
-}
-
-function americanProfit(odds: number, stake = 1): number {
-  if (!Number.isFinite(odds) || odds === 0) return 0;
-  return odds > 0 ? stake * odds / 100 : stake * 100 / Math.abs(odds);
-}
-
-function isoMinusMinutes(iso: string, minutes: number): string {
-  return new Date(new Date(iso).getTime() - minutes * 60000)
-    .toISOString()
-    .replace(/\.\d{3}Z$/, "Z");
-}
-
-async function oddsJson(url: string, apiKey: string) {
-  const joiner = url.includes("?") ? "&" : "?";
-  const response = await fetch(`${url}${joiner}apiKey=${encodeURIComponent(apiKey)}`, {
-    cache: "no-store",
-  });
-  const usage = {
-    used: Number(response.headers.get("x-requests-used")) || null,
-    remaining: Number(response.headers.get("x-requests-remaining")) || null,
-    last: Number(response.headers.get("x-requests-last")) || null,
-  };
-  const text = await response.text();
-  if (!response.ok) throw new Error(`The Odds API ${response.status}: ${text}`);
-  return { data: JSON.parse(text), usage };
-}
-
-function projectV5(history: History, position: string) {
-  const all = history.games;
-  if (all.length < MIN_PRIOR_GAMES) return null;
-
-  const recent = all.slice(-RECENT_GAMES);
-  const lastTwo = all.slice(-2);
-  const careerYpg = avg(all.map(g => g.rushYards));
-  const recentYpg = avg(recent.map(g => g.rushYards));
-  const lastTwoYpg = avg(lastTwo.map(g => g.rushYards));
-  const careerCarries = avg(all.map(g => g.carries));
-  const recentCarries = avg(recent.map(g => g.carries));
-  const rawCarryTrend = careerCarries > 0 ? recentCarries / careerCarries : 1;
-  const carryTrend = clamp(rawCarryTrend, 0.80, 1.20);
-  const isQB = position === "QB";
-
-  let directYards = isQB
-    ? 0.80 * careerYpg + 0.15 * recentYpg + 0.05 * lastTwoYpg
-    : 0.65 * careerYpg + 0.25 * recentYpg + 0.10 * lastTwoYpg;
-
-  const workloadModifier = isQB
-    ? 1 + 0.10 * (carryTrend - 1)
-    : 1 + 0.20 * (carryTrend - 1);
-
-  directYards *= workloadModifier;
-  const maxMove = isQB ? 0.20 : 0.30;
-  const projection = clamp(
-    directYards,
-    careerYpg * (1 - maxMove),
-    careerYpg * (1 + maxMove)
+  // Efficiency is noisy: 85% long-term, 15% recent, with a tight cap.
+  const stableYpc=clamp(
+    .85*careerYpc+.15*recentYpc,
+    careerYpc*.85,
+    careerYpc*1.15
   );
 
-  return {
-    projection,
-    priorGames: all.length,
-    careerYpg,
-    recentYpg,
-    lastTwoYpg,
-    carryTrend,
-    workloadModifier,
-  };
+  const workloadProjection=expectedCarries*stableYpc;
+
+  // Blend some direct yardage history back in to avoid repeating V4.
+  const directAnchor=.55*careerYpg+.30*recent4Ypg+.15*last2Ypg;
+  let projection=.65*workloadProjection+.35*directAnchor;
+
+  // Wider than V5 only when workload evidence supports the move.
+  const move=roleTrend<.80||roleTrend>1.20?.40:.25;
+  projection=clamp(projection,careerYpg*(1-move),careerYpg*(1+move));
+
+  return {projection,expectedCarries,stableYpc,roleTrend};
 }
 
-function chooseMainLine(bookmakers: any[], playerName: string) {
-  const target = normalizeName(playerName);
-  const rows: any[] = [];
+export async function GET(){
+  try{
+    const [season2024,season2025]=await Promise.all([loadSeason(2024),loadSeason(2025)]);
+    const history=new Map<string,History>();
+    for(const g of season2024) addHistory(history,g);
 
-  for (const book of bookmakers || []) {
-    for (const market of book.markets || []) {
-      if (market.key !== MARKET) continue;
-      const grouped = new Map<number, any>();
+    const baselineErrors:number[]=[];
+    const v5Errors:number[]=[];
+    const v6Errors:number[]=[];
+    const rbV5:number[]=[]; const rbV6:number[]=[];
+    const qbV5:number[]=[]; const qbV6:number[]=[];
+    const predictions:any[]=[];
+    let skipped=0;
 
-      for (const o of market.outcomes || []) {
-        if (normalizeName(o.description) !== target) continue;
-        const point = Number(o.point);
-        const side = String(o.name || "").toUpperCase();
-        const price = Number(o.price);
-        if (!Number.isFinite(point) || !Number.isFinite(price)) continue;
-        if (!grouped.has(point)) grouped.set(point, {});
-        grouped.get(point)[side] = { price };
-      }
-
-      for (const [line, pair] of grouped) {
-        if (!pair.OVER || !pair.UNDER) continue;
-        rows.push({
-          sportsbook: book.title || book.key,
-          sportsbook_key: book.key,
-          line,
-          over_odds: pair.OVER.price,
-          under_odds: pair.UNDER.price,
-          balance: Math.abs(pair.OVER.price - pair.UNDER.price),
+    const weeks=[...new Set(season2025.map(g=>g.week))].sort((a,b)=>a-b);
+    for(const week of weeks){
+      const weekGames=season2025.filter(g=>g.week===week);
+      for(const game of weekGames){
+        const h=history.get(game.playerId);
+        if(!h||h.games.length<MIN_PRIOR_GAMES){skipped++;continue;}
+        const all=h.games;
+        const career=avg(all.map(g=>g.rushYards));
+        const v5=projectV5(all,game.position||"UNKNOWN");
+        const v6=projectV6(all,game.position||"UNKNOWN");
+        const eBase=career-game.rushYards;
+        const e5=v5-game.rushYards;
+        const e6=v6.projection-game.rushYards;
+        baselineErrors.push(eBase); v5Errors.push(e5); v6Errors.push(e6);
+        if(game.position==="RB"){rbV5.push(e5);rbV6.push(e6);}
+        if(game.position==="QB"){qbV5.push(e5);qbV6.push(e6);}
+        predictions.push({
+          week,player:game.playerName,team:game.team,position:game.position,
+          actual_rushing_yards:game.rushYards,actual_carries:game.carries,
+          prior_games:all.length,
+          baseline_projection:Number(career.toFixed(1)),
+          v5_projection:Number(v5.toFixed(1)),
+          v6_projection:Number(v6.projection.toFixed(1)),
+          v6_expected_carries:v6.expectedCarries===null?null:Number(v6.expectedCarries.toFixed(2)),
+          v6_stable_ypc:v6.stableYpc===null?null:Number(v6.stableYpc.toFixed(2)),
+          v6_role_trend:Number(v6.roleTrend.toFixed(3)),
         });
       }
-    }
-  }
-
-  if (!rows.length) return null;
-
-  // Prefer a balanced paired main line. This avoids alternate/milestone lines.
-  rows.sort((a,b) => a.balance - b.balance);
-  const bestBalance = rows[0].balance;
-  const balanced = rows.filter(x => x.balance === bestBalance);
-  balanced.sort((a,b) => {
-    const ah = a.sportsbook_key === "hardrockbet_fl" ? -1 : 0;
-    const bh = b.sportsbook_key === "hardrockbet_fl" ? -1 : 0;
-    return ah - bh;
-  });
-  return { selected: balanced[0], available: rows };
-}
-
-function gradeBet(side: "OVER"|"UNDER", line: number, actual: number, odds: number) {
-  if (actual === line) return { result: "PUSH", profit: 0 };
-  const won = side === "OVER" ? actual > line : actual < line;
-  return { result: won ? "WIN" : "LOSS", profit: won ? americanProfit(odds) : -1 };
-}
-
-export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const startWeekRaw = Number(url.searchParams.get("startWeek") || DEFAULT_START_WEEK);
-  const endWeekRaw = Number(url.searchParams.get("endWeek") || DEFAULT_END_WEEK);
-  const START_WEEK = Number.isInteger(startWeekRaw) ? clamp(startWeekRaw, 1, 18) : DEFAULT_START_WEEK;
-  const END_WEEK = Number.isInteger(endWeekRaw) ? clamp(endWeekRaw, START_WEEK, 18) : DEFAULT_END_WEEK;
-
-  const apiKey = process.env.ODDS_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json({ success:false, error:"ODDS_API_KEY is missing." }, { status:500 });
-  }
-
-  try {
-    const [season2024, season2025All] = await Promise.all([
-      loadSeason(2024, MIN_CARRIES),
-      loadSeason(2025, 0),
-    ]);
-
-    // Frozen V5 history still only learns from completed games with >=5 carries.
-    const season2025History = season2025All.filter(g => g.carries >= MIN_CARRIES);
-    const history = new Map<string, History>();
-    for (const game of season2024) addHistory(history, game);
-
-    // IMPORTANT: advance 2025 history chronologically so every week uses only prior games.
-    const results:any[] = [];
-    const weekSummaries:any[] = [];
-    const historicalOddsErrors:any[] = [];
-    let lastUsage:any = null;
-    let totalEventOddsAttempts = 0;
-    let totalEventOddsCalls = 0;
-    let totalEventsMatched = 0;
-
-    function summarize(rows:any[]) {
-      const graded = rows.filter(x => x.result !== "PUSH");
-      const wins = graded.filter(x => x.result === "WIN").length;
-      const losses = graded.filter(x => x.result === "LOSS").length;
-      const profit = rows.reduce((sum,x) => sum + x.profit_units, 0);
-      return {
-        bets: graded.length,
-        wins,
-        losses,
-        win_rate: graded.length ? Number((wins / graded.length * 100).toFixed(2)) : null,
-        profit_units: Number(profit.toFixed(3)),
-        roi_percent: graded.length ? Number((profit / graded.length * 100).toFixed(2)) : null,
-      };
+      for(const g of weekGames) addHistory(history,g);
     }
 
-    function bucket(rows:any[], min:number) {
-      return summarize(rows.filter(r => Math.abs(r.edge_yards) >= min && r.result !== "PUSH"));
-    }
-
-    function breakdown(rows:any[], predicate:(r:any)=>boolean) {
-      const x = rows.filter(predicate);
-      return {
-        overall: summarize(x),
-        edge_5_plus: bucket(x,5),
-        edge_10_plus: bucket(x,10),
-        edge_15_plus: bucket(x,15),
-        edge_20_plus: bucket(x,20),
-      };
-    }
-
-    for (let week = 1; week <= 18; week++) {
-      // Evaluation eligibility is now driven by sportsbook prop availability,
-      // not by the player's eventual carry count.
-      const weekGames = season2025All.filter(g => g.week === week);
-      const weekHistoryGames = season2025History.filter(g => g.week === week);
-
-      // Only fetch sportsbook history for the requested range. Earlier weeks are
-      // still added to player history after the week so projections remain chronological.
-      if (week >= START_WEEK && week <= END_WEEK) {
-        const window = WEEK_WINDOWS_2025[week];
-        if (!window) throw new Error(`No 2025 date window configured for Week ${week}.`);
-
-        const weekStartMs = new Date(window.start).getTime();
-        const weekEndMs = new Date(window.end).getTime();
-        const discoverySnapshots = [
-          window.discovery,
-          new Date(weekStartMs + 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, "Z"),
-          new Date(weekStartMs + 3 * 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, "Z"),
-          new Date(weekStartMs + 4 * 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, "Z"),
-        ];
-
-        const eventsById = new Map<string,any>();
-        for (const date of discoverySnapshots) {
-          const r = await oddsJson(
-            `${ODDS_BASE}/historical/sports/${SPORT}/events?date=${encodeURIComponent(date)}&dateFormat=iso`,
-            apiKey
-          );
-          lastUsage = r.usage;
-          const events = Array.isArray(r.data?.data) ? r.data.data : [];
-          for (const event of events) {
-            const commenceMs = new Date(String(event.commence_time || "")).getTime();
-            if (Number.isFinite(commenceMs) && commenceMs >= weekStartMs && commenceMs <= weekEndMs) {
-              eventsById.set(event.id, event);
-            }
-          }
-        }
-
-        const weekRows:any[] = [];
-        let weekAttempts = 0;
-        let weekCalls = 0;
-        let weekMatched = 0;
-
-        for (const event of eventsById.values()) {
-          const commence = String(event.commence_time || "");
-          const kickoffMs = new Date(commence).getTime();
-          if (!Number.isFinite(kickoffMs) || kickoffMs < weekStartMs || kickoffMs > weekEndMs) continue;
-
-          const snapshot = isoMinusMinutes(commence, SNAPSHOT_MINUTES_BEFORE_KICKOFF);
-          let odds:any;
-          weekAttempts++;
-          totalEventOddsAttempts++;
-
-          try {
-            const r = await oddsJson(
-              `${ODDS_BASE}/historical/sports/${SPORT}/events/${event.id}/odds?regions=us&markets=${MARKET}&oddsFormat=american&dateFormat=iso&date=${encodeURIComponent(snapshot)}`,
-              apiKey
-            );
-            lastUsage = r.usage;
-            odds = r.data?.data ?? r.data;
-            weekCalls++;
-            totalEventOddsCalls++;
-          } catch (error:any) {
-            historicalOddsErrors.push({
-              week,
-              event_id:event.id,
-              home_team:event.home_team,
-              away_team:event.away_team,
-              commence_time:commence,
-              snapshot_requested:snapshot,
-              error:error?.message || String(error),
-            });
-            continue;
-          }
-
-          const marketPlayers = new Set<string>();
-          for (const book of odds?.bookmakers || [])
-            for (const market of book.markets || [])
-              if (market.key === MARKET)
-                for (const outcome of market.outcomes || [])
-                  if (outcome.description) marketPlayers.add(normalizeName(outcome.description));
-
-          const candidates = weekGames.filter(g => marketPlayers.has(normalizeName(g.playerName)));
-          if (!candidates.length) continue;
-          weekMatched++;
-          totalEventsMatched++;
-
-          for (const game of candidates) {
-            const playerHistory = history.get(game.playerId);
-            if (!playerHistory) continue;
-            const model = projectV5(playerHistory, game.position || "UNKNOWN");
-            if (!model) continue;
-
-            const market = chooseMainLine(odds?.bookmakers || [], game.playerName);
-            if (!market) continue;
-
-            const line = market.selected.line;
-            const edgeYards = model.projection - line;
-            const side:"OVER"|"UNDER" = edgeYards >= 0 ? "OVER" : "UNDER";
-            const price = side === "OVER" ? market.selected.over_odds : market.selected.under_odds;
-            const graded = gradeBet(side, line, game.rushYards, price);
-
-            weekRows.push({
-              week,
-              event_id:event.id,
-              commence_time:commence,
-              snapshot_requested:snapshot,
-              player:game.playerName,
-              team:game.team,
-              position:game.position,
-              actual_rushing_yards:game.rushYards,
-              actual_carries:game.carries,
-              v5_projection:Number(model.projection.toFixed(1)),
-              sportsbook:market.selected.sportsbook,
-              sportsbook_key:market.selected.sportsbook_key,
-              line,
-              side,
-              odds:price,
-              edge_yards:Number(edgeYards.toFixed(1)),
-              result:graded.result,
-              profit_units:Number(graded.profit.toFixed(3)),
-              prior_games:model.priorGames,
-              v5_abs_error:Number(Math.abs(model.projection - game.rushYards).toFixed(1)),
-              market_abs_error:Number(Math.abs(line - game.rushYards).toFixed(1)),
-            });
-          }
-        }
-
-        results.push(...weekRows);
-        weekSummaries.push({
-          week,
-          nflverse_week_player_games:weekGames.length,
-          historical_events_seen:eventsById.size,
-          historical_event_odds_attempts:weekAttempts,
-          historical_event_odds_calls:weekCalls,
-          historical_event_odds_errors:historicalOddsErrors.filter(e => e.week === week).length,
-          events_with_matched_prop_players:weekMatched,
-          ...summarize(weekRows),
-        });
-      }
-
-      // Add this completed week's results only AFTER all predictions for the week.
-      for (const game of weekHistoryGames) addHistory(history, game);
-    }
-
-    const graded = results.filter(x => x.result !== "PUSH");
-    const v5Mae = graded.length
-      ? graded.reduce((s,x) => s + x.v5_abs_error, 0) / graded.length
-      : null;
-    const marketMae = graded.length
-      ? graded.reduce((s,x) => s + x.market_abs_error, 0) / graded.length
-      : null;
+    const baseline=metrics(baselineErrors), v5=metrics(v5Errors), v6=metrics(v6Errors);
+    const rb5=metrics(rbV5), rb6=metrics(rbV6), qb5=metrics(qbV5), qb6=metrics(qbV6);
 
     return NextResponse.json({
       success:true,
-      version:"3.1-rushing-v5-clean-evaluation-runner",
-      purpose:"Run frozen Rushing V5 across multiple 2025 regular-season weeks using real pregame historical player_rush_yds lines.",
-      model:"Frozen 5.0-rushing-v5-direct-yards",
-      test_scope:{
-        season:TEST_SEASON,
-        start_week:START_WEEK,
-        end_week:END_WEEK,
-        snapshot_minutes_before_kickoff:SNAPSHOT_MINUTES_BEFORE_KICKOFF,
-        market:MARKET,
-        region:"us",
+      version:VERSION,
+      purpose:"Develop Rushing V6 to improve RB role/workload handling after the clean V5 sportsbook backtest exposed weak RB performance.",
+      model_status:"DEVELOPMENT TEST ONLY — NOT LIVE",
+      data_source:"nflverse weekly player stats",
+      development_guardrail:"2024 initializes history and 2025 is evaluated chronologically. No sportsbook API calls are made.",
+      samples:{
+        training_2024_player_games:season2024.length,
+        testing_2025_player_games:season2025.length,
+        held_out_predictions:predictions.length,
+        skipped_no_prior_history:skipped,
+      },
+      baseline:{description:"All prior rushing yards per game",...baseline},
+      rushing_v5:{description:"Exact V5 logic reproduced for same-sample comparison",...v5},
+      rushing_v6:{
+        description:"Role-aware workload projection + heavily stabilized YPC + direct-yardage anchor",
+        ...v6,
+      },
+      position_comparison:{
+        RB:{v5:rb5,v6:rb6,mae_improvement:rb5.mae!==null&&rb6.mae!==null?Number((rb5.mae-rb6.mae).toFixed(2)):null},
+        QB:{v5:qb5,v6:qb6,mae_improvement:qb5.mae!==null&&qb6.mae!==null?Number((qb5.mae-qb6.mae).toFixed(2)):null},
+      },
+      comparison:{
+        v6_vs_v5_mae_improvement:v5.mae!==null&&v6.mae!==null?Number((v5.mae-v6.mae).toFixed(2)):null,
+        v6_vs_baseline_mae_improvement:baseline.mae!==null&&v6.mae!==null?Number((baseline.mae-v6.mae).toFixed(2)):null,
+        v6_beats_v5_mae:v5.mae!==null&&v6.mae!==null?v6.mae<v5.mae:false,
+        v6_beats_v5_rmse:v5.rmse!==null&&v6.rmse!==null?v6.rmse<v5.rmse:false,
       },
       methodology:{
-        chronological_history:true,
-        same_week_results_added_after_predictions:true,
-        current_week_selection:"sportsbook prop availability; no postgame >=5-carry filter",
-        historical_input_filter:"frozen V5 history uses completed games with >=5 carries",
-        sportsbook_selection:"balanced paired main line",
-        stake:"1 unit risked per bet",
+        rb_workload:"35% career + 35% recent-4 + 20% last-2 + 10% last-game carries; shifts faster to recent usage when role trend is outside 0.80-1.20.",
+        rb_efficiency:"85% career YPC + 15% recent-4 YPC, capped to ±15% of career YPC.",
+        rb_final:"65% workload×stabilized-YPC + 35% direct rushing-yardage anchor.",
+        qb:"Keeps conservative V5-style QB logic because the clean sportsbook test showed the larger weakness was RB rushing.",
+        leakage_control:"Every 2025 week is predicted before that week's results are added.",
+        important:"This is projection development only. If V6 improves materially, it still needs a clean sportsbook-line backtest before production.",
       },
-      api_usage:lastUsage,
-      diagnostics:{
-        historical_event_odds_attempts:totalEventOddsAttempts,
-        historical_event_odds_calls:totalEventOddsCalls,
-        historical_event_odds_errors:historicalOddsErrors.length,
-        events_with_matched_prop_players:totalEventsMatched,
-        graded_bets:graded.length,
-      },
-      overall:summarize(results),
-      edge_buckets:{
-        edge_5_plus:bucket(results,5),
-        edge_10_plus:bucket(results,10),
-        edge_15_plus:bucket(results,15),
-        edge_20_plus:bucket(results,20),
-      },
-      position_breakdown:{
-        QB:breakdown(results,r => r.position === "QB"),
-        RB:breakdown(results,r => r.position === "RB"),
-        OTHER:breakdown(results,r => r.position !== "QB" && r.position !== "RB"),
-      },
-      side_breakdown:{
-        OVER:breakdown(results,r => r.side === "OVER"),
-        UNDER:breakdown(results,r => r.side === "UNDER"),
-      },
-      projection_accuracy:{
-        matched_bets:graded.length,
-        v5_mae:v5Mae === null ? null : Number(v5Mae.toFixed(2)),
-        sportsbook_line_mae:marketMae === null ? null : Number(marketMae.toFixed(2)),
-        v5_minus_market_mae:v5Mae === null || marketMae === null ? null : Number((v5Mae-marketMae).toFixed(2)),
-      },
-      weeks:weekSummaries,
-      historical_odds_error_samples:historicalOddsErrors.slice(0,10),
-      bets:results,
+      sample_predictions:predictions.slice(0,40),
     });
-  } catch (error:any) {
-    return NextResponse.json({
-      success:false,
-      version:"3.1-rushing-v5-clean-evaluation-runner",
-      error:error?.message || String(error),
-    },{status:500});
+  }catch(error:any){
+    return NextResponse.json({success:false,version:VERSION,error:error?.message||String(error)},{status:500});
   }
 }
