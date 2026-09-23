@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const VERSION = "5.0-rushing-v5-direct-yards";
 const MIN_CARRIES = 5;
@@ -185,7 +185,8 @@ const ODDS_BASE = "https://api.the-odds-api.com/v4";
 const SPORT = "americanfootball_nfl";
 const MARKET = "player_rush_yds";
 const TEST_SEASON = 2025;
-const DEFAULT_TEST_WEEK = 2;
+const DEFAULT_START_WEEK = 7;
+const DEFAULT_END_WEEK = 18;
 const SNAPSHOT_MINUTES_BEFORE_KICKOFF = 30;
 
 const WEEK_WINDOWS_2025: Record<number, { start: string; end: string; discovery: string }> = {
@@ -341,10 +342,11 @@ function gradeBet(side: "OVER"|"UNDER", line: number, actual: number, odds: numb
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const requestedWeek = Number(url.searchParams.get("week") || DEFAULT_TEST_WEEK);
-  const TEST_WEEK = Number.isInteger(requestedWeek) && requestedWeek >= 1 && requestedWeek <= 18
-    ? requestedWeek
-    : DEFAULT_TEST_WEEK;
+  const startWeekRaw = Number(url.searchParams.get("startWeek") || DEFAULT_START_WEEK);
+  const endWeekRaw = Number(url.searchParams.get("endWeek") || DEFAULT_END_WEEK);
+  const START_WEEK = Number.isInteger(startWeekRaw) ? clamp(startWeekRaw, 1, 18) : DEFAULT_START_WEEK;
+  const END_WEEK = Number.isInteger(endWeekRaw) ? clamp(endWeekRaw, START_WEEK, 18) : DEFAULT_END_WEEK;
+
   const apiKey = process.env.ODDS_API_KEY;
   if (!apiKey) {
     return NextResponse.json({ success:false, error:"ODDS_API_KEY is missing." }, { status:500 });
@@ -355,168 +357,252 @@ export async function GET(request: Request) {
     const history = new Map<string, History>();
     for (const game of season2024) addHistory(history, game);
 
-    // First-run safety: test only 2025 Week 1.
-    const weekGames = season2025.filter(g => g.week === TEST_WEEK);
-    const gameIds = [...new Set(weekGames.map(g => g.gameId))];
-
-    const eventsById = new Map<string, any>();
-    let lastUsage: any = null;
-
-    // Historical-events returns events that had odds at the requested snapshot.
-    // Week 1 spans Thursday through Monday, so use late pregame snapshots on each
-    // NFL game day instead of querying noon. This endpoint itself is quota-free.
-    const window = WEEK_WINDOWS_2025[TEST_WEEK];
-    if (!window) throw new Error(`No 2025 date window configured for Week ${TEST_WEEK}.`);
-    const weekStartMs = new Date(window.start).getTime();
-    const week1DiscoverySnapshots = [
-      window.discovery,
-      new Date(weekStartMs + 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, "Z"),
-      new Date(weekStartMs + 3 * 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, "Z"),
-      new Date(weekStartMs + 4 * 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, "Z"),
-    ];
-
-    for (const date of week1DiscoverySnapshots) {
-      const r = await oddsJson(
-        `${ODDS_BASE}/historical/sports/${SPORT}/events?date=${encodeURIComponent(date)}&dateFormat=iso`,
-        apiKey
-      );
-      lastUsage = r.usage;
-      const events = Array.isArray(r.data?.data) ? r.data.data : [];
-      for (const e of events) {
-        const commenceMs = new Date(String(e.commence_time || "")).getTime();
-        const weekEndMs = new Date(window.end).getTime();
-        if (Number.isFinite(commenceMs) && commenceMs >= weekStartMs && commenceMs <= weekEndMs) {
-          eventsById.set(e.id, e);
-        }
-      }
-    }
-
-    const eventList = [...eventsById.values()];
+    // IMPORTANT: advance 2025 history chronologically so every week uses only prior games.
     const results:any[] = [];
-    let historicalOddsCalls = 0;
-    let historicalOddsAttempts = 0;
-    let eventsMatched = 0;
-    const historicalOddsErrors: any[] = [];
+    const weekSummaries:any[] = [];
+    const historicalOddsErrors:any[] = [];
+    let lastUsage:any = null;
+    let totalEventOddsAttempts = 0;
+    let totalEventOddsCalls = 0;
+    let totalEventsMatched = 0;
 
-    function teamNorm(s:string){return String(s||"").toLowerCase().replace(/[^a-z]/g,"");}
-
-    // Match each nflverse game to Odds API by date/team abbreviations is unreliable,
-    // so player matching is performed inside all Week-1 NFL events returned around those dates.
-    for (const event of eventList) {
-      const commence = String(event.commence_time || "");
-      const kickoffMs = new Date(commence).getTime();
-      const weekEndMs = new Date(window.end).getTime();
-      if (!Number.isFinite(kickoffMs) || kickoffMs < weekStartMs || kickoffMs > weekEndMs) continue;
-
-      const snapshot = isoMinusMinutes(commence, SNAPSHOT_MINUTES_BEFORE_KICKOFF);
-
-      let odds:any;
-      historicalOddsAttempts++;
-      try {
-        const r = await oddsJson(
-          `${ODDS_BASE}/historical/sports/${SPORT}/events/${event.id}/odds?regions=us&markets=${MARKET}&oddsFormat=american&dateFormat=iso&date=${encodeURIComponent(snapshot)}`,
-          apiKey
-        );
-        lastUsage = r.usage;
-        odds = r.data?.data ?? r.data;
-        historicalOddsCalls++;
-      } catch (error: any) {
-        historicalOddsErrors.push({
-          event_id: event.id,
-          home_team: event.home_team,
-          away_team: event.away_team,
-          commence_time: commence,
-          snapshot_requested: snapshot,
-          error: error?.message || String(error),
-        });
-        continue;
-      }
-
-      const marketPlayers = new Set<string>();
-      for (const book of odds?.bookmakers || [])
-        for (const market of book.markets || [])
-          if (market.key === MARKET)
-            for (const o of market.outcomes || [])
-              if (o.description) marketPlayers.add(normalizeName(o.description));
-
-      const candidates = weekGames.filter(g => marketPlayers.has(normalizeName(g.playerName)));
-      if (!candidates.length) continue;
-      eventsMatched++;
-
-      for (const game of candidates) {
-        const playerHistory = history.get(game.playerId);
-        if (!playerHistory) continue;
-        const model = projectV5(playerHistory, game.position || "UNKNOWN");
-        if (!model) continue;
-
-        const market = chooseMainLine(odds?.bookmakers || [], game.playerName);
-        if (!market) continue;
-
-        const line = market.selected.line;
-        const edgeYards = model.projection - line;
-        const side:"OVER"|"UNDER" = edgeYards >= 0 ? "OVER" : "UNDER";
-        const price = side === "OVER" ? market.selected.over_odds : market.selected.under_odds;
-        const graded = gradeBet(side, line, game.rushYards, price);
-
-        results.push({
-          week: TEST_WEEK,
-          event_id: event.id,
-          commence_time: commence,
-          snapshot_requested: snapshot,
-          player: game.playerName,
-          team: game.team,
-          position: game.position,
-          actual_rushing_yards: game.rushYards,
-          actual_carries: game.carries,
-          v5_projection: Number(model.projection.toFixed(1)),
-          sportsbook: market.selected.sportsbook,
-          sportsbook_key: market.selected.sportsbook_key,
-          line,
-          side,
-          odds: price,
-          edge_yards: Number(edgeYards.toFixed(1)),
-          result: graded.result,
-          profit_units: Number(graded.profit.toFixed(3)),
-          prior_games: model.priorGames,
-        });
-      }
-    }
-
-    const graded = results.filter(x => x.result !== "PUSH");
-    const wins = graded.filter(x => x.result === "WIN").length;
-    const losses = graded.filter(x => x.result === "LOSS").length;
-    const profit = results.reduce((s,x) => s + x.profit_units, 0);
-    const roi = graded.length ? profit / graded.length * 100 : 0;
-
-    function bucket(min:number){
-      const x = results.filter(r => Math.abs(r.edge_yards) >= min && r.result !== "PUSH");
-      const w = x.filter(r => r.result === "WIN").length;
-      const p = x.reduce((s,r)=>s+r.profit_units,0);
+    function summarize(rows:any[]) {
+      const graded = rows.filter(x => x.result !== "PUSH");
+      const wins = graded.filter(x => x.result === "WIN").length;
+      const losses = graded.filter(x => x.result === "LOSS").length;
+      const profit = rows.reduce((sum,x) => sum + x.profit_units, 0);
       return {
-        bets:x.length,
-        wins:w,
-        losses:x.length-w,
-        win_rate:x.length?Number((w/x.length*100).toFixed(2)):null,
-        profit_units:Number(p.toFixed(3)),
-        roi_percent:x.length?Number((p/x.length*100).toFixed(2)):null
+        bets: graded.length,
+        wins,
+        losses,
+        win_rate: graded.length ? Number((wins / graded.length * 100).toFixed(2)) : null,
+        profit_units: Number(profit.toFixed(3)),
+        roi_percent: graded.length ? Number((profit / graded.length * 100).toFixed(2)) : null,
       };
     }
 
+    function bucket(rows:any[], min:number) {
+      return summarize(rows.filter(r => Math.abs(r.edge_yards) >= min && r.result !== "PUSH"));
+    }
+
+    function breakdown(rows:any[], predicate:(r:any)=>boolean) {
+      const x = rows.filter(predicate);
+      return {
+        overall: summarize(x),
+        edge_5_plus: bucket(x,5),
+        edge_10_plus: bucket(x,10),
+        edge_15_plus: bucket(x,15),
+        edge_20_plus: bucket(x,20),
+      };
+    }
+
+    for (let week = 1; week <= 18; week++) {
+      const weekGames = season2025.filter(g => g.week === week);
+
+      // Only fetch sportsbook history for the requested range. Earlier weeks are
+      // still added to player history after the week so projections remain chronological.
+      if (week >= START_WEEK && week <= END_WEEK) {
+        const window = WEEK_WINDOWS_2025[week];
+        if (!window) throw new Error(`No 2025 date window configured for Week ${week}.`);
+
+        const weekStartMs = new Date(window.start).getTime();
+        const weekEndMs = new Date(window.end).getTime();
+        const discoverySnapshots = [
+          window.discovery,
+          new Date(weekStartMs + 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, "Z"),
+          new Date(weekStartMs + 3 * 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, "Z"),
+          new Date(weekStartMs + 4 * 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, "Z"),
+        ];
+
+        const eventsById = new Map<string,any>();
+        for (const date of discoverySnapshots) {
+          const r = await oddsJson(
+            `${ODDS_BASE}/historical/sports/${SPORT}/events?date=${encodeURIComponent(date)}&dateFormat=iso`,
+            apiKey
+          );
+          lastUsage = r.usage;
+          const events = Array.isArray(r.data?.data) ? r.data.data : [];
+          for (const event of events) {
+            const commenceMs = new Date(String(event.commence_time || "")).getTime();
+            if (Number.isFinite(commenceMs) && commenceMs >= weekStartMs && commenceMs <= weekEndMs) {
+              eventsById.set(event.id, event);
+            }
+          }
+        }
+
+        const weekRows:any[] = [];
+        let weekAttempts = 0;
+        let weekCalls = 0;
+        let weekMatched = 0;
+
+        for (const event of eventsById.values()) {
+          const commence = String(event.commence_time || "");
+          const kickoffMs = new Date(commence).getTime();
+          if (!Number.isFinite(kickoffMs) || kickoffMs < weekStartMs || kickoffMs > weekEndMs) continue;
+
+          const snapshot = isoMinusMinutes(commence, SNAPSHOT_MINUTES_BEFORE_KICKOFF);
+          let odds:any;
+          weekAttempts++;
+          totalEventOddsAttempts++;
+
+          try {
+            const r = await oddsJson(
+              `${ODDS_BASE}/historical/sports/${SPORT}/events/${event.id}/odds?regions=us&markets=${MARKET}&oddsFormat=american&dateFormat=iso&date=${encodeURIComponent(snapshot)}`,
+              apiKey
+            );
+            lastUsage = r.usage;
+            odds = r.data?.data ?? r.data;
+            weekCalls++;
+            totalEventOddsCalls++;
+          } catch (error:any) {
+            historicalOddsErrors.push({
+              week,
+              event_id:event.id,
+              home_team:event.home_team,
+              away_team:event.away_team,
+              commence_time:commence,
+              snapshot_requested:snapshot,
+              error:error?.message || String(error),
+            });
+            continue;
+          }
+
+          const marketPlayers = new Set<string>();
+          for (const book of odds?.bookmakers || [])
+            for (const market of book.markets || [])
+              if (market.key === MARKET)
+                for (const outcome of market.outcomes || [])
+                  if (outcome.description) marketPlayers.add(normalizeName(outcome.description));
+
+          const candidates = weekGames.filter(g => marketPlayers.has(normalizeName(g.playerName)));
+          if (!candidates.length) continue;
+          weekMatched++;
+          totalEventsMatched++;
+
+          for (const game of candidates) {
+            const playerHistory = history.get(game.playerId);
+            if (!playerHistory) continue;
+            const model = projectV5(playerHistory, game.position || "UNKNOWN");
+            if (!model) continue;
+
+            const market = chooseMainLine(odds?.bookmakers || [], game.playerName);
+            if (!market) continue;
+
+            const line = market.selected.line;
+            const edgeYards = model.projection - line;
+            const side:"OVER"|"UNDER" = edgeYards >= 0 ? "OVER" : "UNDER";
+            const price = side === "OVER" ? market.selected.over_odds : market.selected.under_odds;
+            const graded = gradeBet(side, line, game.rushYards, price);
+
+            weekRows.push({
+              week,
+              event_id:event.id,
+              commence_time:commence,
+              snapshot_requested:snapshot,
+              player:game.playerName,
+              team:game.team,
+              position:game.position,
+              actual_rushing_yards:game.rushYards,
+              actual_carries:game.carries,
+              v5_projection:Number(model.projection.toFixed(1)),
+              sportsbook:market.selected.sportsbook,
+              sportsbook_key:market.selected.sportsbook_key,
+              line,
+              side,
+              odds:price,
+              edge_yards:Number(edgeYards.toFixed(1)),
+              result:graded.result,
+              profit_units:Number(graded.profit.toFixed(3)),
+              prior_games:model.priorGames,
+              v5_abs_error:Number(Math.abs(model.projection - game.rushYards).toFixed(1)),
+              market_abs_error:Number(Math.abs(line - game.rushYards).toFixed(1)),
+            });
+          }
+        }
+
+        results.push(...weekRows);
+        weekSummaries.push({
+          week,
+          nflverse_week_player_games:weekGames.length,
+          historical_events_seen:eventsById.size,
+          historical_event_odds_attempts:weekAttempts,
+          historical_event_odds_calls:weekCalls,
+          historical_event_odds_errors:historicalOddsErrors.filter(e => e.week === week).length,
+          events_with_matched_prop_players:weekMatched,
+          ...summarize(weekRows),
+        });
+      }
+
+      // Add this completed week's results only AFTER all predictions for the week.
+      for (const game of weekGames) addHistory(history, game);
+    }
+
+    const graded = results.filter(x => x.result !== "PUSH");
+    const v5Mae = graded.length
+      ? graded.reduce((s,x) => s + x.v5_abs_error, 0) / graded.length
+      : null;
+    const marketMae = graded.length
+      ? graded.reduce((s,x) => s + x.market_abs_error, 0) / graded.length
+      : null;
+
     return NextResponse.json({
       success:true,
-      version:"2.3-rushing-v5-historical-sportsbook-week-runner",
-      purpose:"Verify frozen Rushing V5 against real pregame 2025 historical player_rush_yds lines before running a full-season sportsbook backtest.",
+      version:"3.0-rushing-v5-historical-multiweek-runner",
+      purpose:"Run frozen Rushing V5 across multiple 2025 regular-season weeks using real pregame historical player_rush_yds lines.",
       model:"Frozen 5.0-rushing-v5-direct-yards",
-      test_scope:{season:TEST_SEASON,week:TEST_WEEK,snapshot_minutes_before_kickoff:SNAPSHOT_MINUTES_BEFORE_KICKOFF,market:MARKET,region:"us"},
-      important:"Run one 2025 regular-season week at a time to avoid Vercel timeouts and unnecessary repeated historical API spend.",
+      test_scope:{
+        season:TEST_SEASON,
+        start_week:START_WEEK,
+        end_week:END_WEEK,
+        snapshot_minutes_before_kickoff:SNAPSHOT_MINUTES_BEFORE_KICKOFF,
+        market:MARKET,
+        region:"us",
+      },
+      methodology:{
+        chronological_history:true,
+        same_week_results_added_after_predictions:true,
+        sportsbook_selection:"balanced paired main line",
+        stake:"1 unit risked per bet",
+      },
       api_usage:lastUsage,
-      diagnostics:{nflverse_week_player_games:weekGames.length,historical_events_seen:eventList.length,historical_event_odds_attempts:historicalOddsAttempts,historical_event_odds_calls:historicalOddsCalls,historical_event_odds_errors:historicalOddsErrors.length,events_with_matched_prop_players:eventsMatched,graded_bets:graded.length},
-      historical_odds_error_samples: historicalOddsErrors.slice(0, 5),
-      overall:{bets:graded.length,wins,losses,win_rate:graded.length?Number((wins/graded.length*100).toFixed(2)):null,profit_units:Number(profit.toFixed(3)),roi_percent:graded.length?Number(roi.toFixed(2)):null},
-      edge_buckets:{edge_5_plus:bucket(5),edge_10_plus:bucket(10),edge_15_plus:bucket(15),edge_20_plus:bucket(20)},
-      bets:results
+      diagnostics:{
+        historical_event_odds_attempts:totalEventOddsAttempts,
+        historical_event_odds_calls:totalEventOddsCalls,
+        historical_event_odds_errors:historicalOddsErrors.length,
+        events_with_matched_prop_players:totalEventsMatched,
+        graded_bets:graded.length,
+      },
+      overall:summarize(results),
+      edge_buckets:{
+        edge_5_plus:bucket(results,5),
+        edge_10_plus:bucket(results,10),
+        edge_15_plus:bucket(results,15),
+        edge_20_plus:bucket(results,20),
+      },
+      position_breakdown:{
+        QB:breakdown(results,r => r.position === "QB"),
+        RB:breakdown(results,r => r.position === "RB"),
+        OTHER:breakdown(results,r => r.position !== "QB" && r.position !== "RB"),
+      },
+      side_breakdown:{
+        OVER:breakdown(results,r => r.side === "OVER"),
+        UNDER:breakdown(results,r => r.side === "UNDER"),
+      },
+      projection_accuracy:{
+        matched_bets:graded.length,
+        v5_mae:v5Mae === null ? null : Number(v5Mae.toFixed(2)),
+        sportsbook_line_mae:marketMae === null ? null : Number(marketMae.toFixed(2)),
+        v5_minus_market_mae:v5Mae === null || marketMae === null ? null : Number((v5Mae-marketMae).toFixed(2)),
+      },
+      weeks:weekSummaries,
+      historical_odds_error_samples:historicalOddsErrors.slice(0,10),
+      bets:results,
     });
   } catch (error:any) {
-    return NextResponse.json({success:false,version:"2.3-rushing-v5-historical-sportsbook-week-runner",error:error?.message||String(error)},{status:500});
+    return NextResponse.json({
+      success:false,
+      version:"3.0-rushing-v5-historical-multiweek-runner",
+      error:error?.message || String(error),
+    },{status:500});
   }
 }
