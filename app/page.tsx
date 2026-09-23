@@ -366,7 +366,7 @@ function diversifiedSelection<T>(items: T[], count: number, offset: number, stri
   return result;
 }
 
-function TeamLogo({ sport, team }: { sport: "NFL" | "MLB" | "NHL"; team: string }) {
+function TeamLogo({ sport, team }: { sport: "NFL" | "CFB" | "MLB" | "NHL"; team: string }) {
   const aliases: Record<string, Record<string, string>> = {
     NFL: {
       ARI: "ari", ATL: "atl", BAL: "bal", BUF: "buf", CAR: "car", CHI: "chi", CIN: "cin", CLE: "cle",
@@ -387,6 +387,67 @@ function TeamLogo({ sport, team }: { sport: "NFL" | "MLB" | "NHL"; team: string 
       COL: "col", DET: "det", HOU: "hou", KC: "kc", LAA: "laa", LAD: "lad", MIA: "mia", MIL: "mil", MIN: "min", NYM: "nym",
       NYY: "nyy", OAK: "oak", PHI: "phi", PIT: "pit", SD: "sd", SEA: "sea", SF: "sf", SFG: "sf", STL: "stl", TB: "tb", TEX: "tex", TOR: "tor", WSH: "wsh"
     },
+    CFB: {
+      ALA: "333", ALABAMA: "333",
+      ARK: "8", ARKANSAS: "8",
+      AUB: "2", AUBURN: "2",
+      BAY: "239", BAYLOR: "239",
+      BC: "103", "BOSTON COLLEGE": "103",
+      BYU: "252",
+      CAL: "25", CALIFORNIA: "25",
+      CLEM: "228", CLEMSON: "228",
+      COLO: "38", COLORADO: "38",
+      DUKE: "150",
+      FLA: "57", FLORIDA: "57",
+      FSU: "52", "FLORIDA STATE": "52",
+      UGA: "61", GEORGIA: "61",
+      GT: "59", "GEORGIA TECH": "59",
+      ILL: "356", ILLINOIS: "356",
+      IU: "84", INDIANA: "84",
+      IOWA: "2294",
+      ISU: "66", "IOWA STATE": "66",
+      KU: "2305", KANSAS: "2305",
+      KSU: "2306", "KANSAS STATE": "2306",
+      UK: "96", KENTUCKY: "96",
+      LSU: "99",
+      LOU: "97", LOUISVILLE: "97",
+      MIA: "2390", MIAMI: "2390",
+      MICH: "130", MICHIGAN: "130",
+      MSU: "127", "MICHIGAN STATE": "127",
+      MINN: "135", MINNESOTA: "135",
+      MISS: "145", "OLE MISS": "145",
+      MSST: "344", "MISSISSIPPI STATE": "344",
+      MIZ: "142", MIZZOU: "142", MISSOURI: "142",
+      NEB: "158", NEBRASKA: "158",
+      UNC: "153", "NORTH CAROLINA": "153",
+      NCST: "152", "NC STATE": "152",
+      NW: "77", NORTHWESTERN: "77",
+      ND: "87", "NOTRE DAME": "87",
+      OSU: "194", "OHIO STATE": "194",
+      OU: "201", OKLAHOMA: "201",
+      OKST: "197", "OKLAHOMA STATE": "197",
+      ORE: "2483", OREGON: "2483",
+      PSU: "213", "PENN STATE": "213",
+      PITT: "221", PITTSBURGH: "221",
+      PUR: "2509", PURDUE: "2509",
+      SC: "2579", "SOUTH CAROLINA": "2579",
+      STAN: "24", STANFORD: "24",
+      SYR: "183", SYRACUSE: "183",
+      TCU: "2628",
+      TENN: "2633", TENNESSEE: "2633",
+      TEX: "251", TEXAS: "251",
+      TAMU: "245", "TEXAS A&M": "245",
+      TTU: "2641", "TEXAS TECH": "2641",
+      UCF: "2116",
+      UCLA: "26",
+      USC: "30",
+      UTAH: "254",
+      VT: "259", "VIRGINIA TECH": "259",
+      UVA: "258", VIRGINIA: "258",
+      WASH: "264", WASHINGTON: "264",
+      WVU: "277", "WEST VIRGINIA": "277",
+      WISC: "275", WISCONSIN: "275"
+    },
     NHL: {
       ANA: "ana", BOS: "bos", BUF: "buf", CAR: "car", CBJ: "cbj", CGY: "cgy", CHI: "chi", COL: "col", DAL: "dal", DET: "det",
       EDM: "edm", FLA: "fla", LAK: "la", LA: "la", MIN: "min", MTL: "mtl", NJD: "nj", NJ: "nj", NSH: "nsh", NYI: "nyi", NYR: "nyr",
@@ -396,7 +457,10 @@ function TeamLogo({ sport, team }: { sport: "NFL" | "MLB" | "NHL"; team: string 
 
   const key = team.trim().toUpperCase();
   const code = aliases[sport]?.[key] || key.toLowerCase();
-  const url = `https://a.espncdn.com/i/teamlogos/${sport.toLowerCase()}/500/${code}.png`;
+  const url =
+    sport === "CFB"
+      ? `https://a.espncdn.com/i/teamlogos/ncaa/500/${code}.png`
+      : `https://a.espncdn.com/i/teamlogos/${sport.toLowerCase()}/500/${code}.png`;
 
   return (
     <img
@@ -1726,9 +1790,13 @@ const [cfbError, setCfbError] =
               className="grid gap-3 rounded-lg border border-white/10 bg-white/[0.03] p-4 md:grid-cols-5 md:items-center"
             >
               <div>
-                <p className="font-bold">
-                  {game.away_team} @ {game.home_team}
-                </p>
+                <div className="flex items-center gap-2 font-bold">
+                  <TeamLogo sport="CFB" team={game.away_team} />
+                  <span>{game.away_team}</span>
+                  <span className="text-slate-500">@</span>
+                  <TeamLogo sport="CFB" team={game.home_team} />
+                  <span>{game.home_team}</span>
+                </div>
 
                 <p className="mt-1 text-xs text-slate-500">
                   {game.rdg
@@ -3156,7 +3224,7 @@ function CFBBuilderCard({ title, subtitle, candidates, required, featured = fals
         <span className={qualified ? "rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-bold text-green-400" : "rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-400"}>{qualified ? "QUALIFIED" : "NOT ENOUGH LEGS"}</span>
       </div>
       {candidates.length === 0 ? <div className="mt-6 rounded-lg border border-white/10 bg-black/20 p-4"><p className="font-bold">No qualifying selection</p></div> : (
-        <div className="mt-6 space-y-3">{candidates.map((c, i) => <div key={c.event_id} className="rounded-lg border border-white/10 bg-black/20 p-4"><p className="text-[10px] font-bold uppercase text-slate-500">{required > 1 ? `LEG ${i + 1}` : c.signal}</p><div className="mt-1 flex justify-between gap-4"><div><p className="text-lg font-bold">{c.display_bet}</p><p className="text-xs text-slate-500">{c.matchup}</p></div><div className="text-right"><p className="font-bold text-green-400">{c.edge.toFixed(1)} pts</p><p className="text-[10px] uppercase text-slate-500">Model vs Market</p></div></div><p className="mt-3 text-xs text-slate-500">{c.sample_status} • Hard Rock {c.odds || "—"}</p></div>)}</div>
+        <div className="mt-6 space-y-3">{candidates.map((c, i) => <div key={c.event_id} className="rounded-lg border border-white/10 bg-black/20 p-4"><p className="text-[10px] font-bold uppercase text-slate-500">{required > 1 ? `LEG ${i + 1}` : c.signal}</p><div className="mt-1 flex justify-between gap-4"><div><div className="flex items-center gap-2"><TeamLogo sport="CFB" team={c.team} /><p className="text-lg font-bold">{c.display_bet}</p></div><p className="mt-1 text-xs text-slate-500">{c.matchup}</p></div><div className="text-right"><p className="font-bold text-green-400">{c.edge.toFixed(1)} pts</p><p className="text-[10px] uppercase text-slate-500">Model vs Market</p></div></div><p className="mt-3 text-xs text-slate-500">{c.sample_status} • Hard Rock {c.odds || "—"}</p></div>)}</div>
       )}
     </article>
   );
