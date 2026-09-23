@@ -4,22 +4,23 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const VERSION = "7.0-odds-api-market-data-test";
+const VERSION = "7.0.1-odds-api-market-data-test";
 
 const BASE = "https://api.the-odds-api.com/v4";
 const SPORT = "americanfootball_nfl";
 const MARKET = "player_rush_yds";
 const REGION = "us";
 
-// Test a completed 2025 NFL Sunday.
-// Historical events lookup itself does not consume quota.
+// Completed 2025 NFL Sunday.
+// Historical event lookup is used first so we only spend credits
+// on ONE player-prop event during this connection test.
 const SNAPSHOT_DATE = "2025-09-07T16:00:00Z";
 
 async function getJson(url: string) {
   const res = await fetch(url, {
     headers: {
       Accept: "application/json",
-      "User-Agent": "RDG-V7-OddsAPI-Test/7.0",
+      "User-Agent": "RDG-V7-OddsAPI-Test/7.0.1",
     },
     cache: "no-store",
   });
@@ -31,7 +32,9 @@ async function getJson(url: string) {
   try {
     body = text ? JSON.parse(text) : null;
   } catch {
-    body = { raw: text.slice(0, 3000) };
+    body = {
+      raw: text.slice(0, 3000),
+    };
   }
 
   return {
@@ -42,8 +45,10 @@ async function getJson(url: string) {
     quota: {
       requests_remaining:
         res.headers.get("x-requests-remaining"),
+
       requests_used:
         res.headers.get("x-requests-used"),
+
       requests_last:
         res.headers.get("x-requests-last"),
     },
@@ -51,9 +56,30 @@ async function getJson(url: string) {
 }
 
 function getData(body: any): any[] {
-  if (Array.isArray(body)) return body;
-  if (Array.isArray(body?.data)) return body.data;
+  if (Array.isArray(body)) {
+    return body;
+  }
+
+  if (Array.isArray(body?.data)) {
+    return body.data;
+  }
+
   return [];
+}
+
+// The Odds API historical endpoint expects timestamps in the form:
+//
+// 2025-09-07T16:55:00Z
+//
+// JavaScript's toISOString() normally produces:
+//
+// 2025-09-07T16:55:00.000Z
+//
+// Remove milliseconds before sending the timestamp.
+function oddsApiTimestamp(date: Date): string {
+  return date
+    .toISOString()
+    .replace(/\.\d{3}Z$/, "Z");
 }
 
 export async function GET() {
@@ -65,19 +91,19 @@ export async function GET() {
         {
           success: false,
           version: VERSION,
-          error: "Missing ODDS_API_KEY environment variable.",
+          error:
+            "Missing ODDS_API_KEY environment variable.",
         },
-        { status: 500 }
+        {
+          status: 500,
+        }
       );
     }
 
-    // ------------------------------------------------------------------
+    // ================================================================
     // STEP 1
-    // Historical events lookup.
-    //
-    // According to The Odds API documentation this endpoint does not
-    // consume betting-market credits.
-    // ------------------------------------------------------------------
+    // FIND HISTORICAL NFL EVENTS
+    // ================================================================
 
     const eventsUrl =
       `${BASE}/historical/sports/${SPORT}/events` +
@@ -85,177 +111,296 @@ export async function GET() {
       `&date=${encodeURIComponent(SNAPSHOT_DATE)}` +
       `&dateFormat=iso`;
 
-    const eventsResult = await getJson(eventsUrl);
+    const eventsResult =
+      await getJson(eventsUrl);
 
     if (!eventsResult.ok) {
       return NextResponse.json({
         success: false,
+
         version: VERSION,
 
-        stage: "historical_events",
+        stage:
+          "historical_events",
 
-        status: eventsResult.status,
-        response: eventsResult.body,
-        quota: eventsResult.quota,
+        status:
+          eventsResult.status,
+
+        response:
+          eventsResult.body,
+
+        quota:
+          eventsResult.quota,
 
         message:
-          "Historical NFL event lookup failed. Stop here before making any player-prop request.",
+          "Historical NFL event lookup failed. Stop here before making a player-prop request.",
       });
     }
 
-    const events = getData(eventsResult.body);
+    const events =
+      getData(eventsResult.body);
 
     if (!events.length) {
       return NextResponse.json({
         success: false,
+
         version: VERSION,
 
-        stage: "historical_events",
+        stage:
+          "historical_events",
 
         historical_snapshot:
-          eventsResult.body?.timestamp || SNAPSHOT_DATE,
+          eventsResult.body?.timestamp ||
+          SNAPSHOT_DATE,
 
         events_found: 0,
 
-        quota: eventsResult.quota,
+        quota:
+          eventsResult.quota,
 
         message:
           "Historical endpoint worked, but no NFL events were returned for this snapshot.",
       });
     }
 
-    // ------------------------------------------------------------------
-    // Pick ONE event only.
+    // ================================================================
+    // STEP 2
+    // SELECT ONE EVENT
     //
-    // We intentionally do NOT loop through every NFL game because
-    // historical player-prop requests consume quota.
-    // ------------------------------------------------------------------
+    // IMPORTANT:
+    // We deliberately test only one NFL event so we do not burn
+    // unnecessary Odds API credits during development.
+    // ================================================================
 
-    const sortedEvents = [...events].sort(
-      (a: any, b: any) =>
-        new Date(a.commence_time).getTime() -
-        new Date(b.commence_time).getTime()
-    );
+    const sortedEvents =
+      [...events].sort(
+        (a: any, b: any) =>
+          new Date(
+            a.commence_time
+          ).getTime() -
+          new Date(
+            b.commence_time
+          ).getTime()
+      );
+
+    const snapshotTime =
+      new Date(
+        SNAPSHOT_DATE
+      ).getTime();
 
     const event =
       sortedEvents.find(
         (e: any) =>
           e?.id &&
           e?.commence_time &&
-          new Date(e.commence_time).getTime() >
-            new Date(SNAPSHOT_DATE).getTime()
-      ) || sortedEvents.find((e: any) => e?.id);
+          new Date(
+            e.commence_time
+          ).getTime() >
+            snapshotTime
+      ) ||
+      sortedEvents.find(
+        (e: any) => e?.id
+      );
 
     if (!event?.id) {
       return NextResponse.json({
         success: false,
+
         version: VERSION,
 
-        stage: "select_event",
+        stage:
+          "select_event",
 
-        events_found: events.length,
+        events_found:
+          events.length,
 
-        sample_events: events.slice(0, 10),
+        sample_events:
+          events.slice(0, 10),
 
         message:
           "Historical events were returned but no usable event ID was found.",
       });
     }
 
-    // ------------------------------------------------------------------
-    // STEP 2
-    // Request ONE historical player_rush_yds market.
+    // ================================================================
+    // STEP 3
+    // CREATE A NEAR-CLOSING SNAPSHOT
     //
-    // One market + one region = controlled historical API cost.
-    // ------------------------------------------------------------------
+    // Request sportsbook props five minutes before scheduled kickoff.
+    //
+    // This is only a connection test.
+    //
+    // Later, the actual V7 backtest will use a consistent historical
+    // snapshot rule across every game.
+    // ================================================================
 
-    // Request the snapshot shortly before the game's scheduled kickoff.
-    // Subtract five minutes so we're looking for a near-closing market
-    // while remaining before commencement.
-    const kickoff = new Date(event.commence_time);
+    const kickoff =
+      new Date(
+        event.commence_time
+      );
 
-    const requestedMarketSnapshot = new Date(
-      kickoff.getTime() - 5 * 60 * 1000
-    ).toISOString();
+    const requestedMarketSnapshot =
+      oddsApiTimestamp(
+        new Date(
+          kickoff.getTime() -
+            5 * 60 * 1000
+        )
+      );
+
+    // ================================================================
+    // STEP 4
+    // REQUEST HISTORICAL PLAYER RUSHING YARDS
+    //
+    // ONE event
+    // ONE region
+    // ONE market
+    //
+    // This keeps the development request controlled.
+    // ================================================================
 
     const oddsUrl =
       `${BASE}/historical/sports/${SPORT}` +
-      `/events/${encodeURIComponent(event.id)}/odds` +
-      `?apiKey=${encodeURIComponent(apiKey)}` +
-      `&regions=${encodeURIComponent(REGION)}` +
-      `&markets=${encodeURIComponent(MARKET)}` +
+      `/events/${encodeURIComponent(
+        event.id
+      )}/odds` +
+      `?apiKey=${encodeURIComponent(
+        apiKey
+      )}` +
+      `&regions=${encodeURIComponent(
+        REGION
+      )}` +
+      `&markets=${encodeURIComponent(
+        MARKET
+      )}` +
       `&oddsFormat=american` +
       `&dateFormat=iso` +
-      `&date=${encodeURIComponent(requestedMarketSnapshot)}`;
+      `&date=${encodeURIComponent(
+        requestedMarketSnapshot
+      )}`;
 
-    const oddsResult = await getJson(oddsUrl);
+    const oddsResult =
+      await getJson(oddsUrl);
 
     if (!oddsResult.ok) {
       return NextResponse.json({
         success: false,
+
         version: VERSION,
 
-        stage: "historical_player_props",
+        stage:
+          "historical_player_props",
 
         tested_event: {
-          id: event.id,
-          away_team: event.away_team,
-          home_team: event.home_team,
-          commence_time: event.commence_time,
+          id:
+            event.id,
+
+          away_team:
+            event.away_team,
+
+          home_team:
+            event.home_team,
+
+          commence_time:
+            event.commence_time,
         },
 
-        requested_snapshot: requestedMarketSnapshot,
+        requested_snapshot:
+          requestedMarketSnapshot,
 
-        market: MARKET,
-        region: REGION,
+        market:
+          MARKET,
 
-        status: oddsResult.status,
-        response: oddsResult.body,
+        region:
+          REGION,
 
-        quota: oddsResult.quota,
+        status:
+          oddsResult.status,
+
+        response:
+          oddsResult.body,
+
+        quota:
+          oddsResult.quota,
 
         message:
           "Historical event was found, but the player rushing market request failed. Do not repeatedly rerun this endpoint until we inspect this response.",
       });
     }
 
-    const oddsEvent = oddsResult.body?.data || {};
+    // ================================================================
+    // STEP 5
+    // READ HISTORICAL ODDS RESPONSE
+    // ================================================================
 
-    const bookmakers = Array.isArray(oddsEvent?.bookmakers)
-      ? oddsEvent.bookmakers
-      : [];
+    const oddsEvent =
+      oddsResult.body?.data ||
+      {};
 
-    const extractedLines: any[] = [];
-
-    // ------------------------------------------------------------------
-    // Extract rushing props into a simple RDG-friendly structure.
-    // ------------------------------------------------------------------
-
-    for (const bookmaker of bookmakers) {
-      const markets = Array.isArray(bookmaker?.markets)
-        ? bookmaker.markets
+    const bookmakers =
+      Array.isArray(
+        oddsEvent?.bookmakers
+      )
+        ? oddsEvent.bookmakers
         : [];
 
-      const rushingMarket = markets.find(
-        (m: any) => m?.key === MARKET
-      );
+    const extractedLines: any[] =
+      [];
 
-      if (!rushingMarket) continue;
+    // ================================================================
+    // STEP 6
+    // NORMALIZE PLAYER RUSHING LINES
+    //
+    // Convert Odds API format into a simpler RDG format.
+    // ================================================================
 
-      const outcomes = Array.isArray(rushingMarket?.outcomes)
-        ? rushingMarket.outcomes
-        : [];
+    for (
+      const bookmaker
+      of bookmakers
+    ) {
+      const markets =
+        Array.isArray(
+          bookmaker?.markets
+        )
+          ? bookmaker.markets
+          : [];
 
-      for (const outcome of outcomes) {
+      const rushingMarket =
+        markets.find(
+          (m: any) =>
+            m?.key === MARKET
+        );
+
+      if (!rushingMarket) {
+        continue;
+      }
+
+      const outcomes =
+        Array.isArray(
+          rushingMarket?.outcomes
+        )
+          ? rushingMarket.outcomes
+          : [];
+
+      for (
+        const outcome
+        of outcomes
+      ) {
         extractedLines.push({
-          bookmaker_key: bookmaker.key || null,
-          bookmaker: bookmaker.title || null,
+          bookmaker_key:
+            bookmaker.key ||
+            null,
+
+          bookmaker:
+            bookmaker.title ||
+            null,
 
           bookmaker_last_update:
-            bookmaker.last_update || null,
+            bookmaker.last_update ||
+            null,
 
           market_last_update:
-            rushingMarket.last_update || null,
+            rushingMarket.last_update ||
+            null,
 
           player:
             outcome.description ||
@@ -263,25 +408,35 @@ export async function GET() {
             null,
 
           side:
-            outcome.name || null,
+            outcome.name ||
+            null,
 
           line:
-            typeof outcome.point === "number"
+            typeof outcome.point ===
+            "number"
               ? outcome.point
               : null,
 
           price:
-            typeof outcome.price === "number"
+            typeof outcome.price ===
+            "number"
               ? outcome.price
               : null,
         });
       }
     }
 
+    // ================================================================
+    // STEP 7
+    // COVERAGE DIAGNOSTICS
+    // ================================================================
+
     const players = [
       ...new Set(
         extractedLines
-          .map((x) => x.player)
+          .map(
+            (x) => x.player
+          )
           .filter(Boolean)
       ),
     ];
@@ -289,7 +444,10 @@ export async function GET() {
     const sportsbookNames = [
       ...new Set(
         extractedLines
-          .map((x) => x.bookmaker)
+          .map(
+            (x) =>
+              x.bookmaker
+          )
           .filter(Boolean)
       ),
     ];
@@ -297,20 +455,90 @@ export async function GET() {
     const sportsbookKeys = [
       ...new Set(
         extractedLines
-          .map((x) => x.bookmaker_key)
+          .map(
+            (x) =>
+              x.bookmaker_key
+          )
           .filter(Boolean)
       ),
     ];
 
     const linesAvailable =
       extractedLines.filter(
-        (x) => typeof x.line === "number"
+        (x) =>
+          typeof x.line ===
+          "number"
+      );
+
+    // Count complete Over/Under pairs.
+    const playerSides =
+      new Map<
+        string,
+        Set<string>
+      >();
+
+    for (
+      const line
+      of extractedLines
+    ) {
+      if (!line.player) {
+        continue;
+      }
+
+      const key =
+        `${line.bookmaker_key || "unknown"}` +
+        `::${line.player}`;
+
+      const sides =
+        playerSides.get(key) ||
+        new Set<string>();
+
+      if (line.side) {
+        sides.add(
+          String(
+            line.side
+          ).toLowerCase()
+        );
+      }
+
+      playerSides.set(
+        key,
+        sides
+      );
+    }
+
+    let completeOverUnderPairs =
+      0;
+
+    for (
+      const sides
+      of playerSides.values()
+    ) {
+      if (
+        sides.has("over") &&
+        sides.has("under")
+      ) {
+        completeOverUnderPairs++;
+      }
+    }
+
+    // ================================================================
+    // STEP 8
+    // RETURN TEST RESULT
+    // ================================================================
+
+    const readyForV7 =
+      Boolean(
+        event.id &&
+        players.length > 0 &&
+        linesAvailable.length > 0
       );
 
     return NextResponse.json({
       success: true,
 
-      version: VERSION,
+      version:
+        VERSION,
 
       purpose:
         "Validate The Odds API historical NFL rushing-yard player props before building RDG Rushing V7.",
@@ -319,56 +547,88 @@ export async function GET() {
         "DATA CONNECTION TEST ONLY — V5/V6 UNCHANGED",
 
       historical_event_lookup: {
-        requested_snapshot: SNAPSHOT_DATE,
+        requested_snapshot:
+          SNAPSHOT_DATE,
 
         returned_snapshot:
-          eventsResult.body?.timestamp || null,
+          eventsResult.body
+            ?.timestamp ||
+          null,
 
-        events_found: events.length,
+        events_found:
+          events.length,
 
-        quota: eventsResult.quota,
+        quota:
+          eventsResult.quota,
       },
 
       tested_event: {
-        id: event.id,
-        away_team: event.away_team,
-        home_team: event.home_team,
-        commence_time: event.commence_time,
+        id:
+          event.id,
+
+        away_team:
+          event.away_team,
+
+        home_team:
+          event.home_team,
+
+        commence_time:
+          event.commence_time,
       },
 
       historical_prop_request: {
-        requested_snapshot: requestedMarketSnapshot,
+        requested_snapshot:
+          requestedMarketSnapshot,
 
         returned_snapshot:
-          oddsResult.body?.timestamp || null,
+          oddsResult.body
+            ?.timestamp ||
+          null,
 
         previous_snapshot:
-          oddsResult.body?.previous_timestamp || null,
+          oddsResult.body
+            ?.previous_timestamp ||
+          null,
 
         next_snapshot:
-          oddsResult.body?.next_timestamp || null,
+          oddsResult.body
+            ?.next_timestamp ||
+          null,
 
-        market: MARKET,
-        region: REGION,
+        market:
+          MARKET,
 
-        quota: oddsResult.quota,
+        region:
+          REGION,
+
+        quota:
+          oddsResult.quota,
       },
 
       coverage: {
-        bookmakers_found: bookmakers.length,
+        bookmakers_found:
+          bookmakers.length,
 
-        sportsbook_names: sportsbookNames,
+        sportsbook_names:
+          sportsbookNames,
 
-        sportsbook_keys: sportsbookKeys,
+        sportsbook_keys:
+          sportsbookKeys,
 
-        unique_players: players.length,
+        unique_players:
+          players.length,
 
-        player_names: players,
+        player_names:
+          players,
 
-        total_outcomes: extractedLines.length,
+        total_outcomes:
+          extractedLines.length,
 
         outcomes_with_numeric_line:
           linesAvailable.length,
+
+        complete_over_under_pairs:
+          completeOverUnderPairs,
       },
 
       join_test: {
@@ -384,44 +644,57 @@ export async function GET() {
           players.length > 0,
 
         sportsbook_identity_available:
-          sportsbookKeys.length > 0,
+          sportsbookKeys.length >
+          0,
 
         rushing_line_available:
-          linesAvailable.length > 0,
+          linesAvailable.length >
+          0,
 
         ready_for_v7_backtest:
-          Boolean(
-            event.id &&
-            players.length &&
-            linesAvailable.length
-          ),
+          readyForV7,
       },
 
       extracted_rushing_lines:
-        extractedLines.slice(0, 100),
+        extractedLines.slice(
+          0,
+          150
+        ),
 
       raw_bookmaker_sample:
-        bookmakers.slice(0, 2),
+        bookmakers.slice(
+          0,
+          2
+        ),
 
       next_step:
-        linesAvailable.length > 0
+        readyForV7
           ? "PASS — historical rushing lines are available. Next build the controlled 2025 Market vs V5 vs V7 backtest."
           : "PARTIAL — API connection works, but this snapshot returned no usable player rushing lines. Inspect bookmaker/market coverage before another paid request.",
 
       important:
         "This route intentionally tests only one historical NFL event to limit Odds API usage.",
     });
-  } catch (error: any) {
+  } catch (
+    error: any
+  ) {
     return NextResponse.json(
       {
         success: false,
-        version: VERSION,
-        error: error?.message || String(error),
+
+        version:
+          VERSION,
+
+        error:
+          error?.message ||
+          String(error),
 
         message:
           "Unexpected V7 market-data test failure. Do not repeatedly rerun until the error is reviewed.",
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
 }
