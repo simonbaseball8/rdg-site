@@ -202,7 +202,9 @@ function americanProfit(odds: number, stake = 1): number {
 }
 
 function isoMinusMinutes(iso: string, minutes: number): string {
-  return new Date(new Date(iso).getTime() - minutes * 60000).toISOString();
+  return new Date(new Date(iso).getTime() - minutes * 60000)
+    .toISOString()
+    .replace(/\.\d{3}Z$/, "Z");
 }
 
 async function oddsJson(url: string, apiKey: string) {
@@ -474,7 +476,7 @@ export async function GET() {
 
     return NextResponse.json({
       success:true,
-      version:"1.6-rushing-v5-historical-odds-error-diagnostic",
+      version:"1.7-rushing-v5-historical-sportsbook-week1-test",
       purpose:"Verify frozen Rushing V5 against real pregame 2025 historical player_rush_yds lines before running a full-season sportsbook backtest.",
       model:"Frozen 5.0-rushing-v5-direct-yards",
       test_scope:{season:TEST_SEASON,week:TEST_WEEK,snapshot_minutes_before_kickoff:SNAPSHOT_MINUTES_BEFORE_KICKOFF,market:MARKET,region:"us"},
@@ -487,6 +489,6 @@ export async function GET() {
       bets:results
     });
   } catch (error:any) {
-    return NextResponse.json({success:false,version:"1.6-rushing-v5-historical-odds-error-diagnostic",error:error?.message||String(error)},{status:500});
+    return NextResponse.json({success:false,version:"1.7-rushing-v5-historical-sportsbook-week1-test",error:error?.message||String(error)},{status:500});
   }
 }
