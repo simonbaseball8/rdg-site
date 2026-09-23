@@ -508,7 +508,6 @@ function TeamLogo({ sport, team }: { sport: "NFL" | "CFB" | "MLB" | "NHL"; team:
       "NEW-MEXICO-STATE": "166",
       "SAM-HOUSTON-STATE": "2534",
       "SAM-HOUSTON": "2534",
-      "NORTH-CAROLINA-CENTRAL": "2428",
       "NOTRE-DAME": "87",
       "TEXAS-TECH": "2641",
       "CENTRAL-MICHIGAN": "2117",
