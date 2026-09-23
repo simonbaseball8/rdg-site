@@ -363,7 +363,9 @@ export async function GET() {
     const eventList = [...eventsById.values()];
     const results:any[] = [];
     let historicalOddsCalls = 0;
+    let historicalOddsAttempts = 0;
     let eventsMatched = 0;
+    const historicalOddsErrors: any[] = [];
 
     function teamNorm(s:string){return String(s||"").toLowerCase().replace(/[^a-z]/g,"");}
 
@@ -379,6 +381,7 @@ export async function GET() {
       const snapshot = isoMinusMinutes(commence, SNAPSHOT_MINUTES_BEFORE_KICKOFF);
 
       let odds:any;
+      historicalOddsAttempts++;
       try {
         const r = await oddsJson(
           `${ODDS_BASE}/historical/sports/${SPORT}/events/${event.id}/odds?regions=us&markets=${MARKET}&oddsFormat=american&dateFormat=iso&date=${encodeURIComponent(snapshot)}`,
@@ -387,7 +390,15 @@ export async function GET() {
         lastUsage = r.usage;
         odds = r.data?.data ?? r.data;
         historicalOddsCalls++;
-      } catch {
+      } catch (error: any) {
+        historicalOddsErrors.push({
+          event_id: event.id,
+          home_team: event.home_team,
+          away_team: event.away_team,
+          commence_time: commence,
+          snapshot_requested: snapshot,
+          error: error?.message || String(error),
+        });
         continue;
       }
 
@@ -463,18 +474,19 @@ export async function GET() {
 
     return NextResponse.json({
       success:true,
-      version:"1.5-rushing-v5-historical-sportsbook-week1-live-test",
+      version:"1.6-rushing-v5-historical-odds-error-diagnostic",
       purpose:"Verify frozen Rushing V5 against real pregame 2025 historical player_rush_yds lines before running a full-season sportsbook backtest.",
       model:"Frozen 5.0-rushing-v5-direct-yards",
       test_scope:{season:TEST_SEASON,week:TEST_WEEK,snapshot_minutes_before_kickoff:SNAPSHOT_MINUTES_BEFORE_KICKOFF,market:MARKET,region:"us"},
       important:"This first run intentionally tests only Week 1 to verify historical event matching, player matching, grading, and API usage before spending credits on the full season.",
       api_usage:lastUsage,
-      diagnostics:{nflverse_week_player_games:weekGames.length,historical_events_seen:eventList.length,events_with_matched_prop_players:eventsMatched,historical_event_odds_calls:historicalOddsCalls,graded_bets:graded.length},
+      diagnostics:{nflverse_week_player_games:weekGames.length,historical_events_seen:eventList.length,historical_event_odds_attempts:historicalOddsAttempts,historical_event_odds_calls:historicalOddsCalls,historical_event_odds_errors:historicalOddsErrors.length,events_with_matched_prop_players:eventsMatched,graded_bets:graded.length},
+      historical_odds_error_samples: historicalOddsErrors.slice(0, 5),
       overall:{bets:graded.length,wins,losses,win_rate:graded.length?Number((wins/graded.length*100).toFixed(2)):null,profit_units:Number(profit.toFixed(3)),roi_percent:graded.length?Number(roi.toFixed(2)):null},
       edge_buckets:{edge_5_plus:bucket(5),edge_10_plus:bucket(10),edge_15_plus:bucket(15),edge_20_plus:bucket(20)},
       bets:results
     });
   } catch (error:any) {
-    return NextResponse.json({success:false,version:"1.5-rushing-v5-historical-sportsbook-week1-live-test",error:error?.message||String(error)},{status:500});
+    return NextResponse.json({success:false,version:"1.6-rushing-v5-historical-odds-error-diagnostic",error:error?.message||String(error)},{status:500});
   }
 }
