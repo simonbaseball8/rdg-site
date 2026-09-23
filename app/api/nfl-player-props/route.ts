@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 900;
 export const maxDuration = 60;
 
-const VERSION = "6.1.1-rdg-letter-grade-player-props";
+const VERSION = "6.2-rdg-final-grading-role-protection";
 const CACHE_SECONDS = 900;
 
 const CURRENT_SEASON = 2026;
@@ -30,6 +30,7 @@ const CORE_MARKETS = [
 ] as const;
 
 type CoreMarket = (typeof CORE_MARKETS)[number];
+type NonTDMarket = Exclude<CoreMarket, "player_anytime_td">;
 
 type Grade =
   | "A+"
@@ -164,6 +165,21 @@ function normalizeName(name: string): string {
     .toLowerCase()
     .replace(/\b(jr|sr|ii|iii|iv)\b/g, "")
     .replace(/[^a-z0-9]/g, "");
+}
+
+function gradeMeaning(grade: Grade): string {
+  switch (grade) {
+    case "A+":
+      return "Exceptional RDG edge";
+    case "A":
+      return "Strong RDG edge";
+    case "B+":
+      return "Good RDG edge";
+    case "B":
+      return "Moderate RDG edge";
+    default:
+      return "No qualifying RDG edge";
+  }
 }
 
 /* =========================================================
@@ -664,7 +680,7 @@ function projectPassingYardsV2(
 }
 
 /* =========================================================
-   GENERIC HISTORY PROJECTION
+   GENERIC HISTORY MODEL
 ========================================================= */
 
 function projectHistoryMetric(
@@ -849,7 +865,7 @@ function projectHistoryMetric(
 }
 
 /* =========================================================
-   RUSHING
+   RUSHING MODEL
 ========================================================= */
 
 function projectRushingYards(
@@ -915,6 +931,14 @@ function projectRushingYards(
       ),
     );
 
+  const lastTwoCarries =
+    average(
+      lastTwo.map(
+        (game) =>
+          game.carries,
+      ),
+    );
+
   if (careerYards === null) {
     return null;
   }
@@ -947,13 +971,15 @@ function projectRushingYards(
   }
 
   let carryMultiplier = 1;
+  let recentCarryRatio:
+    number | null = null;
 
   if (
     careerCarries !== null &&
     careerCarries > 0 &&
     recentCarries !== null
   ) {
-    const roleRatio =
+    recentCarryRatio =
       recentCarries /
       careerCarries;
 
@@ -964,7 +990,10 @@ function projectRushingYards(
 
     carryMultiplier =
       1 +
-      (roleRatio - 1) *
+      (
+        recentCarryRatio -
+        1
+      ) *
         roleStrength;
 
     carryMultiplier =
@@ -1027,6 +1056,22 @@ function projectRushingYards(
             1,
           ),
 
+    last_2_carries_average:
+      lastTwoCarries === null
+        ? null
+        : round(
+            lastTwoCarries,
+            1,
+          ),
+
+    recent_carry_ratio:
+      recentCarryRatio === null
+        ? null
+        : round(
+            recentCarryRatio,
+            3,
+          ),
+
     carry_role_multiplier:
       round(
         carryMultiplier,
@@ -1042,7 +1087,7 @@ function projectRushingYards(
 }
 
 /* =========================================================
-   RECEIVING / RECEPTIONS / PASS TD
+   RECEIVING / RECEPTIONS / PASSING TD
 ========================================================= */
 
 function projectReceivingYards(
@@ -1096,7 +1141,7 @@ function projectPassingTDs(
 }
 
 /* =========================================================
-   ANYTIME TD
+   ANYTIME TD MODEL
 ========================================================= */
 
 function projectAnytimeTD(
@@ -1161,10 +1206,16 @@ function projectAnytimeTD(
 
   const shrunkRate =
     blendedHistory *
-      (0.55 * sampleWeight) +
+      (
+        0.55 *
+        sampleWeight
+      ) +
     baseline *
-      (1 -
-        0.55 * sampleWeight);
+      (
+        1 -
+        0.55 *
+        sampleWeight
+      );
 
   return {
     projection:
@@ -1308,7 +1359,10 @@ function marketPlayers(
         const key =
           normalizeName(name);
 
-        if (key && name) {
+        if (
+          key &&
+          name
+        ) {
           players.set(
             key,
             name,
@@ -1523,22 +1577,29 @@ function anytimeTDLines(
 
 function consensusLine(
   lines: SportsbookLine[],
-) {
-  const values = [
-    ...new Map(
-      lines
-        .filter(
-          (line) =>
-            line.available,
-        )
-        .map(
-          (line) => [
-            `${line.sportsbook}|${line.line}`,
-            line.line,
-          ],
-        ),
-    ).values(),
-  ];
+): number | null {
+  const bookLines =
+    new Map<
+      string,
+      number
+    >();
+
+  for (const line of lines) {
+    if (
+      line.available &&
+      Number.isFinite(
+        line.line,
+      )
+    ) {
+      bookLines.set(
+        line.sportsbook,
+        line.line,
+      );
+    }
+  }
+
+  const values =
+    [...bookLines.values()];
 
   if (!values.length) {
     return null;
@@ -1547,16 +1608,17 @@ function consensusLine(
   const counts =
     new Map<number, number>();
 
-  values.forEach(
-    (value) =>
-      counts.set(
-        value,
-        (
-          counts.get(value) ??
-          0
-        ) + 1,
-      ),
-  );
+  for (const value of values) {
+    counts.set(
+      value,
+      (
+        counts.get(
+          value,
+        ) ??
+        0
+      ) + 1,
+    );
+  }
 
   const sorted =
     [...values].sort(
@@ -1600,7 +1662,7 @@ function impliedProbability(
     string |
     number |
     null,
-) {
+): number | null {
   const n =
     Number(odds);
 
@@ -1776,25 +1838,34 @@ function noVig(
 }
 
 /* =========================================================
-   MARKET DISPERSION
+   SPORTSBOOK AGREEMENT
 ========================================================= */
 
 function sportsbookLineSpread(
   lines: SportsbookLine[],
 ): number {
-  const values =
-    lines
-      .filter(
-        (line) =>
-          line.available &&
-          Number.isFinite(
-            line.line,
-          ),
+  const bookLines =
+    new Map<
+      string,
+      number
+    >();
+
+  for (const line of lines) {
+    if (
+      line.available &&
+      Number.isFinite(
+        line.line,
       )
-      .map(
-        (line) =>
-          line.line,
+    ) {
+      bookLines.set(
+        line.sportsbook,
+        line.line,
       );
+    }
+  }
+
+  const values =
+    [...bookLines.values()];
 
   if (!values.length) {
     return 0;
@@ -1807,26 +1878,12 @@ function sportsbookLineSpread(
 }
 
 /* =========================================================
-   LETTER GRADE ENGINE
+   FINAL V6.2 GRADING
 ========================================================= */
-
-/*
-  IMPORTANT:
-
-  This score is NOT a win probability.
-
-  It is only an internal ranking score used to convert
-  model evidence into RDG letter grades.
-
-  The numerical score is NOT returned to the public API.
-*/
 
 const MARKET_SCALE:
   Record<
-    Exclude<
-      CoreMarket,
-      "player_anytime_td"
-    >,
+    NonTDMarket,
     number
   > = {
     player_pass_yds: 30,
@@ -1838,10 +1895,7 @@ const MARKET_SCALE:
 
 const MIN_EDGE:
   Record<
-    Exclude<
-      CoreMarket,
-      "player_anytime_td"
-    >,
+    NonTDMarket,
     number
   > = {
     player_pass_yds: 8,
@@ -1853,10 +1907,7 @@ const MIN_EDGE:
 
 const MAX_GOOD_SPREAD:
   Record<
-    Exclude<
-      CoreMarket,
-      "player_anytime_td"
-    >,
+    NonTDMarket,
     number
   > = {
     player_pass_yds: 8,
@@ -1866,18 +1917,30 @@ const MAX_GOOD_SPREAD:
     player_receptions: 1,
   };
 
+/*
+  Internal score is ONLY a ranking mechanism.
+
+  It is NOT returned as a percentage and is NOT
+  intended to represent probability of winning.
+*/
+
 function gradeFromScore(
   score: number,
 ): Grade {
-  if (score >= 90) {
+  /*
+    V6.2:
+    A+ threshold raised from 90 to 94.
+  */
+
+  if (score >= 94) {
     return "A+";
   }
 
-  if (score >= 80) {
+  if (score >= 82) {
     return "A";
   }
 
-  if (score >= 72) {
+  if (score >= 73) {
     return "B+";
   }
 
@@ -1909,12 +1972,289 @@ function gradeRank(
   }
 }
 
+/* =========================================================
+   RUSHING ROLE-CHANGE PROTECTION
+========================================================= */
+
+function rushingRoleProtection(
+  projection: any,
+  sportsbookLine: number,
+  directionalPick:
+    "OVER" |
+    "UNDER",
+) {
+  const careerYards =
+    Number(
+      projection
+        ?.career_yards_average,
+    );
+
+  const recentYards =
+    Number(
+      projection
+        ?.recent_4_yards_average,
+    );
+
+  const careerCarries =
+    Number(
+      projection
+        ?.career_carries_average,
+    );
+
+  const recentCarries =
+    Number(
+      projection
+        ?.recent_carries_average,
+    );
+
+  const lastTwoCarries =
+    Number(
+      projection
+        ?.last_2_carries_average,
+    );
+
+  let detected = false;
+  let severity:
+    "NONE" |
+    "MODERATE" |
+    "STRONG" =
+      "NONE";
+
+  const reasons:
+    string[] = [];
+
+  /*
+    CASE 1:
+    Sportsbook line is dramatically above the player's
+    historical rushing-yard role.
+
+    This is especially important for low-volume backs.
+
+    Example:
+    historical average ~9 yards
+    sportsbook suddenly posts 34.5.
+
+    That can indicate information the historical model
+    has not yet captured.
+  */
+
+  if (
+    directionalPick === "UNDER" &&
+    Number.isFinite(
+      careerYards,
+    ) &&
+    careerYards > 0 &&
+    sportsbookLine >=
+      careerYards * 1.75 &&
+    sportsbookLine -
+      careerYards >=
+      12
+  ) {
+    detected = true;
+    severity =
+      "MODERATE";
+
+    reasons.push(
+      "Sportsbook rushing line is materially above historical rushing production.",
+    );
+  }
+
+  /*
+    Strong protection for historically very small workloads.
+  */
+
+  if (
+    directionalPick === "UNDER" &&
+    Number.isFinite(
+      careerCarries,
+    ) &&
+    careerCarries > 0 &&
+    careerCarries < 6 &&
+    sportsbookLine >= 25
+  ) {
+    detected = true;
+    severity =
+      "STRONG";
+
+    reasons.push(
+      "Historical carry volume is low relative to the posted sportsbook line.",
+    );
+  }
+
+  /*
+    Detect a recent workload jump.
+
+    This prevents the long-term historical average from
+    overpowering evidence that the player's role is changing.
+  */
+
+  if (
+    Number.isFinite(
+      careerCarries,
+    ) &&
+    careerCarries > 0 &&
+    Number.isFinite(
+      recentCarries,
+    ) &&
+    recentCarries >=
+      careerCarries * 1.40 &&
+    recentCarries -
+      careerCarries >=
+      3
+  ) {
+    detected = true;
+
+    if (
+      severity !==
+      "STRONG"
+    ) {
+      severity =
+        "MODERATE";
+    }
+
+    reasons.push(
+      "Recent carry volume is materially above the player's historical workload.",
+    );
+  }
+
+  /*
+    Last-two-game breakout protection.
+  */
+
+  if (
+    Number.isFinite(
+      careerCarries,
+    ) &&
+    careerCarries > 0 &&
+    Number.isFinite(
+      lastTwoCarries,
+    ) &&
+    lastTwoCarries >=
+      careerCarries * 1.50 &&
+    lastTwoCarries -
+      careerCarries >=
+      4
+  ) {
+    detected = true;
+
+    if (
+      severity !==
+      "STRONG"
+    ) {
+      severity =
+        "MODERATE";
+    }
+
+    reasons.push(
+      "Last-two-game rushing workload suggests a possible role change.",
+    );
+  }
+
+  /*
+    If the sportsbook line is far above BOTH career and
+    recent production, we treat the market as potentially
+    pricing a future workload change.
+  */
+
+  if (
+    directionalPick === "UNDER" &&
+    Number.isFinite(
+      careerYards,
+    ) &&
+    careerYards > 0 &&
+    Number.isFinite(
+      recentYards,
+    ) &&
+    recentYards >= 0 &&
+    sportsbookLine >
+      careerYards * 1.75 &&
+    sportsbookLine >
+      recentYards * 1.50
+  ) {
+    detected = true;
+
+    if (
+      careerCarries < 7
+    ) {
+      severity =
+        "STRONG";
+    } else if (
+      severity ===
+      "NONE"
+    ) {
+      severity =
+        "MODERATE";
+    }
+
+    reasons.push(
+      "Market line implies a larger rushing role than recent historical production.",
+    );
+  }
+
+  return {
+    detected,
+    severity,
+    reasons,
+
+    historical_carries:
+      Number.isFinite(
+        careerCarries,
+      )
+        ? round(
+            careerCarries,
+            1,
+          )
+        : null,
+
+    recent_carries:
+      Number.isFinite(
+        recentCarries,
+      )
+        ? round(
+            recentCarries,
+            1,
+          )
+        : null,
+
+    last_2_carries:
+      Number.isFinite(
+        lastTwoCarries,
+      )
+        ? round(
+            lastTwoCarries,
+            1,
+          )
+        : null,
+
+    historical_rushing_yards:
+      Number.isFinite(
+        careerYards,
+      )
+        ? round(
+            careerYards,
+            1,
+          )
+        : null,
+
+    recent_rushing_yards:
+      Number.isFinite(
+        recentYards,
+      )
+        ? round(
+            recentYards,
+            1,
+          )
+        : null,
+  };
+}
+
+/* =========================================================
+   OVER / UNDER ANALYSIS
+========================================================= */
+
 function analyzeOverUnder(
   market:
-    Exclude<
-      CoreMarket,
-      "player_anytime_td"
-    >,
+    NonTDMarket,
 
   projection: any,
 
@@ -1977,22 +2317,41 @@ function analyzeOverUnder(
 
   let score = 35;
 
+  /*
+    EDGE
+  */
+
   score +=
-    normalizedEdge * 32;
+    normalizedEdge *
+    32;
+
+  /*
+    HISTORY
+  */
 
   score +=
     clamp(
       historyCount / 15,
       0,
       1,
-    ) * 12;
+    ) *
+    12;
+
+  /*
+    SPORTSBOOK COVERAGE
+  */
 
   score +=
     clamp(
       sportsbooks / 5,
       0,
       1,
-    ) * 8;
+    ) *
+    8;
+
+  /*
+    SPORTSBOOK LINE AGREEMENT
+  */
 
   const goodSpread =
     MAX_GOOD_SPREAD[
@@ -2013,6 +2372,10 @@ function analyzeOverUnder(
     score -= 5;
   }
 
+  /*
+    MARKET PRICE ALIGNMENT
+  */
+
   if (
     marketData.probability !== null
   ) {
@@ -2032,7 +2395,7 @@ function analyzeOverUnder(
   }
 
   /*
-    Hard safety gates.
+    MINIMUM EDGE GATE
   */
 
   if (
@@ -2050,41 +2413,55 @@ function analyzeOverUnder(
     score = 0;
   }
 
-  /*
-    A+ should be difficult to reach.
-  */
-
-  const exceptionalEdge =
-    absoluteEdge >=
-    MARKET_SCALE[
-      market
-    ] *
-      0.75;
-
-  const strongHistory =
-    historyCount >= 10;
-
-  const strongMarket =
-    sportsbooks >= 3;
-
   let grade =
     gradeFromScore(
       score,
     );
 
+  /* =====================================================
+     A+ PROTECTION
+
+     A+ now requires ALL of these:
+     - internal score >= 94
+     - edge >= one full market scale
+     - 12+ historical games
+     - 4+ sportsbooks
+     - tight sportsbook agreement
+  ===================================================== */
+
+  const exceptionalEdge =
+    absoluteEdge >=
+    MARKET_SCALE[
+      market
+    ];
+
+  const exceptionalHistory =
+    historyCount >= 12;
+
+  const exceptionalMarketDepth =
+    sportsbooks >= 4;
+
+  const exceptionalAgreement =
+    lineSpread <=
+    MAX_GOOD_SPREAD[
+      market
+    ] *
+      0.50;
+
   if (
     grade === "A+" &&
     (
       !exceptionalEdge ||
-      !strongHistory ||
-      !strongMarket
+      !exceptionalHistory ||
+      !exceptionalMarketDepth ||
+      !exceptionalAgreement
     )
   ) {
     grade = "A";
   }
 
   /*
-    Market disagreement protection.
+    Market strongly disagrees with model direction.
   */
 
   if (
@@ -2099,7 +2476,7 @@ function analyzeOverUnder(
   }
 
   /*
-    Low history cannot receive top grades.
+    Limited history cannot receive A/A+.
   */
 
   if (
@@ -2110,6 +2487,67 @@ function analyzeOverUnder(
     )
   ) {
     grade = "B+";
+  }
+
+  /* =====================================================
+     RUSHING ROLE PROTECTION
+  ===================================================== */
+
+  let roleProtection:
+    ReturnType<
+      typeof rushingRoleProtection
+    > |
+    null = null;
+
+  if (
+    market ===
+    "player_rush_yds"
+  ) {
+    roleProtection =
+      rushingRoleProtection(
+        projection,
+        line,
+        directionalPick,
+      );
+
+    /*
+      STRONG role-change signal:
+      Cannot exceed B.
+
+      This is designed for situations like a low-volume
+      backup suddenly receiving a much larger sportsbook
+      line than his historical workload would suggest.
+    */
+
+    if (
+      roleProtection.severity ===
+      "STRONG"
+    ) {
+      if (
+        grade === "A+" ||
+        grade === "A" ||
+        grade === "B+"
+      ) {
+        grade = "B";
+      }
+    }
+
+    /*
+      MODERATE role-change signal:
+      Cannot exceed B+.
+    */
+
+    if (
+      roleProtection.severity ===
+      "MODERATE"
+    ) {
+      if (
+        grade === "A+" ||
+        grade === "A"
+      ) {
+        grade = "B+";
+      }
+    }
   }
 
   const pick:
@@ -2151,6 +2589,9 @@ function analyzeOverUnder(
         lineSpread,
         2,
       ),
+
+    role_change_protection:
+      roleProtection,
 
     paired_market_books:
       marketData.paired_books,
@@ -2225,16 +2666,6 @@ function analyzeAnytimeTD(
       ),
     ).size;
 
-  /*
-    TD props are high variance.
-
-    Require:
-    - at least 8 historical games
-    - at least 3 sportsbooks
-    - valid market implied probability
-    - valid model edge
-  */
-
   if (
     marketImplied === null ||
     tdEdge === null ||
@@ -2254,7 +2685,7 @@ function analyzeAnytimeTD(
           : round(
               marketImplied,
               2,
-            ),
+          ),
 
       edge:
         tdEdge === null
@@ -2262,7 +2693,7 @@ function analyzeAnytimeTD(
           : round(
               tdEdge,
               2,
-            ),
+          ),
 
       sportsbook_count:
         sportsbooks,
@@ -2276,37 +2707,30 @@ function analyzeAnytimeTD(
       tdEdge / 20,
       0,
       1.5,
-    ) * 30;
+    ) *
+    30;
 
   score +=
     clamp(
       historyCount / 17,
       0,
       1,
-    ) * 15;
+    ) *
+    15;
 
   score +=
     clamp(
       sportsbooks / 6,
       0,
       1,
-    ) * 10;
-
-  /*
-    Require meaningful TD edge.
-  */
+    ) *
+    10;
 
   if (
     tdEdge < 5
   ) {
     score = 0;
   }
-
-  /*
-    FIX:
-    Explicit null checks are retained here so TypeScript
-    never treats marketImplied as possibly null.
-  */
 
   if (
     marketImplied !== null &&
@@ -2326,7 +2750,7 @@ function analyzeAnytimeTD(
     );
 
   /*
-    Anytime TD cannot receive A+ yet.
+    TD props still cannot receive A+.
   */
 
   if (
@@ -2336,8 +2760,7 @@ function analyzeAnytimeTD(
   }
 
   /*
-    Require at least 10 percentage points
-    of model edge for an A.
+    A requires substantial model/market separation.
   */
 
   if (
@@ -2762,15 +3185,9 @@ export async function GET() {
                 analysis.grade,
 
               grade_meaning:
-                analysis.grade === "A+"
-                  ? "Exceptional RDG edge"
-                  : analysis.grade === "A"
-                    ? "Strong RDG edge"
-                    : analysis.grade === "B+"
-                      ? "Good RDG edge"
-                      : analysis.grade === "B"
-                        ? "Moderate RDG edge"
-                        : "No qualifying RDG edge",
+                gradeMeaning(
+                  analysis.grade,
+                ),
 
               sportsbook_count:
                 analysis.sportsbook_count,
@@ -2786,7 +3203,7 @@ export async function GET() {
           }
 
           /* =============================================
-             OVER / UNDER MARKETS
+             OVER / UNDER
           ============================================= */
 
           const lines =
@@ -2889,15 +3306,9 @@ export async function GET() {
               analysis.grade,
 
             grade_meaning:
-              analysis.grade === "A+"
-                ? "Exceptional RDG edge"
-                : analysis.grade === "A"
-                  ? "Strong RDG edge"
-                  : analysis.grade === "B+"
-                    ? "Good RDG edge"
-                    : analysis.grade === "B"
-                      ? "Moderate RDG edge"
-                      : "No qualifying RDG edge",
+              gradeMeaning(
+                analysis.grade,
+              ),
 
             market_no_vig_probability:
               analysis.market_no_vig_probability,
@@ -2907,6 +3318,9 @@ export async function GET() {
 
             sportsbook_line_spread:
               analysis.sportsbook_line_spread,
+
+            role_change_protection:
+              analysis.role_change_protection,
 
             projection_details:
               projection,
@@ -2922,7 +3336,7 @@ export async function GET() {
     }
 
     /* =====================================================
-       SORT RESULTS BY LETTER GRADE
+       SORT
     ===================================================== */
 
     props.sort(
@@ -2954,14 +3368,9 @@ export async function GET() {
       },
     );
 
-    /*
-      Parlay pool:
-
-      A+, A, B+, and B are included.
-      PASS is automatically excluded.
-
-      No separate eligibility boolean.
-    */
+    /* =====================================================
+       PARLAY POOL
+    ===================================================== */
 
     const parlayPool =
       props
@@ -3048,6 +3457,26 @@ export async function GET() {
         ).length,
     };
 
+    const roleProtectionCounts = {
+      strong:
+        props.filter(
+          (prop) =>
+            prop
+              ?.role_change_protection
+              ?.severity ===
+            "STRONG",
+        ).length,
+
+      moderate:
+        props.filter(
+          (prop) =>
+            prop
+              ?.role_change_protection
+              ?.severity ===
+            "MODERATE",
+        ).length,
+    };
+
     return NextResponse.json(
       {
         success: true,
@@ -3078,7 +3507,7 @@ export async function GET() {
             CORE_MARKETS,
 
           workflow:
-            "Sportsbook line -> RDG projection -> edge -> pick -> letter grade -> parlay pool",
+            "Sportsbook line -> RDG projection -> edge -> role protection -> pick -> letter grade -> parlay pool",
         },
 
         grading_system: {
@@ -3110,8 +3539,25 @@ export async function GET() {
               "No qualifying RDG edge",
           },
 
+          a_plus_requirements:
+            "Exceptional model edge, 12+ history games, 4+ sportsbooks and strong sportsbook line agreement.",
+
           disclaimer:
             "RDG grades rank model evidence and are not win probabilities or guarantees.",
+        },
+
+        protections: {
+          rushing_role_change:
+            true,
+
+          purpose:
+            "Reduce grades when historical rushing workload may not reflect the role implied by the current sportsbook line.",
+
+          strong_role_flags:
+            roleProtectionCounts.strong,
+
+          moderate_role_flags:
+            roleProtectionCounts.moderate,
         },
 
         model_status: {
@@ -3119,7 +3565,7 @@ export async function GET() {
             "RDG Passing V2",
 
           rushing_yards:
-            "RDG role-aware historical projection",
+            "RDG role-aware historical projection with sportsbook role-change protection",
 
           receiving_yards:
             "RDG historical projection",
@@ -3134,7 +3580,7 @@ export async function GET() {
             "RDG conservative historical scoring model",
 
           grading:
-            "Letter-grade evidence ranking. No public confidence percentage.",
+            "V6.2 final letter-grade evidence ranking. No public confidence percentage.",
         },
 
         api_usage: {
