@@ -1672,109 +1672,85 @@ const [cfbError, setCfbError] =
       </header>
 
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
-        <section className="mb-7 overflow-hidden rounded-2xl border border-white/10 bg-[#071019] shadow-[0_22px_60px_rgba(0,0,0,0.28)]">
-          <div className="grid lg:grid-cols-[1.35fr_0.65fr]">
-            <div className="relative overflow-hidden border-b border-white/10 p-6 sm:p-8 lg:border-b-0 lg:border-r">
-              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_20%,rgba(16,185,129,0.14),transparent_32%),radial-gradient(circle_at_85%_10%,rgba(37,99,235,0.16),transparent_34%)]" />
-              <div className="relative z-10">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-emerald-300">RDG Today</span>
-                  <span className="text-xs font-semibold text-slate-500">Updated {lastUpdatedDisplay}</span>
-                </div>
+        <section className="mb-8">
+          <div className="overflow-hidden rounded-3xl border border-white/10 bg-[linear-gradient(135deg,#08141c_0%,#071019_55%,#091a18_100%)] shadow-[0_24px_70px_rgba(0,0,0,0.30)]">
+            <div className="grid gap-0 lg:grid-cols-[1.15fr_0.85fr]">
+              <div className="relative p-6 sm:p-8 lg:p-10">
+                <div className="pointer-events-none absolute -left-20 -top-24 h-72 w-72 rounded-full bg-emerald-400/10 blur-3xl" />
+                <div className="relative">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="inline-flex items-center gap-2 rounded-full border border-emerald-400/25 bg-emerald-400/10 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.18em] text-emerald-300">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Live RDG Board
+                    </span>
+                    <span className="text-[11px] font-semibold text-slate-500">Updated {lastUpdatedDisplay}</span>
+                  </div>
 
+                  <h1 className="mt-5 max-w-2xl text-3xl font-black tracking-tight text-white sm:text-5xl">
+                    Find the strongest edges without digging through the board.
+                  </h1>
+                  <p className="mt-3 max-w-xl text-sm leading-6 text-slate-400 sm:text-base">
+                    RDG compares model projections with current sportsbook lines, then surfaces the plays that clear the grading filters.
+                  </p>
+
+                  <div className="mt-6 flex flex-wrap gap-2">
+                    {[["ALL","All Sports"],["NFL","NFL"],["CFB","College Football"],["MLB","MLB"],["NHL","NHL"]].map(([value,label]) => (
+                      <button key={value} onClick={() => setActiveSport(value as "ALL" | "NFL" | "CFB" | "MLB" | "NHL" | "NBA")} className={activeSport === value ? "rounded-full bg-emerald-400 px-4 py-2 text-xs font-black text-[#04110c]" : "rounded-full border border-white/10 bg-white/[0.025] px-4 py-2 text-xs font-bold text-slate-300 transition hover:border-emerald-400/35 hover:text-white"}>{label}</button>
+                    ))}
+                  </div>
+
+                  <div className="mt-7 flex flex-wrap items-center gap-3">
+                    <button onClick={() => document.getElementById("rdg-picks")?.scrollIntoView({ behavior: "smooth" })} className="rounded-xl bg-emerald-400 px-5 py-3 text-sm font-black text-[#04110c] transition hover:bg-emerald-300">See Best Picks →</button>
+                    <span className="text-xs text-slate-500">Grades rank RDG evidence — not guaranteed win probability.</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-white/10 bg-black/15 p-5 sm:p-6 lg:border-l lg:border-t-0 lg:p-8">
                 {(() => {
                   const topProp = (nflPlayerProps?.parlay_pool || [])
                     .filter((prop) => prop.pick !== "PASS" && prop.grade !== "PASS")
                     .sort((a, b) => {
                       const ranks: Record<string, number> = { "A+": 5, A: 4, "B+": 3, B: 2, PASS: 0 };
                       const rankDiff = (ranks[b.grade] || 0) - (ranks[a.grade] || 0);
-                      if (rankDiff !== 0) return rankDiff;
-                      return Math.abs(b.edge || 0) - Math.abs(a.edge || 0);
+                      return rankDiff !== 0 ? rankDiff : Math.abs(b.edge || 0) - Math.abs(a.edge || 0);
                     })[0];
 
-                  if (!topProp) {
-                    return (
-                      <div className="py-10">
-                        <p className="text-sm font-bold text-slate-400">TOP RDG PLAY</p>
-                        <h1 className="mt-3 text-3xl font-black text-white sm:text-4xl">Scanning today&apos;s board...</h1>
-                        <p className="mt-3 text-sm text-slate-400">RDG is waiting for qualifying sportsbook lines and model edges.</p>
-                      </div>
-                    );
-                  }
+                  if (!topProp) return <div className="flex min-h-56 items-center justify-center text-sm font-bold text-slate-500">Scanning for qualifying plays...</div>;
 
                   const lineText = topProp.sportsbook_line !== null ? ` ${topProp.sportsbook_line}` : "";
                   const unit = topProp.provider_market.includes("yds") ? " yds" : topProp.provider_market === "player_receptions" ? " rec" : topProp.provider_market === "player_pass_tds" ? " TD" : "";
 
                   return (
-                    <div className="mt-6">
-                      <div className="flex flex-wrap items-center gap-3">
-                        <span className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">Top RDG Play</span>
-                        <span className="rounded-lg border border-emerald-400/40 bg-emerald-400/10 px-2.5 py-1 text-sm font-black text-emerald-300">{topProp.grade}</span>
-                        <span className="text-xs font-bold text-slate-500">{topProp.market}</span>
+                    <div>
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">Featured RDG Edge</p>
+                          <p className="mt-1 text-xs font-bold text-slate-400">{topProp.matchup.away} @ {topProp.matchup.home}</p>
+                        </div>
+                        <span className="rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-lg font-black text-emerald-300">{topProp.grade}</span>
                       </div>
 
-                      <h1 className="mt-4 text-3xl font-black tracking-tight text-white sm:text-5xl">{topProp.player_name}</h1>
-                      <p className="mt-2 text-xl font-black text-emerald-300 sm:text-2xl">{topProp.pick}{lineText} {topProp.market}</p>
-                      <p className="mt-2 text-sm font-semibold text-slate-400">{topProp.matchup.away} @ {topProp.matchup.home}</p>
+                      <h2 className="mt-6 text-3xl font-black tracking-tight text-white">{topProp.player_name}</h2>
+                      <p className="mt-1 text-lg font-black text-emerald-300">{topProp.pick}{lineText} {topProp.market}</p>
 
-                      <div className="mt-6 grid max-w-2xl grid-cols-2 gap-3 sm:grid-cols-4">
-                        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                          <p className="text-[9px] font-black uppercase tracking-[0.15em] text-slate-500">RDG Projection</p>
-                          <p className="mt-1 text-lg font-black text-white">{Number(topProp.rdg_projection).toFixed(1)}{unit}</p>
-                        </div>
-                        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                          <p className="text-[9px] font-black uppercase tracking-[0.15em] text-slate-500">Model Edge</p>
-                          <p className="mt-1 text-lg font-black text-emerald-300">{Math.abs(topProp.edge || 0).toFixed(1)}{unit}</p>
-                        </div>
-                        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                          <p className="text-[9px] font-black uppercase tracking-[0.15em] text-slate-500">Sportsbooks</p>
-                          <p className="mt-1 text-lg font-black text-white">{topProp.sportsbook_count || 0}</p>
-                        </div>
-                        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                          <p className="text-[9px] font-black uppercase tracking-[0.15em] text-slate-500">Role Check</p>
-                          <p className="mt-1 text-lg font-black text-white">{topProp.role_change_protection?.severity || "CLEAR"}</p>
-                        </div>
+                      <div className="mt-6 grid grid-cols-3 gap-2">
+                        <div className="rounded-xl border border-white/10 bg-white/[0.025] p-3"><p className="text-[9px] font-black uppercase tracking-wider text-slate-500">Projection</p><p className="mt-1 font-black text-white">{Number(topProp.rdg_projection).toFixed(1)}{unit}</p></div>
+                        <div className="rounded-xl border border-white/10 bg-white/[0.025] p-3"><p className="text-[9px] font-black uppercase tracking-wider text-slate-500">Edge</p><p className="mt-1 font-black text-emerald-300">+{Math.abs(topProp.edge || 0).toFixed(1)}{unit}</p></div>
+                        <div className="rounded-xl border border-white/10 bg-white/[0.025] p-3"><p className="text-[9px] font-black uppercase tracking-wider text-slate-500">Books</p><p className="mt-1 font-black text-white">{topProp.sportsbook_count || 0}</p></div>
                       </div>
 
-                      <div className="mt-6 flex flex-wrap gap-3">
-                        <button onClick={() => document.getElementById("rdg-picks")?.scrollIntoView({ behavior: "smooth" })} className="rounded-xl bg-emerald-400 px-5 py-3 text-sm font-black text-[#04110c] transition hover:bg-emerald-300">View Today&apos;s Picks →</button>
-                        <button onClick={() => setActiveSport("NFL")} className="rounded-xl border border-white/15 bg-white/[0.03] px-5 py-3 text-sm font-bold text-white transition hover:border-emerald-400/40">Explore NFL</button>
-                      </div>
+                      <button onClick={() => { setActiveSport("NFL"); setTimeout(() => document.getElementById("rdg-picks")?.scrollIntoView({ behavior: "smooth" }), 50); }} className="mt-5 w-full rounded-xl border border-white/10 bg-white/[0.035] px-4 py-3 text-left text-xs font-black text-white transition hover:border-emerald-400/35 hover:bg-emerald-400/[0.06]">View full analysis <span className="float-right text-emerald-400">→</span></button>
                     </div>
                   );
                 })()}
               </div>
             </div>
 
-            <div className="p-6 sm:p-8">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-400">Live Board</p>
-                  <h2 className="mt-1 text-xl font-black text-white">What RDG sees now</h2>
-                </div>
-                <span className="relative flex h-3 w-3"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-40"></span><span className="relative inline-flex h-3 w-3 rounded-full bg-emerald-400"></span></span>
-              </div>
-
-              <div className="mt-5 space-y-3">
-                <button onClick={() => setActiveSport("NFL")} className="flex w-full items-center justify-between rounded-xl border border-white/10 bg-white/[0.025] p-4 text-left transition hover:border-emerald-400/30 hover:bg-emerald-400/[0.04]">
-                  <div><p className="text-xs font-black text-white">NFL Player Props</p><p className="mt-1 text-[10px] text-slate-500">Qualifying V6.3 plays</p></div>
-                  <div className="text-right"><p className="text-2xl font-black text-white">{nflPlayerProps?.actionable_props ?? "—"}</p><p className="text-[10px] font-bold text-emerald-400">{nflPlayerProps?.grade_counts?.["A+"] ?? 0} A+</p></div>
-                </button>
-
-                <button onClick={() => setActiveSport("NFL")} className="flex w-full items-center justify-between rounded-xl border border-white/10 bg-white/[0.025] p-4 text-left transition hover:border-emerald-400/30 hover:bg-emerald-400/[0.04]">
-                  <div><p className="text-xs font-black text-white">NFL Game Board</p><p className="mt-1 text-[10px] text-slate-500">Current games analyzed</p></div>
-                  <p className="text-2xl font-black text-white">{nfl?.games_found ?? "—"}</p>
-                </button>
-
-                <div className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
-                  <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Browse by sport</p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {[["ALL","All"],["NFL","NFL"],["CFB","CFB"],["MLB","MLB"],["NHL","NHL"]].map(([value,label]) => (
-                      <button key={value} onClick={() => setActiveSport(value as "ALL" | "NFL" | "CFB" | "MLB" | "NHL" | "NBA")} className={activeSport === value ? "rounded-lg bg-emerald-400 px-3 py-2 text-[11px] font-black text-[#04110c]" : "rounded-lg border border-white/10 px-3 py-2 text-[11px] font-bold text-slate-300 transition hover:border-emerald-400/40 hover:text-white"}>{label}</button>
-                    ))}
-                  </div>
-                </div>
-              </div>
+            <div className="grid grid-cols-2 border-t border-white/10 sm:grid-cols-4">
+              <div className="px-5 py-4"><p className="text-[9px] font-black uppercase tracking-[0.16em] text-slate-500">NFL Games</p><p className="mt-1 text-xl font-black text-white">{nfl?.games_found ?? "—"}</p></div>
+              <div className="border-l border-white/10 px-5 py-4"><p className="text-[9px] font-black uppercase tracking-[0.16em] text-slate-500">Qualifying Props</p><p className="mt-1 text-xl font-black text-white">{nflPlayerProps?.actionable_props ?? "—"}</p></div>
+              <div className="border-t border-white/10 px-5 py-4 sm:border-l sm:border-t-0"><p className="text-[9px] font-black uppercase tracking-[0.16em] text-slate-500">Elite A+</p><p className="mt-1 text-xl font-black text-emerald-300">{nflPlayerProps?.grade_counts?.["A+"] ?? 0}</p></div>
+              <div className="border-l border-t border-white/10 px-5 py-4 sm:border-t-0"><p className="text-[9px] font-black uppercase tracking-[0.16em] text-slate-500">NFL Week</p><p className="mt-1 text-xl font-black text-white">{nfl?.schedule_week ?? "—"}</p></div>
             </div>
           </div>
         </section>
@@ -1886,59 +1862,18 @@ const [cfbError, setCfbError] =
         )}
 
         {activeSport === "NFL" && (
-          <div className="mb-10 overflow-hidden rounded-2xl border border-emerald-500/20 bg-[linear-gradient(135deg,rgba(16,185,129,0.07),rgba(255,255,255,0.015))] shadow-[0_18px_55px_rgba(0,0,0,0.22)]">
-            <div className="flex flex-col gap-5 p-5 sm:p-6 lg:flex-row lg:items-center lg:justify-between">
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-emerald-300">
-                    RDG NFL MODEL
-                  </span>
-                  <span className="rounded-full border border-white/10 bg-white/[0.035] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">
-                    Week {nfl?.schedule_week ?? "—"}
-                  </span>
-                </div>
-
-                <h2 className="mt-3 text-2xl font-black tracking-tight text-white sm:text-3xl">
-                  NFL Command Center
-                </h2>
-                <p className="mt-2 max-w-2xl text-sm text-slate-400">
-                  Live Hard Rock odds, RDG model analysis, defense data, injury reports, and weekly parlay research in one place.
-                </p>
+          <div className="mb-8 flex flex-col gap-4 border-b border-white/10 pb-5 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-emerald-400">
+                <span className="h-2 w-2 rounded-full bg-emerald-400" /> NFL • Week {nfl?.schedule_week ?? "—"}
               </div>
-
-              <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap lg:justify-end">
-                <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/[0.08] px-4 py-3">
-                  <p className="text-[9px] font-black uppercase tracking-[0.18em] text-emerald-400">Games</p>
-                  <p className="mt-1 text-lg font-black text-white">{nfl?.games_found ?? "—"}</p>
-                </div>
-                <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-                  <p className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-500">Stats</p>
-                  <p className="mt-1 text-lg font-black text-white">{nfl ? `${nfl.games_with_stats}/${nfl.games_found}` : "—"}</p>
-                </div>
-                <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-                  <p className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-500">Strong</p>
-                  <p className="mt-1 text-lg font-black text-white">{nfl?.strong_reviews ?? "—"}</p>
-                </div>
-                <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-                  <p className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-500">Priority</p>
-                  <p className="mt-1 text-lg font-black text-white">{nfl?.priority_reviews ?? "—"}</p>
-                </div>
-              </div>
+              <h2 className="mt-2 text-2xl font-black tracking-tight text-white sm:text-3xl">NFL Picks & Parlays</h2>
+              <p className="mt-1 text-sm text-slate-500">Current RDG game edges and player props in one board.</p>
             </div>
-
-            <div className="grid grid-cols-2 border-t border-white/10 sm:grid-cols-4">
-              <div className="border-r border-white/10 px-4 py-3 text-center text-[10px] font-black uppercase tracking-[0.16em] text-emerald-400">
-                ● Live Odds
-              </div>
-              <div className="border-r border-white/10 px-4 py-3 text-center text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">
-                Defense Stats
-              </div>
-              <div className="border-r border-white/10 px-4 py-3 text-center text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">
-                Injury Reports
-              </div>
-              <div className="px-4 py-3 text-center text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">
-                Weekly Parlays
-              </div>
+            <div className="flex flex-wrap gap-2 text-xs font-bold">
+              <span className="rounded-full border border-white/10 bg-white/[0.025] px-3 py-2 text-slate-300">{nfl?.games_found ?? "—"} games</span>
+              <span className="rounded-full border border-white/10 bg-white/[0.025] px-3 py-2 text-slate-300">{nflPlayerProps?.actionable_props ?? "—"} props</span>
+              <span className="rounded-full border border-emerald-400/25 bg-emerald-400/[0.07] px-3 py-2 text-emerald-300">{nflPlayerProps?.grade_counts?.["A+"] ?? 0} A+ plays</span>
             </div>
           </div>
         )}
