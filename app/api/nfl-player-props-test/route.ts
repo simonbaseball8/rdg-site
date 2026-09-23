@@ -83,7 +83,7 @@ function parseCSV(text: string): Record<string, string>[] {
   });
 }
 
-async function loadSeason(season: number): Promise<PlayerGame[]> {
+async function loadSeason(season: number, minCarries = MIN_CARRIES): Promise<PlayerGame[]> {
   const url =
     `https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_${season}.csv`;
 
@@ -109,8 +109,10 @@ async function loadSeason(season: number): Promise<PlayerGame[]> {
 
     const carries = num(row.carries);
 
-    // Keep the same sample definition as V2-V4 so comparisons remain fair.
-    if (carries < MIN_CARRIES) continue;
+    // Historical model inputs keep the frozen V5 >=5-carry definition.
+    // For the evaluation season we can pass minCarries=0 so sportsbook-offered
+    // players are graded regardless of how many carries they ultimately record.
+    if (carries < minCarries) continue;
 
     const playerId =
       row.player_id ||
@@ -353,7 +355,13 @@ export async function GET(request: Request) {
   }
 
   try {
-    const [season2024, season2025] = await Promise.all([loadSeason(2024), loadSeason(2025)]);
+    const [season2024, season2025All] = await Promise.all([
+      loadSeason(2024, MIN_CARRIES),
+      loadSeason(2025, 0),
+    ]);
+
+    // Frozen V5 history still only learns from completed games with >=5 carries.
+    const season2025History = season2025All.filter(g => g.carries >= MIN_CARRIES);
     const history = new Map<string, History>();
     for (const game of season2024) addHistory(history, game);
 
@@ -397,7 +405,10 @@ export async function GET(request: Request) {
     }
 
     for (let week = 1; week <= 18; week++) {
-      const weekGames = season2025.filter(g => g.week === week);
+      // Evaluation eligibility is now driven by sportsbook prop availability,
+      // not by the player's eventual carry count.
+      const weekGames = season2025All.filter(g => g.week === week);
+      const weekHistoryGames = season2025History.filter(g => g.week === week);
 
       // Only fetch sportsbook history for the requested range. Earlier weeks are
       // still added to player history after the week so projections remain chronological.
@@ -534,7 +545,7 @@ export async function GET(request: Request) {
       }
 
       // Add this completed week's results only AFTER all predictions for the week.
-      for (const game of weekGames) addHistory(history, game);
+      for (const game of weekHistoryGames) addHistory(history, game);
     }
 
     const graded = results.filter(x => x.result !== "PUSH");
@@ -547,7 +558,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       success:true,
-      version:"3.0-rushing-v5-historical-multiweek-runner",
+      version:"3.1-rushing-v5-clean-evaluation-runner",
       purpose:"Run frozen Rushing V5 across multiple 2025 regular-season weeks using real pregame historical player_rush_yds lines.",
       model:"Frozen 5.0-rushing-v5-direct-yards",
       test_scope:{
@@ -561,6 +572,8 @@ export async function GET(request: Request) {
       methodology:{
         chronological_history:true,
         same_week_results_added_after_predictions:true,
+        current_week_selection:"sportsbook prop availability; no postgame >=5-carry filter",
+        historical_input_filter:"frozen V5 history uses completed games with >=5 carries",
         sportsbook_selection:"balanced paired main line",
         stake:"1 unit risked per bet",
       },
@@ -601,7 +614,7 @@ export async function GET(request: Request) {
   } catch (error:any) {
     return NextResponse.json({
       success:false,
-      version:"3.0-rushing-v5-historical-multiweek-runner",
+      version:"3.1-rushing-v5-clean-evaluation-runner",
       error:error?.message || String(error),
     },{status:500});
   }
