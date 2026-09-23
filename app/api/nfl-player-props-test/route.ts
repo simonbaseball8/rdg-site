@@ -367,7 +367,13 @@ export async function GET(request: Request) {
     // NFL game day instead of querying noon. This endpoint itself is quota-free.
     const window = WEEK_WINDOWS_2025[TEST_WEEK];
     if (!window) throw new Error(`No 2025 date window configured for Week ${TEST_WEEK}.`);
-    const week1DiscoverySnapshots = [window.discovery];
+    const weekStartMs = new Date(window.start).getTime();
+    const week1DiscoverySnapshots = [
+      window.discovery,
+      new Date(weekStartMs + 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, "Z"),
+      new Date(weekStartMs + 3 * 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, "Z"),
+      new Date(weekStartMs + 4 * 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, "Z"),
+    ];
 
     for (const date of week1DiscoverySnapshots) {
       const r = await oddsJson(
@@ -397,7 +403,6 @@ export async function GET(request: Request) {
     for (const event of eventList) {
       const commence = String(event.commence_time || "");
       const kickoffMs = new Date(commence).getTime();
-      const weekStartMs = new Date(window.start).getTime();
       const weekEndMs = new Date(window.end).getTime();
       if (!Number.isFinite(kickoffMs) || kickoffMs < weekStartMs || kickoffMs > weekEndMs) continue;
 
@@ -497,7 +502,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       success:true,
-      version:"2.1-rushing-v5-historical-sportsbook-week-runner",
+      version:"2.2-rushing-v5-historical-sportsbook-week-runner",
       purpose:"Verify frozen Rushing V5 against real pregame 2025 historical player_rush_yds lines before running a full-season sportsbook backtest.",
       model:"Frozen 5.0-rushing-v5-direct-yards",
       test_scope:{season:TEST_SEASON,week:TEST_WEEK,snapshot_minutes_before_kickoff:SNAPSHOT_MINUTES_BEFORE_KICKOFF,market:MARKET,region:"us"},
@@ -510,6 +515,6 @@ export async function GET(request: Request) {
       bets:results
     });
   } catch (error:any) {
-    return NextResponse.json({success:false,version:"2.1-rushing-v5-historical-sportsbook-week-runner",error:error?.message||String(error)},{status:500});
+    return NextResponse.json({success:false,version:"2.2-rushing-v5-historical-sportsbook-week-runner",error:error?.message||String(error)},{status:500});
   }
 }
