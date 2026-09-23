@@ -94,39 +94,35 @@ type NFLAnalysis = {
   updated_at: string;
   games: NFLGame[];
 };
-type NFLPassingProp = {
+type NFLPlayerProp = {
   event_id: string;
   start_time: string | null;
   matchup: { away: string | null; home: string | null };
   player_id: string;
   player_name: string;
+  position?: string;
   market: string;
-  selection: "OVER" | "UNDER";
-  market_line: number;
+  provider_market: string;
+  sportsbook_line: number | null;
   rdg_projection: number;
-  model_vs_line_yards: number;
-  model_probability: number;
+  difference: number;
+  edge: number;
+  pick: "OVER" | "UNDER" | "YES" | "PASS";
+  grade: "A+" | "A" | "B+" | "B" | "PASS";
+  grade_meaning: string;
   market_no_vig_probability: number | null;
-  model_vs_market_probability: number | null;
-  review: string;
-  sportsbook_lines?: Array<{
-    sportsbook: string;
-    side: string | null;
-    line: number;
-    odds: string | number | null;
-    available: boolean;
-    updated_at: string | null;
-  }>;
+  sportsbook_count: number;
+  role_change_protection?: { detected: boolean; severity: "NONE" | "MODERATE" | "STRONG"; reasons: string[] } | null;
+  sportsbook_lines?: Array<{ sportsbook: string; side: string | null; line: number | null; odds: string | number | null; available: boolean; updated_at: string | null }>;
 };
 
-type NFLPassingPropsAnalysis = {
+type NFLPlayerPropsAnalysis = {
   success: boolean;
   version: string;
-  market: string;
-  model_status: string;
-  qualifying_reviews: number;
-  props: NFLPassingProp[];
-  updated_at: string;
+  actionable_props: number;
+  grade_counts: Record<string, number>;
+  parlay_pool: NFLPlayerProp[];
+  props: NFLPlayerProp[];
 };
 
 type CFBGame = {
@@ -330,10 +326,13 @@ type BetCandidate = {
   historical_bucket: string;
   score: number;
   player_name?: string;
-  selection?: "OVER" | "UNDER";
+  selection?: "OVER" | "UNDER" | "YES";
   model_probability?: number;
   market_probability?: number | null;
   review?: string;
+  prop_market?: string;
+  grade?: string;
+  role_protection?: string;
   sportsbook_name?: string | null;
 };
 
@@ -765,12 +764,8 @@ export default function Home() {
   const [nflError, setNflError] =
     useState("");
   const [lastUpdatedDisplay, setLastUpdatedDisplay] = useState("Updating...");
-  const [nflPassingProps, setNflPassingProps] =
-    useState<NFLPassingPropsAnalysis | null>(null);
-  const [nflPassingPropsLoading, setNflPassingPropsLoading] =
-    useState(true);
-  const [nflPassingPropsError, setNflPassingPropsError] =
-    useState("");
+  const [nflPlayerProps, setNflPlayerProps] =
+    useState<NFLPlayerPropsAnalysis | null>(null);
 const [activeSport, setActiveSport] =
   useState<"ALL" | "NFL" | "CFB" | "MLB" | "NHL" | "NBA">("NFL");
 
@@ -856,21 +851,13 @@ const [cfbError, setCfbError] =
       }
     }
 
-    async function loadNFLPassingProps() {
+    async function loadNFLPlayerProps() {
       try {
-        const response = await fetch("/api/nfl-passing-props", { cache: "no-store" });
-        if (!response.ok) {
-          throw new Error(`NFL passing props failed: ${response.status}`);
-        }
-        const data = await response.json();
-        setNflPassingProps(data);
+        const response = await fetch("/api/nfl-player-props", { cache: "no-store" });
+        if (!response.ok) throw new Error(`NFL player props failed: ${response.status}`);
+        setNflPlayerProps(await response.json());
       } catch (err) {
         console.error(err);
-        setNflPassingPropsError(
-          err instanceof Error ? err.message : "NFL passing props failed"
-        );
-      } finally {
-        setNflPassingPropsLoading(false);
       }
     }
 
@@ -934,7 +921,7 @@ const [cfbError, setCfbError] =
 
     loadParlays();
     loadNFL();
-    loadNFLPassingProps();
+    loadNFLPlayerProps();
     loadCFB();
     loadMLB();
     loadNHL();
@@ -1160,69 +1147,49 @@ const [cfbError, setCfbError] =
       .filter((candidate): candidate is BetCandidate => candidate !== null)
       .sort((a, b) => b.score - a.score);
 
-  // PASSING PROP CANDIDATES
+  // UNIFIED NFL PLAYER PROP CANDIDATES (V6.2)
+  const propMarketScale: Record<string, number> = {
+    player_pass_yds: 30, player_pass_tds: 0.75, player_rush_yds: 15,
+    player_reception_yds: 15, player_receptions: 1.5, player_anytime_td: 10,
+  };
+  const gradeRank: Record<string, number> = { "A+": 4, A: 3, "B+": 2, B: 1 };
+
   const passingPropCandidates: BetCandidate[] =
-    (nflPassingProps?.props || [])
-      .filter((prop) =>
-        prop.review !== "PASS" &&
-        prop.model_vs_market_probability !== null &&
-        prop.model_vs_market_probability >= 2 &&
-        (!prop.start_time || new Date(prop.start_time).getTime() > nowMs)
-      )
+    (nflPlayerProps?.parlay_pool || [])
+      .filter((prop) => prop.grade !== "PASS" && prop.pick !== "PASS" && (!prop.start_time || new Date(prop.start_time).getTime() > nowMs))
       .map((prop) => {
         const away = prop.matchup.away || "AWAY";
         const home = prop.matchup.home || "HOME";
-        const edge = prop.model_vs_market_probability || 0;
-
+        const scale = propMarketScale[prop.provider_market] || 1;
+        const normalizedEdge = Math.abs(prop.edge || 0) / scale;
+        const rank = gradeRank[prop.grade] || 0;
         const matchingPrices = (prop.sportsbook_lines || [])
-          .filter((book) =>
-            book.available &&
-            Number(book.line) === Number(prop.market_line) &&
-            String(book.side || "").toUpperCase() === prop.selection &&
-            book.odds !== null &&
-            book.odds !== undefined
-          )
-          .map((book) => ({
-            sportsbook: book.sportsbook,
-            odds: String(book.odds),
-            numericOdds: Number(book.odds),
-          }))
+          .filter((book) => {
+            if (!book.available || book.odds === null || book.odds === undefined) return false;
+            const side = String(book.side || "").toUpperCase();
+            const sideMatches = prop.pick === "YES" ? side === "YES" : side === prop.pick;
+            const lineMatches = prop.sportsbook_line === null || book.line === null || Number(book.line) === Number(prop.sportsbook_line);
+            return sideMatches && lineMatches;
+          })
+          .map((book) => ({ sportsbook: book.sportsbook, odds: String(book.odds), numericOdds: Number(book.odds) }))
           .filter((book) => Number.isFinite(book.numericOdds))
           .sort((a, b) => b.numericOdds - a.numericOdds);
-
         const bestPrice = matchingPrices[0] || null;
-
-        let score = edge * 10;
-        if (prop.review === "STRONG REVIEW") score += 20;
-        else if (prop.review === "REVIEW") score += 10;
-        else if (prop.review === "WATCH") score += 4;
-        if (prop.model_probability >= 60) score += 8;
-        else if (prop.model_probability >= 55) score += 4;
-
+        const rolePenalty = prop.role_change_protection?.severity === "STRONG" ? 20 : prop.role_change_protection?.severity === "MODERATE" ? 10 : 0;
+        const score = rank * 100 + Math.min(normalizedEdge, 3) * 25 + Math.min(prop.sportsbook_count || 0, 6) * 2 - rolePenalty;
+        const line = prop.sportsbook_line ?? 0;
+        const lineText = prop.sportsbook_line !== null ? ` ${prop.sportsbook_line}` : "";
         return {
-          event_id: `prop-${prop.event_id}-${prop.player_id}`,
-          correlation_key: `${away}@${home}`.toUpperCase(),
-          market_type: "passing_prop" as const,
-          matchup: `${away} @ ${home}`,
-          team: "",
-          line: prop.market_line,
-          odds: bestPrice?.odds || null,
-          display_bet: `${prop.player_name} ${prop.selection} ${prop.market_line}${bestPrice?.odds ? ` (${Number(bestPrice.odds) > 0 ? "+" : ""}${bestPrice.odds})` : ""}`,
-          projected_winner: "",
-          projected_margin: prop.rdg_projection,
-          difference: Number(edge.toFixed(2)),
-          historical_accuracy: prop.model_probability,
-          historical_sample: 517,
-          historical_correct: 0,
-          historical_bucket: "V2 residual calibration",
-          score: Number(score.toFixed(2)),
-          player_name: prop.player_name,
-          selection: prop.selection,
-          model_probability: prop.model_probability,
-          market_probability: prop.market_no_vig_probability,
-          review: prop.review,
-          sportsbook_name: bestPrice?.sportsbook || null,
-        };
+          event_id: `prop-${prop.event_id}-${prop.player_id}-${prop.provider_market}`,
+          correlation_key: `${away}@${home}`.toUpperCase(), market_type: "passing_prop" as const,
+          matchup: `${away} @ ${home}`, team: prop.player_name, line, odds: bestPrice?.odds || null,
+          display_bet: `${prop.player_name} ${prop.pick}${lineText}${bestPrice?.odds ? ` (${Number(bestPrice.odds) > 0 ? "+" : ""}${bestPrice.odds})` : ""}`,
+          projected_winner: "", projected_margin: prop.rdg_projection, difference: Number(Math.abs(prop.edge || 0).toFixed(2)),
+          historical_accuracy: 0, historical_sample: 0, historical_correct: 0, historical_bucket: prop.grade_meaning,
+          score: Number(score.toFixed(2)), player_name: prop.player_name, selection: prop.pick === "PASS" ? undefined : prop.pick,
+          market_probability: prop.market_no_vig_probability, review: prop.grade, prop_market: prop.market, grade: prop.grade,
+          role_protection: prop.role_change_protection?.severity || "NONE", sportsbook_name: bestPrice?.sportsbook || null,
+        } as BetCandidate;
       })
       .sort((a, b) => b.score - a.score);
 
@@ -1255,20 +1222,9 @@ const [cfbError, setCfbError] =
   const moneylineHigherRiskCandidates =
     moneylineCandidates.filter((candidate) => candidate.projected_margin >= 3);
 
-  const propSaferCandidates = passingPropCandidates.filter((candidate) =>
-    (candidate.model_probability || 0) >= 58 &&
-    candidate.difference >= 8 &&
-    candidate.review === "STRONG REVIEW"
-  );
-
-  const propBalancedCandidates = passingPropCandidates.filter((candidate) =>
-    (candidate.model_probability || 0) >= 55 &&
-    candidate.difference >= 5 &&
-    (candidate.review === "STRONG REVIEW" || candidate.review === "REVIEW")
-  );
-
-  const propHigherRiskCandidates =
-    passingPropCandidates.filter((candidate) => candidate.difference >= 2);
+  const propSaferCandidates = passingPropCandidates.filter((candidate) => candidate.grade === "A+" || candidate.grade === "A");
+  const propBalancedCandidates = passingPropCandidates.filter((candidate) => candidate.grade === "A+" || candidate.grade === "A" || candidate.grade === "B+");
+  const propHigherRiskCandidates = passingPropCandidates.filter((candidate) => candidate.grade !== "PASS");
 
   const saferCandidates = [
     ...spreadSaferCandidates,
@@ -1421,13 +1377,13 @@ const [cfbError, setCfbError] =
 
   const crossSportCandidates: CrossSportCandidate[] = [];
 
-  // NFL spreads, moneylines and passing props.
+  // NFL spreads, moneylines and unified V6.2 player props.
   [...candidates, ...moneylineCandidates, ...passingPropCandidates].forEach((candidate) => {
     let startTime: string | null = null;
 
     if (candidate.market_type === "passing_prop") {
-      const prop = (nflPassingProps?.props || []).find(
-        (item) => `prop-${item.event_id}-${item.player_id}` === candidate.event_id
+      const prop = (nflPlayerProps?.parlay_pool || []).find(
+        (item) => `prop-${item.event_id}-${item.player_id}-${item.provider_market}` === candidate.event_id
       );
       startTime = prop?.start_time || null;
     } else {
@@ -1449,7 +1405,7 @@ const [cfbError, setCfbError] =
       score: candidate.score,
       detail:
         candidate.market_type === "passing_prop"
-          ? `${candidate.review || "Review"} • Model ${candidate.model_probability?.toFixed(1) || "—"}%`
+          ? `${candidate.grade || candidate.review || "RDG"} • ${candidate.prop_market || "Player Prop"}`
           : candidate.market_type === "moneyline"
             ? `Projected margin ${candidate.projected_margin.toFixed(1)} • ${candidate.historical_accuracy.toFixed(1)}% historical bucket`
             : `${candidate.difference.toFixed(1)} pt model/market difference`,
@@ -2223,11 +2179,6 @@ const [cfbError, setCfbError] =
 
         <NFLFeaturedReviews games={reviewGames} />
 
-        <NFLPassingPropsSection
-          data={nflPassingProps}
-          loading={nflPassingPropsLoading}
-          error={nflPassingPropsError}
-        />
 
         {/* BET BUILDER */}
 
@@ -2247,7 +2198,7 @@ const [cfbError, setCfbError] =
                 </h2>
 
                 <p className="mt-2 max-w-3xl text-sm text-slate-400">
-                  Built from qualified NFL spreads, Hard Rock moneylines, and calibrated passing-yard props.
+                  Built from qualified NFL spreads, moneylines, and V6.2 player props across passing, rushing, receiving, receptions, and touchdowns.
                   RDG allows only one leg per game by default to reduce accidental
                   correlation, and it will not force weaker selections into a parlay.
                 </p>
@@ -2720,7 +2671,7 @@ function BuilderCard({
                     <p className="font-bold text-green-400">
                       {candidate.market_type === "moneyline"
                         ? `${candidate.projected_margin.toFixed(1)} pts`
-                        : `${candidate.difference.toFixed(1)}${candidate.market_type === "passing_prop" ? "%" : " pts"}`}
+                        : `${candidate.difference.toFixed(1)}${candidate.market_type === "passing_prop" ? " edge" : " pts"}`}
                     </p>
 
                     <p className="mt-1 text-[10px] uppercase text-slate-500">
@@ -2732,58 +2683,28 @@ function BuilderCard({
                 {candidate.market_type === "passing_prop" ? (
                   <>
                     <div className="mt-4 grid grid-cols-2 gap-3">
-                      <MiniStat
-                        title="RDG PROJECTION"
-                        value={`${candidate.projected_margin.toFixed(1)} yds`}
-                      />
-                      <MiniStat
-                        title="MODEL PROB."
-                        value={`${(candidate.model_probability || 0).toFixed(1)}%`}
-                      />
-                      <MiniStat
-                        title="SPORTSBOOK ODDS"
-                        value={candidate.odds ? `${Number(candidate.odds) > 0 ? "+" : ""}${candidate.odds}` : "—"}
-                      />
-                      <MiniStat
-                        title="MARKET PROB."
-                        value={candidate.market_probability !== null && candidate.market_probability !== undefined ? `${candidate.market_probability.toFixed(1)}%` : "—"}
-                      />
+                      <MiniStat title="RDG PROJECTION" value={candidate.projected_margin.toFixed(1)} />
+                      <MiniStat title="RDG GRADE" value={candidate.grade || candidate.review || "—"} />
+                      <MiniStat title="SPORTSBOOK ODDS" value={candidate.odds ? `${Number(candidate.odds) > 0 ? "+" : ""}${candidate.odds}` : "—"} />
+                      <MiniStat title="PROP MARKET" value={candidate.prop_market || "Player Prop"} />
                     </div>
-                    <p className="mt-3 text-xs text-slate-500">
-                      Passing-yard probability is model-implied from the frozen V2 residual calibration; it is not a historical sportsbook prop win rate.
-                    </p>
+                    <p className="mt-3 text-xs text-slate-500">RDG grades rank model evidence and market edge. They are not win probabilities or guarantees.</p>
                   </>
                 ) : candidate.market_type === "moneyline" ? (
                   <>
                     <div className="mt-4 grid grid-cols-2 gap-3">
-                      <MiniStat
-                        title="RDG PROJECTION"
-                        value={`${candidate.projected_winner} by ${candidate.projected_margin.toFixed(1)}`}
-                      />
-                      <MiniStat
-                        title="HARD ROCK MONEYLINE"
-                        value={candidate.odds ? `${Number(candidate.odds) > 0 ? "+" : ""}${candidate.odds}` : "—"}
-                      />
+                      <MiniStat title="RDG PROJECTION" value={`${candidate.projected_winner} by ${candidate.projected_margin.toFixed(1)}`} />
+                      <MiniStat title="HARD ROCK MONEYLINE" value={candidate.odds ? `${Number(candidate.odds) > 0 ? "+" : ""}${candidate.odds}` : "—"} />
                     </div>
-                    <p className="mt-3 text-xs text-slate-500">
-                      Historical {candidate.historical_bucket} bucket: {candidate.historical_correct}/{candidate.historical_sample} ({candidate.historical_accuracy}%) straight-up. This historical bucket rate is not an individual-game win probability.
-                    </p>
+                    <p className="mt-3 text-xs text-slate-500">Historical {candidate.historical_bucket} bucket: {candidate.historical_correct}/{candidate.historical_sample} ({candidate.historical_accuracy}%) straight-up. This historical bucket rate is not an individual-game win probability.</p>
                   </>
                 ) : (
                   <>
                     <div className="mt-4 grid grid-cols-2 gap-3">
-                      <MiniStat
-                        title="RDG PROJECTION"
-                        value={`${candidate.projected_winner} by ${candidate.projected_margin.toFixed(1)}`}
-                      />
-                      <MiniStat
-                        title="HARD ROCK ODDS"
-                        value={candidate.odds || "—"}
-                      />
+                      <MiniStat title="RDG PROJECTION" value={`${candidate.projected_winner} by ${candidate.projected_margin.toFixed(1)}`} />
+                      <MiniStat title="HARD ROCK ODDS" value={candidate.odds || "—"} />
                     </div>
-                    <p className="mt-3 text-xs text-slate-500">
-                      Historical {candidate.historical_bucket} bucket: {candidate.historical_correct}/{candidate.historical_sample} ({candidate.historical_accuracy}%) straight-up.
-                    </p>
+                    <p className="mt-3 text-xs text-slate-500">Historical {candidate.historical_bucket} bucket: {candidate.historical_correct}/{candidate.historical_sample} ({candidate.historical_accuracy}%) straight-up.</p>
                   </>
                 )}
 
@@ -2799,64 +2720,26 @@ function BuilderCard({
                 {expandedPicks.has(`${candidate.event_id}-${index}`) && (
                   <div className="mt-3">
                     {candidate.market_type === "passing_prop" ? (
-                      <>
-                        <div className="grid gap-3 lg:grid-cols-2">
-                          <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/[0.06] p-4">
-                            <p className="text-sm font-black uppercase tracking-[0.12em] text-emerald-300">
-                              ✓ Why RDG Thinks This Is a Good Pick
-                            </p>
-                            <div className="mt-3 space-y-2 text-sm leading-6 text-slate-200">
-                              <p>✓ RDG projects <b className="text-white">{candidate.projected_margin.toFixed(1)} passing yards</b> versus <b className="text-white">{candidate.line.toFixed(1)}</b>, a <b className="text-emerald-300">{candidate.projected_margin - candidate.line >= 0 ? "+" : ""}{(candidate.projected_margin - candidate.line).toFixed(1)}-yard</b> difference.</p>
-                              <p>✓ The {candidate.selection} has a <b className="text-white">{(candidate.model_probability || 0).toFixed(1)}% model-implied probability</b> versus a <b className="text-white">{candidate.market_probability !== null && candidate.market_probability !== undefined ? `${candidate.market_probability.toFixed(1)}%` : "—"}</b> no-vig market estimate.</p>
-                              <p>✓ That creates a <b className="text-emerald-300">+{candidate.difference.toFixed(1)} percentage-point</b> model-versus-market difference.</p>
-                              <p>✓ The selection passed RDG&apos;s current <b className="text-white">{candidate.review || "model review"}</b> filter rather than being added simply to fill a parlay.</p>
-                            </div>
-                          </div>
-
-                          <div className="rounded-xl border border-red-500/40 bg-red-500/[0.06] p-4">
-                            <p className="text-sm font-black uppercase tracking-[0.12em] text-red-400">
-                              ⚠ Potential Cons / Risks
-                            </p>
-                            <div className="mt-3 space-y-2 text-sm leading-6 text-red-200">
-                              <p>⚠ Passing-yard results are volatile. RDG&apos;s 2025 V2 test MAE was about <b>59.6 yards</b>.</p>
-                              <p>⚠ Game script can change passing volume. An early lead can reduce attempts, while pressure or turnovers can disrupt drives.</p>
-                              <p>⚠ Injuries or limitations to the QB, offensive line, or key receivers can materially change the projection.</p>
-                              <p>⚠ RDG does <b>not currently have a live injury/expected-lineup feed connected to this explanation</b>, so verify current player availability before relying on an injury-specific conclusion.</p>
-                            </div>
+                      <div className="grid gap-3 lg:grid-cols-2">
+                        <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/[0.06] p-4">
+                          <p className="text-sm font-black uppercase tracking-[0.12em] text-emerald-300">✓ Why RDG Likes This Player Prop</p>
+                          <div className="mt-3 space-y-2 text-sm leading-6 text-slate-200">
+                            <p>✓ RDG grades this play <b className="text-emerald-300">{candidate.grade || candidate.review}</b>.</p>
+                            <p>✓ RDG projection: <b className="text-white">{candidate.projected_margin.toFixed(1)}</b>{candidate.line ? <> versus sportsbook line <b className="text-white">{candidate.line.toFixed(1)}</b></> : null}.</p>
+                            <p>✓ Model edge: <b className="text-emerald-300">{candidate.difference.toFixed(2)}</b> in the native market unit.</p>
+                            <p>✓ Market: <b className="text-white">{candidate.prop_market || "Player Prop"}</b>.</p>
                           </div>
                         </div>
-
-                        <div className="mt-3 grid gap-3 md:grid-cols-3">
-                          <div className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
-                            <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">Key Numbers</p>
-                            <div className="mt-3 space-y-2 text-sm">
-                              <div className="flex justify-between gap-4"><span className="text-slate-400">Projection</span><b>{candidate.projected_margin.toFixed(1)} yds</b></div>
-                              <div className="flex justify-between gap-4"><span className="text-slate-400">Line</span><b>{candidate.line.toFixed(1)}</b></div>
-                              <div className="flex justify-between gap-4"><span className="text-slate-400">Difference</span><b className="text-emerald-300">{candidate.projected_margin - candidate.line >= 0 ? "+" : ""}{(candidate.projected_margin - candidate.line).toFixed(1)} yds</b></div>
-                              <div className="flex justify-between gap-4"><span className="text-slate-400">Model Prob.</span><b>{(candidate.model_probability || 0).toFixed(1)}%</b></div>
-                              <div className="flex justify-between gap-4"><span className="text-slate-400">Market Prob.</span><b>{candidate.market_probability !== null && candidate.market_probability !== undefined ? `${candidate.market_probability.toFixed(1)}%` : "—"}</b></div>
-                            </div>
-                          </div>
-
-                          <div className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
-                            <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">Context</p>
-                            <div className="mt-3 space-y-2 text-sm">
-                              <div className="flex justify-between gap-4"><span className="text-slate-400">Player</span><b className="text-right">{candidate.team}</b></div>
-                              <div className="flex justify-between gap-4"><span className="text-slate-400">Game</span><b>{candidate.matchup}</b></div>
-                              <div className="flex justify-between gap-4"><span className="text-slate-400">Sportsbook</span><b>{candidate.sportsbook_name ? candidate.sportsbook_name.toUpperCase() : "Available book"}</b></div>
-                              <div className="flex justify-between gap-4"><span className="text-slate-400">Odds</span><b>{candidate.odds ? `${Number(candidate.odds) > 0 ? "+" : ""}${candidate.odds}` : "—"}</b></div>
-                              <div className="flex justify-between gap-4"><span className="text-slate-400">Model</span><b>RDG NFL V2</b></div>
-                            </div>
-                          </div>
-
-                          <div className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
-                            <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">Bottom Line</p>
-                            <p className="mt-3 text-sm leading-6 text-slate-300">
-                              RDG&apos;s numbers favor <b className="text-white">{candidate.team} {candidate.selection} {candidate.line.toFixed(1)}</b>. The model&apos;s estimated advantage is <b className="text-emerald-300">+{candidate.difference.toFixed(1)} percentage points</b> versus the no-vig market estimate. Check late injury and lineup news because those factors are not yet automatically included.
-                            </p>
+                        <div className="rounded-xl border border-red-500/40 bg-red-500/[0.06] p-4">
+                          <p className="text-sm font-black uppercase tracking-[0.12em] text-red-400">⚠ Potential Cons / Risks</p>
+                          <div className="mt-3 space-y-2 text-sm leading-6 text-red-200">
+                            <p>⚠ Player props can move quickly as sportsbook lines and prices update.</p>
+                            <p>⚠ Game script and player usage can materially change the result.</p>
+                            <p>⚠ RDG grades are evidence rankings, not predicted win percentages.</p>
+                            {candidate.role_protection && candidate.role_protection !== "NONE" && (<p>⚠ Rushing role protection is active: <b>{candidate.role_protection}</b>.</p>)}
                           </div>
                         </div>
-                      </>
+                      </div>
                     ) : candidate.market_type === "moneyline" ? (
                       <div className="grid gap-3 lg:grid-cols-2">
                         <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/[0.06] p-4">
@@ -2920,119 +2803,6 @@ function BuilderCard({
   );
 }
 
-function NFLPassingPropsSection({
-  data,
-  loading,
-  error,
-}: {
-  data: NFLPassingPropsAnalysis | null;
-  loading: boolean;
-  error: string;
-}) {
-  const props = (data?.props || []).filter((prop) => prop.review !== "PASS");
-
-  return (
-    <section className="mt-14 border-t border-white/10 pt-10">
-      <p className="text-xs font-bold uppercase tracking-[0.25em] text-emerald-400">
-        NFL PLAYER PROPS • PASSING YARDS
-      </p>
-      <div className="mt-3 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h2 className="text-3xl font-bold">RDG Passing Yard Reviews</h2>
-          <p className="mt-2 max-w-3xl text-sm text-slate-400">
-            Frozen RDG V2 projections compared with current sportsbook passing-yard lines.
-          </p>
-        </div>
-        {data && (
-          <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-400">
-            {props.length} CURRENT REVIEWS
-          </span>
-        )}
-      </div>
-
-      <div className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-4 text-xs leading-5 text-slate-400">
-        Model probability is calibrated from historical RDG projection errors. Model vs Market compares that estimate with no-vig sportsbook probability. These are model estimates, not historical prop-bet win rates or guaranteed edges.
-      </div>
-
-      {loading && (
-        <div className="mt-6 rounded-xl border border-white/10 bg-white/[0.03] p-6">
-          Loading NFL passing props...
-        </div>
-      )}
-
-      {error && (
-        <div className="mt-6 rounded-xl border border-red-500/30 bg-red-500/10 p-6 text-red-400">
-          Passing props error: {error}
-        </div>
-      )}
-
-      {!loading && !error && props.length === 0 && (
-        <div className="mt-6 rounded-xl border border-white/10 bg-white/[0.03] p-6">
-          <p className="font-bold">No passing-yard props currently pass the RDG review filters.</p>
-        </div>
-      )}
-
-      {!loading && !error && props.length > 0 && (
-        <div className="mt-6 grid gap-5 lg:grid-cols-2">
-          {props.map((prop) => {
-            const edge = prop.model_vs_market_probability;
-            const strong = prop.review === "STRONG REVIEW";
-            return (
-              <article
-                key={`${prop.event_id}-${prop.player_id}`}
-                className={
-                  strong
-                    ? "rounded-2xl border border-emerald-400/50 bg-emerald-500/[0.08] p-6 shadow-[0_0_28px_rgba(16,185,129,0.08)]"
-                    : "rounded-2xl border border-white/10 bg-white/[0.035] p-6"
-                }
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-xs font-black uppercase tracking-widest text-emerald-400">
-                      {prop.review}
-                    </p>
-                    <h3 className="mt-2 text-xl font-black">{prop.player_name}</h3>
-                    <p className="mt-1 text-lg font-bold text-white">
-                      {prop.selection} {prop.market_line.toFixed(1)}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      {prop.matchup.away || "—"} @ {prop.matchup.home || "—"}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-2xl font-black text-emerald-400">
-                      {edge !== null ? `${edge >= 0 ? "+" : ""}${edge.toFixed(1)}%` : "—"}
-                    </p>
-                    <p className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                      Model vs Market
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                  <MiniStat title="RDG PROJECTION" value={prop.rdg_projection.toFixed(1)} />
-                  <MiniStat title="MODEL PROB." value={`${prop.model_probability.toFixed(1)}%`} />
-                  <MiniStat
-                    title="MARKET PROB."
-                    value={
-                      prop.market_no_vig_probability !== null
-                        ? `${prop.market_no_vig_probability.toFixed(1)}%`
-                        : "—"
-                    }
-                  />
-                  <MiniStat
-                    title="VS LINE"
-                    value={`${prop.model_vs_line_yards >= 0 ? "+" : ""}${prop.model_vs_line_yards.toFixed(1)} yds`}
-                  />
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      )}
-    </section>
-  );
-}
 
 function NFLFeaturedReviews({ games }: { games: NFLGame[] }) {
   if (games.length === 0) return null;
