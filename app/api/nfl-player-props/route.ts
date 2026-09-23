@@ -20,17 +20,6 @@ const PRIOR_STATS_URL =
 const ODDS_API_BASE = "https://api.the-odds-api.com/v4";
 const ODDS_API_SPORT = "americanfootball_nfl";
 
-/*
-  ============================================================
-  CORE MARKETS
-
-  These are the six markets RDG will actually analyze.
-
-  We are no longer exposing a pile of sportsbook-only markets
-  that the model is not using.
-  ============================================================
-*/
-
 const CORE_MARKETS = [
   "player_pass_yds",
   "player_pass_tds",
@@ -47,16 +36,13 @@ type Row = Record<string, string>;
 type PlayerGame = {
   season: number;
   week: number;
-
   player_id: string;
   player_name: string;
-
   team: string;
   position: string;
 
   attempts: number;
   completions: number;
-
   passing_yards: number;
   passing_tds: number;
 
@@ -74,7 +60,6 @@ type PlayerHistory = {
   player_name: string;
   player_id: string;
   position: string;
-
   current: PlayerGame[];
   prior: PlayerGame[];
 };
@@ -103,11 +88,9 @@ type OddsEvent = {
   away_team?: string;
 };
 
-/*
-  ============================================================
-  UTILITIES
-  ============================================================
-*/
+/* =========================================================
+   UTILITIES
+========================================================= */
 
 function num(value: unknown): number {
   const n = Number(value);
@@ -176,11 +159,9 @@ function normalizeName(name: string): string {
     .replace(/[^a-z0-9]/g, "");
 }
 
-/*
-  ============================================================
-  CSV
-  ============================================================
-*/
+/* =========================================================
+   CSV
+========================================================= */
 
 function parseCSVLine(line: string): string[] {
   const result: string[] = [];
@@ -192,19 +173,13 @@ function parseCSVLine(line: string): string[] {
     const char = line[i];
 
     if (char === '"') {
-      if (
-        quoted &&
-        line[i + 1] === '"'
-      ) {
+      if (quoted && line[i + 1] === '"') {
         current += '"';
         i++;
       } else {
         quoted = !quoted;
       }
-    } else if (
-      char === "," &&
-      !quoted
-    ) {
+    } else if (char === "," && !quoted) {
       result.push(current);
       current = "";
     } else {
@@ -213,53 +188,36 @@ function parseCSVLine(line: string): string[] {
   }
 
   result.push(current);
-
   return result;
 }
 
 function parseCSV(text: string): Row[] {
   const lines = text
     .split(/\r?\n/)
-    .filter(
-      (line) =>
-        line.trim().length > 0,
-    );
+    .filter((line) => line.trim().length > 0);
 
-  if (!lines.length) {
-    return [];
-  }
+  if (!lines.length) return [];
 
-  const headers =
-    parseCSVLine(lines[0]);
+  const headers = parseCSVLine(lines[0]);
 
-  return lines
-    .slice(1)
-    .map((line) => {
-      const values =
-        parseCSVLine(line);
+  return lines.slice(1).map((line) => {
+    const values = parseCSVLine(line);
+    const row: Row = {};
 
-      const row: Row = {};
-
-      headers.forEach(
-        (header, index) => {
-          row[header] =
-            values[index] ?? "";
-        },
-      );
-
-      return row;
+    headers.forEach((header, index) => {
+      row[header] = values[index] ?? "";
     });
+
+    return row;
+  });
 }
 
-async function fetchCSV(
-  url: string,
-): Promise<Row[]> {
-  const response =
-    await fetch(url, {
-      next: {
-        revalidate: 3600,
-      },
-    });
+async function fetchCSV(url: string): Promise<Row[]> {
+  const response = await fetch(url, {
+    next: {
+      revalidate: 3600,
+    },
+  });
 
   if (!response.ok) {
     throw new Error(
@@ -267,23 +225,12 @@ async function fetchCSV(
     );
   }
 
-  return parseCSV(
-    await response.text(),
-  );
+  return parseCSV(await response.text());
 }
 
-/*
-  ============================================================
-  PLAYER HISTORY
-
-  One history structure now supports:
-  - Passing
-  - Rushing
-  - Receiving
-  - Receptions
-  - Touchdowns
-  ============================================================
-*/
+/* =========================================================
+   PLAYER HISTORY
+========================================================= */
 
 function playerGames(
   rows: Row[],
@@ -293,15 +240,12 @@ function playerGames(
     .filter(
       (row) =>
         num(row.season) === season &&
-        String(
-          row.season_type,
-        ).toUpperCase() === "REG",
+        String(row.season_type).toUpperCase() === "REG",
     )
     .map((row) => ({
       season,
 
-      week:
-        num(row.week),
+      week: num(row.week),
 
       player_id:
         row.player_id ?? "",
@@ -354,10 +298,7 @@ function playerGames(
       receiving_tds:
         num(row.receiving_tds),
     }))
-    .filter(
-      (game) =>
-        Boolean(game.player_name),
-    )
+    .filter((game) => Boolean(game.player_name))
     .sort(
       (a, b) =>
         a.season - b.season ||
@@ -370,10 +311,7 @@ function buildPlayerHistory(
   priorGames: PlayerGame[],
 ): Map<string, PlayerHistory> {
   const map =
-    new Map<
-      string,
-      PlayerHistory
-    >();
+    new Map<string, PlayerHistory>();
 
   for (
     const game of [
@@ -382,9 +320,7 @@ function buildPlayerHistory(
     ]
   ) {
     const key =
-      normalizeName(
-        game.player_name,
-      );
+      normalizeName(game.player_name);
 
     if (!key) continue;
 
@@ -417,10 +353,7 @@ function buildPlayerHistory(
     }
   }
 
-  for (
-    const player
-    of map.values()
-  ) {
+  for (const player of map.values()) {
     player.current.sort(
       (a, b) =>
         a.week - b.week,
@@ -474,21 +407,14 @@ function recencyWeighted(
   );
 }
 
-/*
-  ============================================================
-  FROZEN RDG PASSING YARDS V2
-
-  This preserves the core Passing V2 structure already used
-  by the previous centralized route.
-  ============================================================
-*/
+/* =========================================================
+   FROZEN PASSING YARDS V2
+========================================================= */
 
 function yardsPerAttempt(
   game: PlayerGame,
 ): number {
-  if (
-    game.attempts <= 0
-  ) {
+  if (game.attempts <= 0) {
     return 0;
   }
 
@@ -508,9 +434,7 @@ function projectPassingYardsV2(
           game.attempts >= 10,
       );
 
-  if (
-    history.length < 3
-  ) {
+  if (history.length < 3) {
     return null;
   }
 
@@ -559,21 +483,13 @@ function projectPassingYardsV2(
 
   if (current.length === 1) {
     currentWeight = 0.15;
-  } else if (
-    current.length === 2
-  ) {
+  } else if (current.length === 2) {
     currentWeight = 0.25;
-  } else if (
-    current.length === 3
-  ) {
+  } else if (current.length === 3) {
     currentWeight = 0.35;
-  } else if (
-    current.length === 4
-  ) {
+  } else if (current.length === 4) {
     currentWeight = 0.45;
-  } else if (
-    current.length >= 5
-  ) {
+  } else if (current.length >= 5) {
     currentWeight = 0.55;
   }
 
@@ -630,21 +546,13 @@ function projectPassingYardsV2(
 
   if (current.length === 1) {
     efficiencyWeight = 0.1;
-  } else if (
-    current.length === 2
-  ) {
+  } else if (current.length === 2) {
     efficiencyWeight = 0.18;
-  } else if (
-    current.length === 3
-  ) {
+  } else if (current.length === 3) {
     efficiencyWeight = 0.25;
-  } else if (
-    current.length === 4
-  ) {
+  } else if (current.length === 4) {
     efficiencyWeight = 0.32;
-  } else if (
-    current.length >= 5
-  ) {
+  } else if (current.length >= 5) {
     efficiencyWeight = 0.4;
   }
 
@@ -704,15 +612,11 @@ function projectPassingYardsV2(
   const totalHistory =
     history.length;
 
-  if (
-    totalHistory <= 5
-  ) {
+  if (totalHistory <= 5) {
     projection =
       projection * 0.65 +
       225 * 0.35;
-  } else if (
-    totalHistory <= 10
-  ) {
+  } else if (totalHistory <= 10) {
     projection =
       projection * 0.8 +
       225 * 0.2;
@@ -720,7 +624,10 @@ function projectPassingYardsV2(
 
   return {
     projection:
-      round(projection, 1),
+      round(
+        projection,
+        1,
+      ),
 
     expected_attempts:
       round(
@@ -748,38 +655,26 @@ function projectPassingYardsV2(
   };
 }
 
-/*
-  ============================================================
-  GENERIC HISTORY PROJECTION
-
-  Used for markets that have not yet received a separately
-  validated frozen model.
-
-  This is intentionally conservative.
-
-  Prior season = stability
-  Current season = role
-  Recent games = current usage/form
-
-  These are projections — NOT claimed historical win rates.
-  ============================================================
-*/
+/* =========================================================
+   GENERIC HISTORY MODEL
+========================================================= */
 
 function projectHistoryMetric(
   player: PlayerHistory,
+
   selector:
     (game: PlayerGame) => number,
+
   participation:
     (game: PlayerGame) => boolean,
+
   modelName: string,
 ) {
   const all =
     historyGames(player)
       .filter(participation);
 
-  if (
-    all.length < 3
-  ) {
+  if (all.length < 3) {
     return null;
   }
 
@@ -815,23 +710,11 @@ function projectHistoryMetric(
   let projection:
     number | null = null;
 
-  /*
-    Early season:
-    keep significant prior-season weight.
-
-    Later season:
-    current-season role becomes more important.
-  */
-
-  if (
-    current.length === 0
-  ) {
+  if (current.length === 0) {
     projection =
       priorAverage ??
       recentAverage;
-  } else if (
-    current.length <= 2
-  ) {
+  } else if (current.length <= 2) {
     projection =
       weightedAverage([
         {
@@ -856,9 +739,7 @@ function projectHistoryMetric(
           weight: 0.20,
         },
       ]);
-  } else if (
-    current.length <= 5
-  ) {
+  } else if (current.length <= 5) {
     projection =
       weightedAverage([
         {
@@ -910,15 +791,16 @@ function projectHistoryMetric(
       ]);
   }
 
-  if (
-    projection === null
-  ) {
+  if (projection === null) {
     return null;
   }
 
   return {
     projection:
-      round(projection, 2),
+      round(
+        projection,
+        2,
+      ),
 
     prior_average:
       priorAverage === null
@@ -958,16 +840,9 @@ function projectHistoryMetric(
   };
 }
 
-/*
-  ============================================================
-  RUSHING YARDS
-
-  Role-aware historical projection.
-
-  QB rushing and RB rushing behave differently, so QB history
-  is intentionally more stable and less reactive.
-  ============================================================
-*/
+/* =========================================================
+   RUSHING YARDS
+========================================================= */
 
 function projectRushingYards(
   player: PlayerHistory,
@@ -979,9 +854,7 @@ function projectRushingYards(
           game.carries > 0,
       );
 
-  if (
-    all.length < 3
-  ) {
+  if (all.length < 3) {
     return null;
   }
 
@@ -1034,9 +907,7 @@ function projectRushingYards(
       ),
     );
 
-  if (
-    careerYards === null
-  ) {
+  if (careerYards === null) {
     return null;
   }
 
@@ -1066,13 +937,6 @@ function projectRushingYards(
         careerYards) *
         0.10;
   }
-
-  /*
-    Small role adjustment.
-
-    We intentionally prevent recent carries from moving the
-    projection too aggressively.
-  */
 
   let carryMultiplier = 1;
 
@@ -1109,7 +973,10 @@ function projectRushingYards(
 
   return {
     projection:
-      round(projection, 1),
+      round(
+        projection,
+        1,
+      ),
 
     position:
       player.position,
@@ -1166,6 +1033,10 @@ function projectRushingYards(
   };
 }
 
+/* =========================================================
+   RECEIVING / RECEPTIONS / PASSING TD
+========================================================= */
+
 function projectReceivingYards(
   player: PlayerHistory,
 ) {
@@ -1216,18 +1087,9 @@ function projectPassingTDs(
   );
 }
 
-/*
-  ============================================================
-  ANYTIME TD
-
-  We calculate scoring frequency from rushing + receiving TDs.
-
-  This is NOT treated like an OVER/UNDER market.
-
-  Output:
-  YES or PASS
-  ============================================================
-*/
+/* =========================================================
+   ANYTIME TD
+========================================================= */
 
 function projectAnytimeTD(
   player: PlayerHistory,
@@ -1241,9 +1103,7 @@ function projectAnytimeTD(
           game.receptions > 0,
       );
 
-  if (
-    all.length < 4
-  ) {
+  if (all.length < 4) {
     return null;
   }
 
@@ -1314,11 +1174,9 @@ function projectAnytimeTD(
   };
 }
 
-/*
-  ============================================================
-  ODDS API
-  ============================================================
-*/
+/* =========================================================
+   THE ODDS API
+========================================================= */
 
 async function oddsFetch(
   url: string,
@@ -1382,10 +1240,7 @@ function marketPlayers(
   marketKey: string,
 ) {
   const players =
-    new Map<
-      string,
-      string
-    >();
+    new Map<string, string>();
 
   for (
     const book of
@@ -1428,10 +1283,7 @@ function marketPlayers(
         const key =
           normalizeName(name);
 
-        if (
-          key &&
-          name
-        ) {
+        if (key && name) {
           players.set(
             key,
             name,
@@ -1640,6 +1492,10 @@ function anytimeTDLines(
   return out;
 }
 
+/* =========================================================
+   CONSENSUS LINE
+========================================================= */
+
 function consensusLine(
   lines: SportsbookLine[],
 ) {
@@ -1664,10 +1520,7 @@ function consensusLine(
   }
 
   const counts =
-    new Map<
-      number,
-      number
-    >();
+    new Map<number, number>();
 
   values.forEach(
     (value) =>
@@ -1713,6 +1566,10 @@ function consensusLine(
   )[0][0];
 }
 
+/* =========================================================
+   ODDS / NO-VIG
+========================================================= */
+
 function impliedProbability(
   odds:
     string |
@@ -1754,10 +1611,7 @@ function noVig(
       }
     >();
 
-  for (
-    const item
-    of lines
-  ) {
+  for (const item of lines) {
     if (
       !item.available ||
       item.line !== line
@@ -1788,9 +1642,7 @@ function noVig(
       );
     }
 
-    if (
-      key === "OVER"
-    ) {
+    if (key === "OVER") {
       books.get(
         item.sportsbook,
       )!.over = item;
@@ -1898,21 +1750,9 @@ function noVig(
   };
 }
 
-/*
-  ============================================================
-  CONFIDENCE / PICK ENGINE
-
-  IMPORTANT:
-
-  confidence is an RDG ranking score.
-
-  It is NOT being represented as:
-  "this bet has X% chance of winning."
-
-  This lets the parlay builder rank plays without pretending
-  we have validated win probabilities for every market.
-  ============================================================
-*/
+/* =========================================================
+   CONFIDENCE / PICK ENGINE
+========================================================= */
 
 const MARKET_SCALE:
   Record<
@@ -1992,14 +1832,6 @@ function confidenceScore(
     historyStrength * 10 +
     bookStrength * 10;
 
-  /*
-    If the market itself heavily prices the same side,
-    give a small boost.
-
-    This is deliberately small so RDG does not simply copy
-    the sportsbook.
-  */
-
   if (
     marketProbability !== null
   ) {
@@ -2025,10 +1857,11 @@ function confidenceScore(
 }
 
 function analyzeOverUnder(
-  market: Exclude<
-    CoreMarket,
-    "player_anytime_td"
-  >,
+  market:
+    Exclude<
+      CoreMarket,
+      "player_anytime_td"
+    >,
 
   projection: any,
 
@@ -2071,19 +1904,16 @@ function analyzeOverUnder(
       market,
       difference,
       historyCount,
+
       new Set(
         lines.map(
           (item) =>
             item.sportsbook,
         ),
       ).size,
+
       marketData.probability,
     );
-
-  /*
-    PASS protects us from forcing tiny model/line differences
-    into parlays.
-  */
 
   let pick:
     "OVER" |
@@ -2133,11 +1963,9 @@ function analyzeOverUnder(
   };
 }
 
-/*
-  ============================================================
-  MARKET LABELS
-  ============================================================
-*/
+/* =========================================================
+   MARKET HELPERS
+========================================================= */
 
 function marketLabel(
   market: CoreMarket,
@@ -2200,11 +2028,9 @@ function projectionForMarket(
   }
 }
 
-/*
-  ============================================================
-  MAIN ROUTE
-  ============================================================
-*/
+/* =========================================================
+   MAIN ROUTE
+========================================================= */
 
 export async function GET() {
   const apiKey =
@@ -2228,10 +2054,6 @@ export async function GET() {
   }
 
   try {
-    /*
-      Load player history + upcoming NFL events.
-    */
-
     const [
       currentRows,
       priorRows,
@@ -2299,10 +2121,6 @@ export async function GET() {
               ).getTime(),
           );
 
-    /*
-      Build historical player database.
-    */
-
     const currentGames =
       playerGames(
         currentRows,
@@ -2320,10 +2138,6 @@ export async function GET() {
         currentGames,
         priorGames,
       );
-
-    /*
-      Request all six markets for every upcoming event.
-    */
 
     const markets =
       CORE_MARKETS.join(",");
@@ -2389,12 +2203,6 @@ export async function GET() {
     let unmatchedPlayers = 0;
     let providerErrors = 0;
 
-    /*
-      ========================================================
-      ANALYZE EVERY EVENT / MARKET / PLAYER
-      ========================================================
-    */
-
     for (
       const result
       of results
@@ -2453,11 +2261,9 @@ export async function GET() {
             continue;
           }
 
-          /*
-            ================================================
-            ANYTIME TD
-            ================================================
-          */
+          /* =============================================
+             ANYTIME TD
+          ============================================= */
 
           if (
             market ===
@@ -2514,11 +2320,12 @@ export async function GET() {
                 projection.projection,
               );
 
-            const tdEdge =
-              marketImplied === null
-                ? null
-                : rdgTD -
-                  marketImplied;
+            const tdEdge:
+              number | null =
+                marketImplied === null
+                  ? null
+                  : rdgTD -
+                    marketImplied;
 
             let pick:
               "YES" |
@@ -2526,14 +2333,14 @@ export async function GET() {
                 "PASS";
 
             /*
-              Require RDG scoring rate to clear both:
-              - minimum historical TD rate
-              - market-implied probability by a useful margin
+              FIX:
+              Explicitly confirm tdEdge is not null before
+              comparing it to 5.
             */
 
             if (
-              marketImplied !==
-                null &&
+              marketImplied !== null &&
+              tdEdge !== null &&
               rdgTD >= 35 &&
               tdEdge >= 5
             ) {
@@ -2639,8 +2446,7 @@ export async function GET() {
                 null,
 
               sportsbook_implied_probability:
-                marketImplied ===
-                null
+                marketImplied === null
                   ? null
                   : round(
                       marketImplied,
@@ -2675,11 +2481,9 @@ export async function GET() {
             continue;
           }
 
-          /*
-            ================================================
-            OVER / UNDER MARKETS
-            ================================================
-          */
+          /* =============================================
+             OVER / UNDER MARKETS
+          ============================================= */
 
           const lines =
             oddsLines(
@@ -2796,15 +2600,9 @@ export async function GET() {
       }
     }
 
-    /*
-      ========================================================
-      SORTING
-
-      Highest confidence usable plays first.
-
-      PASS automatically goes below actionable plays.
-      ========================================================
-    */
+    /* =====================================================
+       SORT PROPS
+    ===================================================== */
 
     props.sort(
       (a, b) => {
@@ -2838,11 +2636,10 @@ export async function GET() {
     );
 
     /*
-      Parlay builder can consume this array directly.
+      No separate eligible YES/NO field.
 
-      No redundant YES/NO "eligible" field.
-
-      It simply receives the strongest non-PASS plays.
+      The parlay builder simply receives every non-PASS play
+      ordered from highest confidence to lowest confidence.
     */
 
     const parlayPool =
@@ -2973,14 +2770,15 @@ export async function GET() {
           ).length,
 
         /*
-          This is what the future parlay builder should use.
+          This is the list the parlay builder should eventually
+          consume.
         */
 
         parlay_pool:
           parlayPool,
 
         /*
-          Full analysis including PASS.
+          Full analysis including PASS results.
         */
 
         props,
