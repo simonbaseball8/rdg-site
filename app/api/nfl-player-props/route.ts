@@ -746,530 +746,6 @@ function projectPassingYardsV2(
 }
 
 
-const PROPLINE_BASE =
-  "https://api.prop-line.com/v1";
-
-const PROPLINE_SPORT =
-  "football_nfl";
-
-const PROPLINE_MARKET =
-  "player_pass_yds";
-
-type PropLineEvent = {
-  id: string | number;
-  sport_key?: string;
-  home_team?: string;
-  away_team?: string;
-  commence_time?: string;
-};
-
-function isFutureEvent(
-  event: PropLineEvent
-): boolean {
-  const start =
-    new Date(
-      String(
-        event?.commence_time ?? ""
-      )
-    ).getTime();
-
-  return (
-    Number.isFinite(start) &&
-    start > Date.now()
-  );
-}
-
-function propLineSportsbookLines(
-  eventOdds: any,
-  playerName: string
-): SportsbookLine[] {
-  const lines: SportsbookLine[] = [];
-
-  const books =
-    Array.isArray(
-      eventOdds?.bookmakers
-    )
-      ? eventOdds.bookmakers
-      : [];
-
-  const target =
-    normalizeName(playerName);
-
-  for (const book of books) {
-    const markets =
-      Array.isArray(book?.markets)
-        ? book.markets
-        : [];
-
-    for (const market of markets) {
-      if (
-        String(market?.key ?? "") !==
-        PROPLINE_MARKET
-      ) {
-        continue;
-      }
-
-      const outcomes =
-        Array.isArray(
-          market?.outcomes
-        )
-          ? market.outcomes
-          : [];
-
-      for (const outcome of outcomes) {
-        const outcomePlayer =
-          String(
-            outcome?.description ??
-            market?.description ??
-            ""
-          );
-
-        if (
-          normalizeName(
-            outcomePlayer
-          ) !== target
-        ) {
-          continue;
-        }
-
-        const side =
-          String(
-            outcome?.name ?? ""
-          ).toUpperCase();
-
-        if (
-          side !== "OVER" &&
-          side !== "UNDER"
-        ) {
-          continue;
-        }
-
-        const line =
-          Number(
-            outcome?.point
-          );
-
-        if (
-          !Number.isFinite(line)
-        ) {
-          continue;
-        }
-
-        lines.push({
-          sportsbook:
-            String(
-              book?.title ??
-              book?.key ??
-              "Unknown"
-            ),
-
-          side,
-
-          line,
-
-          odds:
-            outcome?.price ??
-            outcome?.price_american ??
-            null,
-
-          available: true,
-
-          updated_at:
-            market?.last_update ??
-            book?.last_update ??
-            eventOdds?.last_update ??
-            null,
-        });
-      }
-    }
-  }
-
-  return lines;
-}
-
-function propLinePlayers(
-  eventOdds: any
-): string[] {
-  const names =
-    new Map<string, string>();
-
-  const books =
-    Array.isArray(
-      eventOdds?.bookmakers
-    )
-      ? eventOdds.bookmakers
-      : [];
-
-  for (const book of books) {
-    const markets =
-      Array.isArray(book?.markets)
-        ? book.markets
-        : [];
-
-    for (const market of markets) {
-      if (
-        String(market?.key ?? "") !==
-        PROPLINE_MARKET
-      ) {
-        continue;
-      }
-
-      const outcomes =
-        Array.isArray(
-          market?.outcomes
-        )
-          ? market.outcomes
-          : [];
-
-      for (const outcome of outcomes) {
-        const name =
-          String(
-            outcome?.description ??
-            market?.description ??
-            ""
-          ).trim();
-
-        const key =
-          normalizeName(name);
-
-        if (key && name) {
-          names.set(key, name);
-        }
-      }
-    }
-  }
-
-  return Array.from(
-    names.values()
-  );
-}
-
-/*
-  Pick an ACTUAL sportsbook line.
-
-  First choose the line offered by the
-  largest number of books.
-
-  If tied, choose the one closest to
-  the median of all available lines.
-*/
-function consensusActualLine(
-  lines: SportsbookLine[]
-): number | null {
-  const available =
-    lines.filter(
-      (line) => line.available
-    );
-
-  if (!available.length) {
-    return null;
-  }
-
-  const uniqueBookLine =
-    new Map<string, number>();
-
-  for (const item of available) {
-    uniqueBookLine.set(
-      `${item.sportsbook}|${item.line}`,
-      item.line
-    );
-  }
-
-  const values =
-    Array.from(
-      uniqueBookLine.values()
-    );
-
-  if (!values.length) {
-    return null;
-  }
-
-  const counts =
-    new Map<number, number>();
-
-  for (const value of values) {
-    counts.set(
-      value,
-      (counts.get(value) ?? 0) + 1
-    );
-  }
-
-  const sorted =
-    [...values].sort(
-      (a, b) => a - b
-    );
-
-  const middle =
-    Math.floor(
-      sorted.length / 2
-    );
-
-  const median =
-    sorted.length % 2
-      ? sorted[middle]
-      : (
-          sorted[middle - 1] +
-          sorted[middle]
-        ) / 2;
-
-  let bestLine = values[0];
-  let bestCount =
-    counts.get(bestLine) ?? 0;
-
-  for (
-    const [line, count]
-    of counts.entries()
-  ) {
-    if (count > bestCount) {
-      bestLine = line;
-      bestCount = count;
-      continue;
-    }
-
-    if (count === bestCount) {
-      const currentDistance =
-        Math.abs(line - median);
-
-      const bestDistance =
-        Math.abs(
-          bestLine - median
-        );
-
-      if (
-        currentDistance <
-        bestDistance
-      ) {
-        bestLine = line;
-      }
-    }
-  }
-
-  return bestLine;
-}
-
-function americanImpliedProbability(
-  odds:
-    | string
-    | number
-    | null
-): number | null {
-  if (
-    odds === null ||
-    odds === undefined
-  ) {
-    return null;
-  }
-
-  const value = Number(odds);
-
-  if (
-    !Number.isFinite(value) ||
-    value === 0
-  ) {
-    return null;
-  }
-
-  if (value > 0) {
-    return 100 / (value + 100);
-  }
-
-  return (
-    Math.abs(value) /
-    (Math.abs(value) + 100)
-  );
-}
-
-function marketNoVigProbability(
-  lines: SportsbookLine[],
-  selectedLine: number,
-  side: "OVER" | "UNDER"
-) {
-  const books =
-    new Map<
-      string,
-      {
-        over?: SportsbookLine;
-        under?: SportsbookLine;
-      }
-    >();
-
-  for (const item of lines) {
-    if (
-      !item.available ||
-      item.line !== selectedLine
-    ) {
-      continue;
-    }
-
-    const sideName =
-      String(
-        item.side ?? ""
-      ).toLowerCase();
-
-    if (
-      sideName !== "over" &&
-      sideName !== "under"
-    ) {
-      continue;
-    }
-
-    if (
-      !books.has(
-        item.sportsbook
-      )
-    ) {
-      books.set(
-        item.sportsbook,
-        {}
-      );
-    }
-
-    const pair =
-      books.get(
-        item.sportsbook
-      )!;
-
-    if (sideName === "over") {
-      pair.over = item;
-    } else {
-      pair.under = item;
-    }
-  }
-
-  const probabilities:
-    number[] = [];
-
-  const pairedBooks:
-    any[] = [];
-
-  for (
-    const [sportsbook, pair]
-    of books.entries()
-  ) {
-    if (
-      !pair.over ||
-      !pair.under
-    ) {
-      continue;
-    }
-
-    const overRaw =
-      americanImpliedProbability(
-        pair.over.odds
-      );
-
-    const underRaw =
-      americanImpliedProbability(
-        pair.under.odds
-      );
-
-    if (
-      overRaw === null ||
-      underRaw === null
-    ) {
-      continue;
-    }
-
-    const total =
-      overRaw + underRaw;
-
-    if (total <= 0) {
-      continue;
-    }
-
-    const overNoVig =
-      overRaw / total;
-
-    const underNoVig =
-      underRaw / total;
-
-    const selected =
-      side === "OVER"
-        ? overNoVig
-        : underNoVig;
-
-    probabilities.push(
-      selected
-    );
-
-    pairedBooks.push({
-      sportsbook,
-      line: selectedLine,
-      over_odds:
-        pair.over.odds,
-      under_odds:
-        pair.under.odds,
-      over_no_vig_probability:
-        round(
-          overNoVig * 100,
-          2
-        ),
-      under_no_vig_probability:
-        round(
-          underNoVig * 100,
-          2
-        ),
-    });
-  }
-
-  if (!probabilities.length) {
-    return {
-      probability: null,
-      paired_books:
-        pairedBooks,
-    };
-  }
-
-  return {
-    probability:
-      round(
-        (
-          probabilities.reduce(
-            (sum, value) =>
-              sum + value,
-            0
-          ) /
-          probabilities.length
-        ) * 100,
-        2
-      ),
-
-    paired_books:
-      pairedBooks,
-  };
-}
-
-async function fetchPropLineJSON(
-  url: string,
-  apiKey: string
-) {
-  const response =
-    await fetch(
-      url,
-      {
-        headers: {
-          "X-API-Key":
-            apiKey,
-        },
-        next: {
-          revalidate:
-            3600,
-        },
-      }
-    );
-
-  if (!response.ok) {
-    const body =
-      await response.text();
-
-    throw new Error(
-      `PropLine returned ${response.status}: ${body}`
-    );
-  }
-
-  return response.json();
-}
-
 function calibratedProbability(
   difference: number,
   side:
@@ -1354,574 +830,165 @@ function calibratedProbability(
 }
 
 
-export async function GET() {
-  const apiKey =
-    process.env
-      .PROPLINE_API_KEY;
 
-  if (!apiKey) {
-    return NextResponse.json(
-      {
-        success: false,
-        error:
-          "PROPLINE_API_KEY is missing.",
-      },
-      {
-        status: 500,
-      }
-    );
-  }
-
-  try {
-    const [
-      currentRows,
-      priorRows,
-      eventsData,
-    ] =
-      await Promise.all([
-        fetchCSV(
-          CURRENT_STATS_URL
-        ),
-
-        fetchCSV(
-          PRIOR_STATS_URL
-        ),
-
-        fetchPropLineJSON(
-          `${PROPLINE_BASE}/sports/${PROPLINE_SPORT}/events`,
-          apiKey
-        ),
-      ]);
-
-    const events:
-      PropLineEvent[] =
-      Array.isArray(eventsData)
-        ? eventsData
-        : Array.isArray(
-            eventsData?.data
-          )
-          ? eventsData.data
-          : [];
-
-    const futureEvents =
-      events
-        .filter(isFutureEvent)
-        .sort(
-          (a, b) =>
-            new Date(
-              String(
-                a.commence_time ?? ""
-              )
-            ).getTime() -
-            new Date(
-              String(
-                b.commence_time ?? ""
-              )
-            ).getTime()
-        );
-
-    /*
-      Pull only PASSING YARDS for each
-      upcoming NFL event.
-
-      PropLine free tier = 1,000 requests/day.
-      These provider fetches are cached for
-      one hour to keep usage low.
-    */
-    const eventOddsResults =
-      await Promise.all(
-        futureEvents.map(
-          async (event) => {
-            try {
-              const odds =
-                await fetchPropLineJSON(
-                  `${PROPLINE_BASE}/sports/${PROPLINE_SPORT}/events/${encodeURIComponent(
-                    String(event.id)
-                  )}/odds?markets=${PROPLINE_MARKET}`,
-                  apiKey
-                );
-
-              return {
-                event,
-                odds,
-                error: null,
-              };
-            } catch (error) {
-              return {
-                event,
-                odds: null,
-                error:
-                  error instanceof Error
-                    ? error.message
-                    : "Unknown PropLine event error",
-              };
-            }
-          }
-        )
-      );
-
-    const currentGames =
-      passingGames(
-        currentRows,
-        CURRENT_SEASON
-      );
-
-    const priorGames =
-      passingGames(
-        priorRows,
-        PRIOR_SEASON
-      );
-
-    const history =
-      buildPlayerHistory(
-        currentGames,
-        priorGames
-      );
-
-    const props: any[] = [];
-
-    let matchedPlayers = 0;
-    let unmatchedPlayers = 0;
-    let eventsWithPassingProps = 0;
-    let providerEventErrors = 0;
-
-    for (
-      const result
-      of eventOddsResults
-    ) {
-      const event =
-        result.event;
-
-      const eventOdds =
-        result.odds;
-
-      if (
-        result.error ||
-        !eventOdds
-      ) {
-        providerEventErrors++;
-        continue;
-      }
-
-      const players =
-        propLinePlayers(
-          eventOdds
-        );
-
-      if (players.length) {
-        eventsWithPassingProps++;
-      }
-
-      for (
-        const providerName
-        of players
-      ) {
-        const key =
-          normalizeName(
-            providerName
-          );
-
-        const player =
-          history.get(key);
-
-        if (!player) {
-          unmatchedPlayers++;
-          continue;
-        }
-
-        const projection =
-          projectPassingYardsV2(
-            player
-          );
-
-        if (!projection) {
-          continue;
-        }
-
-        const availableLines =
-          propLineSportsbookLines(
-            eventOdds,
-            providerName
-          ).filter(
-            (line) =>
-              line.available
-          );
-
-        if (
-          !availableLines.length
-        ) {
-          continue;
-        }
-
-        const marketLine =
-          consensusActualLine(
-            availableLines
-          );
-
-        if (
-          marketLine === null
-        ) {
-          continue;
-        }
-
-        matchedPlayers++;
-
-        const difference =
-          projection.projection -
-          marketLine;
-
-        const modelSide:
-          | "OVER"
-          | "UNDER" =
-          difference >= 0
-            ? "OVER"
-            : "UNDER";
-
-        const modelProbability =
-          calibratedProbability(
-            difference,
-            modelSide
-          );
-
-        const market =
-          marketNoVigProbability(
-            availableLines,
-            marketLine,
-            modelSide
-          );
-
-        const marketProbability =
-          market.probability;
-
-        const probabilityEdge =
-          marketProbability !== null
-            ? round(
-                modelProbability -
-                  marketProbability,
-                2
-              )
-            : null;
-
-        const absDifference =
-          Math.abs(
-            difference
-          );
-
-        let review = "PASS";
-
-        if (
-          probabilityEdge !== null &&
-          probabilityEdge >= 8 &&
-          absDifference >= 20
-        ) {
-          review =
-            "STRONG REVIEW";
-        } else if (
-          probabilityEdge !== null &&
-          probabilityEdge >= 5 &&
-          absDifference >= 12
-        ) {
-          review = "REVIEW";
-        } else if (
-          probabilityEdge !== null &&
-          probabilityEdge >= 2 &&
-          absDifference >= 8
-        ) {
-          review = "WATCH";
-        } else if (
-          marketProbability === null
-        ) {
-          if (
-            absDifference >= 20
-          ) {
-            review = "REVIEW";
-          } else if (
-            absDifference >= 10
-          ) {
-            review = "WATCH";
-          }
-        }
-
-        if (
-          projection
-            .total_history_games <
-            11 &&
-          review ===
-            "STRONG REVIEW"
-        ) {
-          review = "REVIEW";
-        }
-
-        if (
-          projection
-            .total_history_games <
-            6 &&
-          review === "REVIEW"
-        ) {
-          review = "WATCH";
-        }
-
-        props.push({
-          event_id:
-            String(event.id),
-
-          start_time:
-            event.commence_time ??
-            null,
-
-          matchup: {
-            away:
-              event.away_team ??
-              eventOdds?.away_team ??
-              null,
-
-            home:
-              event.home_team ??
-              eventOdds?.home_team ??
-              null,
-          },
-
-          player_id:
-            player.player_id ||
-            null,
-
-          player_name:
-            player.player_name ||
-            providerName,
-
-          market:
-            "PASSING YARDS",
-
-          selection:
-            modelSide,
-
-          market_line:
-            round(
-              marketLine,
-              1
-            ),
-
-          rdg_projection:
-            projection.projection,
-
-          model_vs_line_yards:
-            round(
-              difference,
-              1
-            ),
-
-          model_probability:
-            modelProbability,
-
-          market_no_vig_probability:
-            marketProbability,
-
-          model_vs_market_probability:
-            probabilityEdge,
-
-          review,
-
-          projection_details: {
-            expected_attempts:
-              projection
-                .expected_attempts,
-
-            expected_yards_per_attempt:
-              projection
-                .expected_yards_per_attempt,
-
-            current_games:
-              projection
-                .current_games,
-
-            prior_games:
-              projection
-                .prior_games,
-
-            total_history_games:
-              projection
-                .total_history_games,
-
-            current_season_yards_average:
-              projection
-                .current_season_yards_average,
-
-            prior_season_yards_average:
-              projection
-                .prior_season_yards_average,
-          },
-
-          paired_market_books:
-            market.paired_books,
-
-          sportsbook_lines:
-            availableLines,
-
-          probability_note:
-            "Model probability comes from the empirical 2025 out-of-sample V2 residual distribution. Market probability removes vig from paired over/under prices at the selected consensus PropLine sportsbook line.",
-
-          important:
-            "Model-vs-market is a probability-model comparison, not a historical sportsbook betting backtest or proof of positive expected value.",
-        });
+const ODDS_API_BASE = "https://api.the-odds-api.com/v4";
+const ODDS_API_SPORT = "americanfootball_nfl";
+const NFL_PROP_MARKETS = [
+  "player_pass_yds","player_pass_tds","player_pass_completions",
+  "player_pass_attempts","player_pass_interceptions","player_rush_yds",
+  "player_rush_attempts","player_reception_yds","player_receptions",
+  "player_anytime_td"
+] as const;
+
+type OddsEvent = { id:string; commence_time?:string; home_team?:string; away_team?:string };
+
+async function oddsFetch(url:string,key:string,revalidate=CACHE_SECONDS){
+  const r=await fetch(`${url}${url.includes("?")?"&":"?"}apiKey=${encodeURIComponent(key)}`,{next:{revalidate}});
+  const usage={
+    used:Number(r.headers.get("x-requests-used"))||null,
+    remaining:Number(r.headers.get("x-requests-remaining"))||null,
+    last:Number(r.headers.get("x-requests-last"))||null
+  };
+  if(!r.ok) throw new Error(`The Odds API returned ${r.status}: ${await r.text()}`);
+  return {data:await r.json(),usage};
+}
+
+function oddsLines(data:any,marketKey:string,playerName:string):SportsbookLine[]{
+  const out:SportsbookLine[]=[]; const target=normalizeName(playerName);
+  for(const book of (Array.isArray(data?.bookmakers)?data.bookmakers:[])){
+    for(const market of (Array.isArray(book?.markets)?book.markets:[])){
+      if(String(market?.key??"")!==marketKey) continue;
+      for(const o of (Array.isArray(market?.outcomes)?market.outcomes:[])){
+        if(normalizeName(String(o?.description??""))!==target) continue;
+        const side=String(o?.name??"").toUpperCase();
+        const line=Number(o?.point);
+        if((side!=="OVER"&&side!=="UNDER")||!Number.isFinite(line)) continue;
+        out.push({sportsbook:String(book?.title??book?.key??"Unknown"),side,line,odds:o?.price??null,available:true,updated_at:market?.last_update??null});
       }
     }
+  }
+  return out;
+}
 
-    props.sort(
-      (a, b) => {
-        const aEdge =
-          a.model_vs_market_probability ??
-          -999;
-
-        const bEdge =
-          b.model_vs_market_probability ??
-          -999;
-
-        return bEdge - aEdge;
+function marketPlayers(data:any,marketKey:string){
+  const m=new Map<string,string>();
+  for(const book of (Array.isArray(data?.bookmakers)?data.bookmakers:[]))
+    for(const market of (Array.isArray(book?.markets)?book.markets:[])){
+      if(String(market?.key??"")!==marketKey) continue;
+      for(const o of (Array.isArray(market?.outcomes)?market.outcomes:[])){
+        const n=String(o?.description??"").trim(), k=normalizeName(n);
+        if(k&&n)m.set(k,n);
       }
-    );
+    }
+  return [...m.values()];
+}
 
-    return NextResponse.json(
-      {
-        success: true,
+function rawMarkets(data:any,event:OddsEvent){
+  const out:any[]=[];
+  for(const book of (Array.isArray(data?.bookmakers)?data.bookmakers:[]))
+    for(const market of (Array.isArray(book?.markets)?book.markets:[])){
+      const mk=String(market?.key??"");
+      if(!NFL_PROP_MARKETS.includes(mk as any))continue;
+      for(const o of (Array.isArray(market?.outcomes)?market.outcomes:[]))
+        out.push({event_id:event.id,start_time:event.commence_time??null,matchup:{away:event.away_team??null,home:event.home_team??null},market_key:mk,sportsbook:String(book?.title??book?.key??"Unknown"),sportsbook_key:String(book?.key??""),player_name:String(o?.description??"").trim()||null,selection:String(o?.name??"").toUpperCase()||null,line:Number.isFinite(Number(o?.point))?Number(o.point):null,odds:o?.price??null,updated_at:market?.last_update??null});
+    }
+  return out;
+}
 
-        version:
-          "4.0-rdg-player-props-propline",
+function consensusLine(lines:SportsbookLine[]){
+  const vals=[...new Map(lines.filter(x=>x.available).map(x=>[`${x.sportsbook}|${x.line}`,x.line])).values()];
+  if(!vals.length)return null;
+  const counts=new Map<number,number>(); vals.forEach(v=>counts.set(v,(counts.get(v)??0)+1));
+  const sorted=[...vals].sort((x,y)=>x-y), mid=Math.floor(sorted.length/2);
+  const median=sorted.length%2?sorted[mid]:(sorted[mid-1]+sorted[mid])/2;
+  return [...counts.entries()].sort((a,b)=>b[1]-a[1]||Math.abs(a[0]-median)-Math.abs(b[0]-median))[0][0];
+}
 
-        cache_policy: {
-          sportsbook_cache_seconds:
-            3600,
+function implied(odds:string|number|null){
+  const n=Number(odds); if(!Number.isFinite(n)||n===0)return null;
+  return n>0?100/(n+100):Math.abs(n)/(Math.abs(n)+100);
+}
 
-          nflverse_cache_seconds:
-            3600,
+function noVig(lines:SportsbookLine[],line:number,side:"OVER"|"UNDER"){
+  const books=new Map<string,{over?:SportsbookLine;under?:SportsbookLine}>();
+  for(const x of lines){
+    if(!x.available||x.line!==line)continue;
+    const k=String(x.side??"").toUpperCase(); if(k!=="OVER"&&k!=="UNDER")continue;
+    if(!books.has(x.sportsbook))books.set(x.sportsbook,{});
+    if(k==="OVER")books.get(x.sportsbook)!.over=x; else books.get(x.sportsbook)!.under=x;
+  }
+  const probs:number[]=[], paired:any[]=[];
+  for(const [sportsbook,p] of books){
+    if(!p.over||!p.under)continue;
+    const a=implied(p.over.odds),b=implied(p.under.odds); if(a===null||b===null||a+b<=0)continue;
+    const ov=a/(a+b),un=b/(a+b); probs.push(side==="OVER"?ov:un);
+    paired.push({sportsbook,line,over_odds:p.over.odds,under_odds:p.under.odds,over_no_vig_probability:round(ov*100,2),under_no_vig_probability:round(un*100,2)});
+  }
+  return {probability:probs.length?round(probs.reduce((a,b)=>a+b,0)/probs.length*100,2):null,paired_books:paired};
+}
 
-          note:
-            "PropLine requests are cached for one hour. Only player_pass_yds is requested to keep free-tier usage low.",
-        },
 
-        sport: "NFL",
 
-        market:
-          "passing_yards",
+export async function GET(){
+  const apiKey=process.env.ODDS_API_KEY;
+  if(!apiKey)return NextResponse.json({success:false,error:"ODDS_API_KEY is missing."},{status:500});
+  try{
+    const [currentRows,priorRows,eventRes]=await Promise.all([
+      fetchCSV(CURRENT_STATS_URL),fetchCSV(PRIOR_STATS_URL),
+      oddsFetch(`${ODDS_API_BASE}/sports/${ODDS_API_SPORT}/events?dateFormat=iso`,apiKey,900)
+    ]);
+    const events:(OddsEvent[])=(Array.isArray(eventRes.data)?eventRes.data:[])
+      .filter((e:OddsEvent)=>{const t=new Date(String(e.commence_time??"")).getTime();return Number.isFinite(t)&&t>Date.now();})
+      .sort((a:OddsEvent,b:OddsEvent)=>new Date(String(a.commence_time)).getTime()-new Date(String(b.commence_time)).getTime());
 
-        model_status:
-          "Frozen V2 + Historical Residual Calibration",
+    const markets=NFL_PROP_MARKETS.join(",");
+    const results=await Promise.all(events.map(async event=>{
+      try{
+        const r=await oddsFetch(`${ODDS_API_BASE}/sports/${ODDS_API_SPORT}/events/${encodeURIComponent(event.id)}/odds?regions=us&markets=${encodeURIComponent(markets)}&oddsFormat=american&dateFormat=iso`,apiKey);
+        return {event,data:r.data,usage:r.usage,error:null};
+      }catch(e){return {event,data:null,usage:null,error:e instanceof Error?e.message:"Unknown provider error"};}
+    }));
 
-        validation: {
-          development_test_2025: {
-            games: 517,
-            mae: 59.6,
-            rmse: 75.07,
-            mean_error: -5.4,
-          },
+    const currentGames=passingGames(currentRows,CURRENT_SEASON),priorGames=passingGames(priorRows,PRIOR_SEASON);
+    const history=buildPlayerHistory(currentGames,priorGames);
+    const props:any[]=[],all_market_rows:any[]=[]; const marketCounts:Record<string,number>={};
+    let matched=0,unmatched=0,passingEvents=0,errors=0;
 
-          untouched_2026_validation: {
-            games: 48,
-            rdg_v2_mae: 57.27,
-            rdg_v2_rmse: 71.51,
-            simple_baseline_mae:
-              60.06,
-
-            note:
-              "2026 validation remains a small sample and is not used to tune model weights.",
-          },
-        },
-
-        probability_calibration: {
-          observations: 517,
-          season: 2025,
-
-          method:
-            "Empirical out-of-sample V2 residual distribution with linear interpolation between observed calibration thresholds.",
-
-          residual_mean: -5.4,
-          residual_sd: 74.95,
-
-          important:
-            "Historical sportsbook prop lines were not available. These probabilities describe the historical V2 residual distribution relative to hypothetical lines, not historical betting results.",
-        },
-
-        methodology: {
-          stats_source:
-            "nflverse",
-
-          market_source:
-            "PropLine",
-
-          provider_market:
-            PROPLINE_MARKET,
-
-          projection_model:
-            "Frozen RDG V2",
-
-          model_probability:
-            "Empirical historical V2 residual calibration.",
-
-          market_probability:
-            "Average no-vig probability from PropLine sportsbooks offering paired over and under prices at the selected actual consensus line.",
-
-          comparison:
-            "Model probability minus no-vig market probability, expressed in percentage points.",
-        },
-
-        current_player_games:
-          currentGames.length,
-
-        prior_player_games:
-          priorGames.length,
-
-        sportsbook_events_found:
-          futureEvents.length,
-
-        pregame_events_found:
-          futureEvents.length,
-
-        events_with_passing_props:
-          eventsWithPassingProps,
-
-        provider_event_errors:
-          providerEventErrors,
-
-        matched_prop_players:
-          matchedPlayers,
-
-        unmatched_prop_players:
-          unmatchedPlayers,
-
-        qualifying_reviews:
-          props.filter(
-            (prop) =>
-              prop.review !==
-              "PASS"
-          ).length,
-
-        props,
-
-        updated_at:
-          new Date().toISOString(),
-      },
-      {
-        headers: {
-          "Cache-Control":
-            "public, s-maxage=900, stale-while-revalidate=1800",
-        },
+    for(const r of results){
+      if(r.error||!r.data){errors++;continue;}
+      for(const row of rawMarkets(r.data,r.event)){all_market_rows.push(row);marketCounts[row.market_key]=(marketCounts[row.market_key]??0)+1;}
+      const players=marketPlayers(r.data,"player_pass_yds"); if(players.length)passingEvents++;
+      for(const providerName of players){
+        const player=history.get(normalizeName(providerName)); if(!player){unmatched++;continue;}
+        const projection=projectPassingYardsV2(player); if(!projection)continue;
+        const lines=oddsLines(r.data,"player_pass_yds",providerName); if(!lines.length)continue;
+        const line=consensusLine(lines); if(line===null)continue; matched++;
+        const diff=projection.projection-line,side:"OVER"|"UNDER"=diff>=0?"OVER":"UNDER";
+        const modelProb=calibratedProbability(diff,side),market=noVig(lines,line,side);
+        const edge=market.probability!==null?round(modelProb-market.probability,2):null,abs=Math.abs(diff);
+        let review="PASS";
+        if(edge!==null&&edge>=8&&abs>=20)review="STRONG REVIEW";
+        else if(edge!==null&&edge>=5&&abs>=12)review="REVIEW";
+        else if(edge!==null&&edge>=2&&abs>=8)review="WATCH";
+        else if(market.probability===null&&abs>=20)review="REVIEW";
+        else if(market.probability===null&&abs>=10)review="WATCH";
+        if(projection.total_history_games<11&&review==="STRONG REVIEW")review="REVIEW";
+        if(projection.total_history_games<6&&review==="REVIEW")review="WATCH";
+        props.push({event_id:r.event.id,start_time:r.event.commence_time??null,matchup:{away:r.event.away_team??null,home:r.event.home_team??null},player_id:player.player_id||null,player_name:player.player_name||providerName,market:"PASSING YARDS",provider_market:"player_pass_yds",selection:side,market_line:round(line,1),rdg_projection:projection.projection,model_vs_line_yards:round(diff,1),model_probability:modelProb,market_no_vig_probability:market.probability,model_vs_market_probability:edge,review,projection_details:projection,paired_market_books:market.paired_books,sportsbook_lines:lines,important:"Passing yards is currently the only market receiving an RDG model recommendation. Other prop markets are collected until their models are validated."});
       }
-    );
-  } catch (error) {
-    return NextResponse.json(
-      {
-        success: false,
-
-        provider:
-          "PropLine",
-
-        error:
-          error instanceof Error
-            ? error.message
-            : "Unknown NFL passing props error",
-      },
-      {
-        status: 500,
-      }
-    );
+    }
+    props.sort((a,b)=>(b.model_vs_market_probability??-999)-(a.model_vs_market_probability??-999));
+    const usage=[...results].reverse().find(x=>x.usage)?.usage??eventRes.usage;
+    return NextResponse.json({
+      success:true,version:"5.0-rdg-centralized-nfl-player-props-odds-api",sport:"NFL",provider:"The Odds API",
+      architecture:{one_route_for_nfl_props:true,requested_markets:NFL_PROP_MARKETS,note:"One route requests multiple prop markets for every upcoming NFL event."},
+      model_status:{passing_yards:"Frozen RDG Passing V2 + Historical Residual Calibration",other_markets:"Sportsbook data only until RDG models are validated."},
+      api_usage:{credits_used:usage?.used??null,credits_remaining:usage?.remaining??null,last_request_cost:usage?.last??null},
+      sportsbook_events_found:events.length,provider_event_errors:errors,market_outcome_counts:marketCounts,raw_player_prop_outcomes:all_market_rows.length,
+      passing_yards:{events_with_props:passingEvents,matched_players:matched,unmatched_players:unmatched,qualifying_reviews:props.filter(x=>x.review!=="PASS").length,props},
+      props,all_market_rows,updated_at:new Date().toISOString()
+    },{headers:{"Cache-Control":"public, s-maxage=900, stale-while-revalidate=1800"}});
+  }catch(error){
+    return NextResponse.json({success:false,provider:"The Odds API",error:error instanceof Error?error.message:"Unknown centralized NFL player props error"},{status:500});
   }
 }
