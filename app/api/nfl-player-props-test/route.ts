@@ -4,9 +4,10 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const VERSION = "1.2-rushing-v1-backtest";
+const VERSION = "2.0-rushing-v2-backtest";
 const MIN_CARRIES = 5;
-const MIN_PRIOR_GAMES = 2;
+const MIN_PRIOR_GAMES = 3;
+const RECENT_GAMES = 4;
 
 type PlayerGame = {
   season: number;
@@ -20,9 +21,7 @@ type PlayerGame = {
 };
 
 type History = {
-  games: number;
-  carries: number;
-  yards: number;
+  games: PlayerGame[];
 };
 
 function num(v: unknown): number {
@@ -64,13 +63,11 @@ function parseCSV(text: string): Record<string, string>[] {
 }
 
 async function loadSeason(season: number): Promise<PlayerGame[]> {
-  // nflverse changed the player-stats release layout before the 2025 season.
-  // Use the season-specific weekly file instead of the old combined player_stats.csv.
   const url =
     `https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_${season}.csv`;
 
   const res = await fetch(url, {
-    headers: { "User-Agent": "RDG-NFL-Rushing-Backtest/1.2" },
+    headers: { "User-Agent": "RDG-NFL-Rushing-V2/2.0" },
     next: { revalidate: 3600 },
   });
 
@@ -89,11 +86,7 @@ async function loadSeason(season: number): Promise<PlayerGame[]> {
     if (carries < MIN_CARRIES) continue;
 
     const playerId =
-      row.player_id ||
-      row.player_display_name ||
-      row.player_name ||
-      "";
-
+      row.player_id || row.player_display_name || row.player_name || "";
     if (!playerId) continue;
 
     games.push({
@@ -103,10 +96,7 @@ async function loadSeason(season: number): Promise<PlayerGame[]> {
         row.game_id ||
         `${season}-${row.week}-${row.recent_team || row.team}-${playerId}`,
       playerId,
-      playerName:
-        row.player_display_name ||
-        row.player_name ||
-        playerId,
+      playerName: row.player_display_name || row.player_name || playerId,
       team: row.recent_team || row.team || "",
       carries,
       rushYards: num(row.rushing_yards),
@@ -116,24 +106,24 @@ async function loadSeason(season: number): Promise<PlayerGame[]> {
   return games.sort((a, b) => a.week - b.week || a.gameId.localeCompare(b.gameId));
 }
 
-function updateHistory(map: Map<string, History>, g: PlayerGame) {
-  const h = map.get(g.playerId) ?? { games: 0, carries: 0, yards: 0 };
-  h.games += 1;
-  h.carries += g.carries;
-  h.yards += g.rushYards;
+function avg(values: number[]) {
+  return values.length
+    ? values.reduce((s, x) => s + x, 0) / values.length
+    : 0;
+}
+
+function addHistory(map: Map<string, History>, g: PlayerGame) {
+  const h = map.get(g.playerId) ?? { games: [] };
+  h.games.push(g);
   map.set(g.playerId, h);
 }
 
 function metrics(errors: number[]) {
-  if (!errors.length) {
-    return { n: 0, mae: null, rmse: null, mean_error: null };
-  }
+  if (!errors.length) return { n: 0, mae: null, rmse: null, mean_error: null };
 
-  const mae = errors.reduce((s, e) => s + Math.abs(e), 0) / errors.length;
-  const rmse = Math.sqrt(
-    errors.reduce((s, e) => s + e * e, 0) / errors.length,
-  );
-  const mean = errors.reduce((s, e) => s + e, 0) / errors.length;
+  const mae = avg(errors.map(Math.abs));
+  const rmse = Math.sqrt(avg(errors.map((e) => e * e)));
+  const mean = avg(errors);
 
   return {
     n: errors.length,
@@ -150,17 +140,11 @@ export async function GET() {
       loadSeason(2025),
     ]);
 
-    if (!train2024.length || !test2025.length) {
-      throw new Error(
-        `Missing player-game data: 2024=${train2024.length}, 2025=${test2025.length}`,
-      );
-    }
-
     const history = new Map<string, History>();
-    for (const g of train2024) updateHistory(history, g);
+    for (const g of train2024) addHistory(history, g);
 
     const baselineErrors: number[] = [];
-    const v1Errors: number[] = [];
+    const v2Errors: number[] = [];
     const predictions: any[] = [];
     let skippedNoHistory = 0;
 
@@ -169,24 +153,39 @@ export async function GET() {
     for (const week of weeks) {
       const games = test2025.filter((g) => g.week === week);
 
-      // Predict the full week before adding that week's results.
       for (const g of games) {
         const h = history.get(g.playerId);
-
-        if (!h || h.games < MIN_PRIOR_GAMES || h.carries <= 0) {
+        if (!h || h.games.length < MIN_PRIOR_GAMES) {
           skippedNoHistory++;
           continue;
         }
 
-        const yardsPerGame = h.yards / h.games;
-        const carriesPerGame = h.carries / h.games;
-        const yardsPerCarry = h.yards / h.carries;
+        const all = h.games;
+        const recent = all.slice(-RECENT_GAMES);
 
-        const baselineProjection = yardsPerGame;
-        const v1Projection = carriesPerGame * yardsPerCarry;
+        const careerYpg = avg(all.map((x) => x.rushYards));
+        const careerCarries = avg(all.map((x) => x.carries));
+        const careerYpc =
+          all.reduce((s, x) => s + x.rushYards, 0) /
+          Math.max(1, all.reduce((s, x) => s + x.carries, 0));
+
+        const recentYpg = avg(recent.map((x) => x.rushYards));
+        const recentCarries = avg(recent.map((x) => x.carries));
+        const recentYpc =
+          recent.reduce((s, x) => s + x.rushYards, 0) /
+          Math.max(1, recent.reduce((s, x) => s + x.carries, 0));
+
+        // Rushing V2:
+        // workload leans toward recent usage; efficiency is deliberately
+        // more conservative because YPC is noisy game to game.
+        const expectedCarries = 0.65 * recentCarries + 0.35 * careerCarries;
+        const expectedYpc = 0.30 * recentYpc + 0.70 * careerYpc;
+        const v2Projection = expectedCarries * expectedYpc;
+
+        const baselineProjection = careerYpg;
 
         baselineErrors.push(baselineProjection - g.rushYards);
-        v1Errors.push(v1Projection - g.rushYards);
+        v2Errors.push(v2Projection - g.rushYards);
 
         predictions.push({
           week,
@@ -194,43 +193,45 @@ export async function GET() {
           team: g.team,
           actual_rushing_yards: g.rushYards,
           actual_carries: g.carries,
-          prior_games: h.games,
-          prior_carries_per_game: Number(carriesPerGame.toFixed(2)),
-          prior_yards_per_carry: Number(yardsPerCarry.toFixed(2)),
+          prior_games: all.length,
+          recent_games: recent.length,
+          career_yards_per_game: Number(careerYpg.toFixed(1)),
+          career_carries_per_game: Number(careerCarries.toFixed(2)),
+          career_yards_per_carry: Number(careerYpc.toFixed(2)),
+          recent_yards_per_game: Number(recentYpg.toFixed(1)),
+          recent_carries_per_game: Number(recentCarries.toFixed(2)),
+          recent_yards_per_carry: Number(recentYpc.toFixed(2)),
+          expected_carries: Number(expectedCarries.toFixed(2)),
+          expected_yards_per_carry: Number(expectedYpc.toFixed(2)),
           baseline_projection: Number(baselineProjection.toFixed(1)),
-          rushing_v1_projection: Number(v1Projection.toFixed(1)),
+          rushing_v2_projection: Number(v2Projection.toFixed(1)),
         });
       }
 
-      for (const g of games) updateHistory(history, g);
+      // Prevent same-week leakage.
+      for (const g of games) addHistory(history, g);
     }
 
     const baseline = metrics(baselineErrors);
-    const rushingV1 = metrics(v1Errors);
+    const rushingV2 = metrics(v2Errors);
 
     const improvement =
-      baseline.mae !== null && rushingV1.mae !== null
-        ? Number((baseline.mae - rushingV1.mae).toFixed(2))
+      baseline.mae !== null && rushingV2.mae !== null
+        ? Number((baseline.mae - rushingV2.mae).toFixed(2))
+        : null;
+
+    const improvementPct =
+      baseline.mae && improvement !== null
+        ? Number(((improvement / baseline.mae) * 100).toFixed(2))
         : null;
 
     return NextResponse.json({
       success: true,
       version: VERSION,
       purpose:
-        "Leakage-safe NFL rushing-yards projection backtest. 2024 initializes history; 2025 is held out and processed chronologically.",
+        "Test whether recent workload and recent efficiency improve leakage-safe rushing-yard projections over a player's prior rushing-yards/game baseline.",
       model_status: "TEST ONLY — NOT LIVE",
-      data_source: {
-        provider: "nflverse",
-        files: [
-          "stats_player_week_2024.csv",
-          "stats_player_week_2025.csv",
-        ],
-      },
-      filters: {
-        season_type: "REG",
-        minimum_game_carries: MIN_CARRIES,
-        minimum_prior_games: MIN_PRIOR_GAMES,
-      },
+      data_source: "nflverse weekly player stats",
       samples: {
         training_2024_player_games: train2024.length,
         testing_2025_player_games: test2025.length,
@@ -238,23 +239,28 @@ export async function GET() {
         skipped_no_prior_history: skippedNoHistory,
       },
       baseline: {
-        description: "Prior rushing yards per game",
+        description: "All prior rushing yards per game",
         ...baseline,
       },
-      rushing_v1: {
-        description: "Prior carries/game × prior yards/carry",
-        ...rushingV1,
+      rushing_v2: {
+        description:
+          "Expected carries (65% recent / 35% long-term) × expected YPC (30% recent / 70% long-term)",
+        recent_window_games: RECENT_GAMES,
+        ...rushingV2,
       },
       comparison: {
         mae_improvement_yards: improvement,
+        mae_improvement_percent: improvementPct,
+        v2_beats_baseline:
+          improvement !== null ? improvement > 0 : false,
         note:
-          "Positive means Rushing V1 beat the baseline. This is a projection backtest, not a sportsbook betting win-rate test.",
+          "This is a held-out projection test, not a sportsbook betting win-rate test.",
       },
       methodology: {
         leakage_control:
-          "2024 supplies prior history. Every 2025 week is predicted before that week's results are added.",
-        next_step:
-          "Use these results to decide whether workload/recency features are needed before separate 2026 validation and live PropLine integration.",
+          "2024 initializes history. Each 2025 week is predicted before that week's results are added.",
+        important:
+          "The V2 weights are an initial hypothesis, not validated live-model weights. If V2 improves 2025, it still requires separate 2026 validation.",
       },
       sample_predictions: predictions.slice(0, 25),
     });
