@@ -330,6 +330,9 @@ export async function GET() {
     const weekGames = season2025.filter(g => g.week === TEST_WEEK);
     const gameIds = [...new Set(weekGames.map(g => g.gameId))];
 
+    const eventsById = new Map<string, any>();
+    let lastUsage: any = null;
+
     // Historical-events returns events that had odds at the requested snapshot.
     // Week 1 spans Thursday through Monday, so use late pregame snapshots on each
     // NFL game day instead of querying noon. This endpoint itself is quota-free.
@@ -455,7 +458,7 @@ export async function GET() {
 
     return NextResponse.json({
       success:true,
-      version:"1.1-rushing-v5-historical-sportsbook-week1-test",
+      version:"1.2-rushing-v5-historical-sportsbook-week1-test",
       purpose:"Verify frozen Rushing V5 against real pregame 2025 historical player_rush_yds lines before running a full-season sportsbook backtest.",
       model:"Frozen 5.0-rushing-v5-direct-yards",
       test_scope:{season:TEST_SEASON,week:TEST_WEEK,snapshot_minutes_before_kickoff:SNAPSHOT_MINUTES_BEFORE_KICKOFF,market:MARKET,region:"us"},
@@ -467,6 +470,6 @@ export async function GET() {
       bets:results
     });
   } catch (error:any) {
-    return NextResponse.json({success:false,version:"1.1-rushing-v5-historical-sportsbook-week1-test",error:error?.message||String(error)},{status:500});
+    return NextResponse.json({success:false,version:"1.2-rushing-v5-historical-sportsbook-week1-test",error:error?.message||String(error)},{status:500});
   }
 }
