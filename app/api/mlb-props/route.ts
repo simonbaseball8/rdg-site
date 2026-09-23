@@ -4,13 +4,22 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const ODDS_API_BASE = "https://api.the-odds-api.com/v4";
+const MLB_API = "https://statsapi.mlb.com/api/v1";
 const SPORT_KEY = "baseball_mlb";
+const SEASON = 2026;
+
+// Keep V1 controlled. Raise this after we validate output/backtest.
+const MAX_EVENTS_TO_ANALYZE = 4;
 
 const MARKETS = [
   "batter_hits",
   "batter_total_bases",
   "pitcher_strikeouts",
-];
+] as const;
+
+type MarketKey = (typeof MARKETS)[number];
+type Side = "Over" | "Under";
+type Signal = "OVER" | "UNDER" | "PASS";
 
 type OddsEvent = {
   id: string;
@@ -41,29 +50,337 @@ type OddsBookmaker = {
   markets?: OddsMarket[];
 };
 
-type EventOdds = {
-  id: string;
-  sport_key: string;
-  sport_title: string;
-  commence_time: string;
-  home_team: string;
-  away_team: string;
+type EventOdds = OddsEvent & {
   bookmakers?: OddsBookmaker[];
 };
 
+type BookQuote = {
+  sportsbook_key: string;
+  sportsbook: string;
+  side: Side;
+  line: number;
+  odds: number | null;
+};
+
+type LineGroup = {
+  event_id: string;
+  commence_time: string;
+  away_team: string;
+  home_team: string;
+  market: MarketKey;
+  player: string;
+  line: number;
+  quotes: BookQuote[];
+};
+
+type PlayerHistory = {
+  mlb_player_id: number;
+  player: string;
+  group: "hitting" | "pitching";
+  games: number;
+  season_avg: number;
+  last_10_avg: number;
+  last_5_avg: number;
+  weighted_history_avg: number;
+  recent_values: number[];
+};
+
+function round(value: number, digits = 3) {
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function average(values: number[]) {
+  if (!values.length) return 0;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function median(values: number[]) {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[middle - 1] + sorted[middle]) / 2
+    : sorted[middle];
+}
+
 function usageHeaders(response: Response) {
   return {
-    last:
-      response.headers.get("x-requests-last") ??
-      "unknown",
+    last: response.headers.get("x-requests-last") ?? "unknown",
+    used: response.headers.get("x-requests-used") ?? "unknown",
+    remaining: response.headers.get("x-requests-remaining") ?? "unknown",
+  };
+}
 
-    used:
-      response.headers.get("x-requests-used") ??
-      "unknown",
+async function fetchJson(url: string) {
+  const response = await fetch(url, {
+    cache: "no-store",
+    headers: { Accept: "application/json" },
+  });
 
-    remaining:
-      response.headers.get("x-requests-remaining") ??
-      "unknown",
+  const text = await response.text();
+
+  if (!response.ok) {
+    throw new Error(`Request failed ${response.status}: ${text.slice(0, 1000)}`);
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error("Provider returned invalid JSON.");
+  }
+}
+
+function marketLabel(market: MarketKey) {
+  if (market === "batter_hits") return "Batter Hits";
+  if (market === "batter_total_bases") return "Batter Total Bases";
+  return "Pitcher Strikeouts";
+}
+
+function statGroup(market: MarketKey): "hitting" | "pitching" {
+  return market === "pitcher_strikeouts" ? "pitching" : "hitting";
+}
+
+function metricFromSplit(market: MarketKey, split: any): number | null {
+  const stat = split?.stat ?? {};
+
+  if (market === "batter_hits") {
+    const value = Number(stat.hits);
+    return Number.isFinite(value) ? value : null;
+  }
+
+  if (market === "batter_total_bases") {
+    const direct = Number(stat.totalBases);
+    if (Number.isFinite(direct)) return direct;
+
+    const singles = Number(stat.hits ?? 0) - Number(stat.doubles ?? 0) - Number(stat.triples ?? 0) - Number(stat.homeRuns ?? 0);
+    const doubles = Number(stat.doubles ?? 0);
+    const triples = Number(stat.triples ?? 0);
+    const homeRuns = Number(stat.homeRuns ?? 0);
+    const calculated = singles + doubles * 2 + triples * 3 + homeRuns * 4;
+    return Number.isFinite(calculated) ? calculated : null;
+  }
+
+  const strikeouts = Number(stat.strikeOuts);
+  return Number.isFinite(strikeouts) ? strikeouts : null;
+}
+
+async function findMlbPlayerId(playerName: string): Promise<number | null> {
+  const url = `${MLB_API}/people/search?names=${encodeURIComponent(playerName)}`;
+  const data = await fetchJson(url);
+  const people = Array.isArray(data?.people) ? data.people : [];
+
+  if (!people.length) return null;
+
+  const normalized = playerName.trim().toLowerCase();
+  const exact = people.find(
+    (person: any) => String(person?.fullName ?? "").trim().toLowerCase() === normalized
+  );
+
+  const chosen = exact ?? people[0];
+  const id = Number(chosen?.id);
+  return Number.isFinite(id) ? id : null;
+}
+
+async function loadPlayerHistory(
+  playerName: string,
+  market: MarketKey,
+  cache: Map<string, Promise<PlayerHistory | null>>
+): Promise<PlayerHistory | null> {
+  const cacheKey = `${market}|${playerName.toLowerCase()}`;
+  const existing = cache.get(cacheKey);
+  if (existing) return existing;
+
+  const promise = (async () => {
+    const playerId = await findMlbPlayerId(playerName);
+    if (!playerId) return null;
+
+    const group = statGroup(market);
+    const url =
+      `${MLB_API}/people/${playerId}/stats` +
+      `?stats=gameLog` +
+      `&group=${group}` +
+      `&season=${SEASON}`;
+
+    const data = await fetchJson(url);
+    const splits = Array.isArray(data?.stats?.[0]?.splits)
+      ? data.stats[0].splits
+      : [];
+
+    const values = splits
+      .map((split: any) => ({
+        date: String(split?.date ?? ""),
+        value: metricFromSplit(market, split),
+      }))
+      .filter((item: any) => item.value !== null && Number.isFinite(item.value))
+      .sort((a: any, b: any) => a.date.localeCompare(b.date))
+      .map((item: any) => Number(item.value));
+
+    if (!values.length) return null;
+
+    const last5 = values.slice(-5);
+    const last10 = values.slice(-10);
+
+    const seasonAvg = average(values);
+    const last5Avg = average(last5);
+    const last10Avg = average(last10);
+
+    // V1 history blend. This is intentionally conservative and must be backtested.
+    // Season carries the most weight; recent form can only move it moderately.
+    const weightedHistoryAvg =
+      seasonAvg * 0.55 +
+      last10Avg * 0.30 +
+      last5Avg * 0.15;
+
+    return {
+      mlb_player_id: playerId,
+      player: playerName,
+      group,
+      games: values.length,
+      season_avg: round(seasonAvg),
+      last_10_avg: round(last10Avg),
+      last_5_avg: round(last5Avg),
+      weighted_history_avg: round(weightedHistoryAvg),
+      recent_values: values.slice(-10),
+    };
+  })().catch(() => null);
+
+  cache.set(cacheKey, promise);
+  return promise;
+}
+
+function modelSettings(market: MarketKey) {
+  if (market === "batter_hits") {
+    return {
+      marketWeight: 0.72,
+      historyWeight: 0.28,
+      maxAdjustment: 0.28,
+      passEdge: 0.10,
+      minGames: 12,
+    };
+  }
+
+  if (market === "batter_total_bases") {
+    return {
+      marketWeight: 0.70,
+      historyWeight: 0.30,
+      maxAdjustment: 0.45,
+      passEdge: 0.18,
+      minGames: 12,
+    };
+  }
+
+  return {
+    marketWeight: 0.68,
+    historyWeight: 0.32,
+    maxAdjustment: 0.75,
+    passEdge: 0.30,
+    minGames: 5,
+  };
+}
+
+function projectFromMarketAndHistory(
+  market: MarketKey,
+  line: number,
+  history: PlayerHistory
+) {
+  const settings = modelSettings(market);
+
+  // Market is the anchor. History only supplies a controlled correction.
+  const rawHistoryDifference = history.weighted_history_avg - line;
+  const controlledAdjustment = clamp(
+    rawHistoryDifference * settings.historyWeight,
+    -settings.maxAdjustment,
+    settings.maxAdjustment
+  );
+
+  const projection = line + controlledAdjustment;
+  const edge = projection - line;
+
+  let signal: Signal = "PASS";
+
+  if (history.games >= settings.minGames) {
+    if (edge >= settings.passEdge) signal = "OVER";
+    if (edge <= -settings.passEdge) signal = "UNDER";
+  }
+
+  return {
+    projection: round(projection),
+    edge: round(edge),
+    signal,
+    controlled_adjustment: round(controlledAdjustment),
+    settings,
+  };
+}
+
+function buildLineGroups(event: EventOdds): LineGroup[] {
+  const groups = new Map<string, LineGroup>();
+
+  for (const bookmaker of event.bookmakers ?? []) {
+    for (const market of bookmaker.markets ?? []) {
+      if (!MARKETS.includes(market.key as MarketKey)) continue;
+      const marketKey = market.key as MarketKey;
+
+      for (const outcome of market.outcomes ?? []) {
+        const player = outcome.description?.trim();
+        const side = outcome.name as Side;
+        const line = Number(outcome.point);
+        const odds = Number(outcome.price);
+
+        if (!player) continue;
+        if (side !== "Over" && side !== "Under") continue;
+        if (!Number.isFinite(line)) continue;
+
+        // Critical: player + market + exact line are separate groups.
+        // We never average 0.5 and 1.5 together.
+        const key = `${event.id}|${marketKey}|${player.toLowerCase()}|${line}`;
+
+        if (!groups.has(key)) {
+          groups.set(key, {
+            event_id: event.id,
+            commence_time: event.commence_time,
+            away_team: event.away_team,
+            home_team: event.home_team,
+            market: marketKey,
+            player,
+            line,
+            quotes: [],
+          });
+        }
+
+        groups.get(key)!.quotes.push({
+          sportsbook_key: bookmaker.key,
+          sportsbook: bookmaker.title,
+          side,
+          line,
+          odds: Number.isFinite(odds) ? odds : null,
+        });
+      }
+    }
+  }
+
+  return [...groups.values()];
+}
+
+function summarizeQuotes(quotes: BookQuote[]) {
+  const sportsbookNames = [...new Set(quotes.map((quote) => quote.sportsbook))];
+  const overOdds = quotes
+    .filter((quote) => quote.side === "Over" && quote.odds !== null)
+    .map((quote) => Number(quote.odds));
+  const underOdds = quotes
+    .filter((quote) => quote.side === "Under" && quote.odds !== null)
+    .map((quote) => Number(quote.odds));
+
+  return {
+    sportsbooks: sportsbookNames.length,
+    sportsbook_names: sportsbookNames,
+    median_over_odds: median(overOdds),
+    median_under_odds: median(underOdds),
+    quotes,
   };
 }
 
@@ -73,35 +390,19 @@ export async function GET() {
 
     if (!apiKey) {
       return NextResponse.json(
-        {
-          success: false,
-          error: "Missing ODDS_API_KEY",
-        },
+        { success: false, error: "Missing ODDS_API_KEY" },
         { status: 500 }
       );
     }
 
-    /*
-      ------------------------------------------------
-      STEP 1
-      Fetch upcoming MLB events.
-
-      The Odds API does not charge usage credits for
-      the events endpoint.
-      ------------------------------------------------
-    */
-
+    // 1) Upcoming MLB events. Events endpoint is used only to discover event IDs.
     const eventsUrl =
       `${ODDS_API_BASE}/sports/${SPORT_KEY}/events` +
       `?apiKey=${encodeURIComponent(apiKey)}` +
       `&dateFormat=iso`;
 
-    const eventsResponse = await fetch(eventsUrl, {
-      cache: "no-store",
-    });
-
+    const eventsResponse = await fetch(eventsUrl, { cache: "no-store" });
     const eventsUsage = usageHeaders(eventsResponse);
-
     const eventsText = await eventsResponse.text();
 
     if (!eventsResponse.ok) {
@@ -117,50 +418,13 @@ export async function GET() {
       );
     }
 
-    let events: OddsEvent[];
-
-    try {
-      events = JSON.parse(eventsText);
-    } catch {
-      return NextResponse.json(
-        {
-          success: false,
-          stage: "events",
-          error: "The Odds API returned invalid event JSON.",
-        },
-        { status: 500 }
-      );
-    }
-
-    if (!Array.isArray(events)) {
-      return NextResponse.json(
-        {
-          success: false,
-          stage: "events",
-          error: "Unexpected events response structure.",
-        },
-        { status: 500 }
-      );
-    }
-
-    /*
-      ------------------------------------------------
-      Only use future games.
-      ------------------------------------------------
-    */
-
+    const allEvents: OddsEvent[] = JSON.parse(eventsText);
     const now = Date.now();
 
-    const upcomingEvents = events
+    const upcomingEvents = (Array.isArray(allEvents) ? allEvents : [])
       .filter((event) => {
-        const start = new Date(
-          event.commence_time
-        ).getTime();
-
-        return (
-          Number.isFinite(start) &&
-          start > now
-        );
+        const start = new Date(event.commence_time).getTime();
+        return Number.isFinite(start) && start > now;
       })
       .sort(
         (a, b) =>
@@ -168,363 +432,224 @@ export async function GET() {
           new Date(b.commence_time).getTime()
       );
 
-    /*
-      ------------------------------------------------
-      IMPORTANT
+    const selectedEvents = upcomingEvents.slice(0, MAX_EVENTS_TO_ANALYZE);
 
-      Phase 1 only checks ONE game.
-
-      We do NOT want to burn credits checking every
-      MLB game until we verify the prop structure.
-      ------------------------------------------------
-    */
-
-    const selectedEvent =
-      upcomingEvents[0] ?? null;
-
-    if (!selectedEvent) {
+    if (!selectedEvents.length) {
       return NextResponse.json({
         success: true,
-
-        version:
-          "1.0-mlb-player-props-odds-api-diagnostic",
-
+        version: "1.0-rdg-mlb-market-anchored-player-props",
         sport: "MLB",
-
-        provider: "The Odds API",
-
-        message:
-          "No upcoming MLB events were returned.",
-
-        events_found: events.length,
-
-        future_events_found:
-          upcomingEvents.length,
-
-        usage: {
-          events_request: eventsUsage,
-          props_request: null,
-        },
+        message: "No upcoming MLB events were found.",
+        events_found: allEvents.length,
+        usage: { events_request: eventsUsage },
       });
     }
 
-    /*
-      ------------------------------------------------
-      STEP 2
-      Request our three MLB player prop markets
-      for the NEXT upcoming game only.
-      ------------------------------------------------
-    */
+    // 2) Fetch the three prop markets for a controlled number of upcoming games.
+    const eventResults = await Promise.all(
+      selectedEvents.map(async (event) => {
+        const url =
+          `${ODDS_API_BASE}/sports/${SPORT_KEY}/events/${event.id}/odds` +
+          `?apiKey=${encodeURIComponent(apiKey)}` +
+          `&regions=us` +
+          `&markets=${encodeURIComponent(MARKETS.join(","))}` +
+          `&oddsFormat=american` +
+          `&dateFormat=iso`;
 
-    const propsUrl =
-      `${ODDS_API_BASE}/sports/${SPORT_KEY}` +
-      `/events/${selectedEvent.id}/odds` +
-      `?apiKey=${encodeURIComponent(apiKey)}` +
-      `&regions=us` +
-      `&markets=${encodeURIComponent(
-        MARKETS.join(",")
-      )}` +
-      `&oddsFormat=american` +
-      `&dateFormat=iso`;
+        const response = await fetch(url, { cache: "no-store" });
+        const usage = usageHeaders(response);
+        const text = await response.text();
 
-    const propsResponse = await fetch(propsUrl, {
-      cache: "no-store",
+        if (!response.ok) {
+          return {
+            ok: false as const,
+            event,
+            status: response.status,
+            error: text.slice(0, 1000),
+            usage,
+          };
+        }
+
+        try {
+          return {
+            ok: true as const,
+            event: JSON.parse(text) as EventOdds,
+            usage,
+          };
+        } catch {
+          return {
+            ok: false as const,
+            event,
+            status: 500,
+            error: "The Odds API returned invalid JSON.",
+            usage,
+          };
+        }
+      })
+    );
+
+    const successfulEvents = eventResults
+      .filter((result): result is Extract<(typeof eventResults)[number], { ok: true }> => result.ok)
+      .map((result) => result.event);
+
+    const lineGroups = successfulEvents.flatMap(buildLineGroups);
+
+    // Prefer groups with broader sportsbook coverage first.
+    lineGroups.sort((a, b) => {
+      const booksA = new Set(a.quotes.map((q) => q.sportsbook_key)).size;
+      const booksB = new Set(b.quotes.map((q) => q.sportsbook_key)).size;
+      return booksB - booksA;
     });
 
-    const propsUsage =
-      usageHeaders(propsResponse);
+    const historyCache = new Map<string, Promise<PlayerHistory | null>>();
 
-    const propsText =
-      await propsResponse.text();
+    // 3) Analyze every distinct player + market + exact line group.
+    const analyses = await Promise.all(
+      lineGroups.map(async (group) => {
+        const history = await loadPlayerHistory(
+          group.player,
+          group.market,
+          historyCache
+        );
 
-    if (!propsResponse.ok) {
-      return NextResponse.json(
-        {
-          success: false,
+        const quoteSummary = summarizeQuotes(group.quotes);
 
-          version:
-            "1.0-mlb-player-props-odds-api-diagnostic",
+        if (!history) {
+          return {
+            event_id: group.event_id,
+            commence_time: group.commence_time,
+            matchup: `${group.away_team} @ ${group.home_team}`,
+            player: group.player,
+            market: group.market,
+            market_name: marketLabel(group.market),
+            market_line: group.line,
+            rdg_projection: null,
+            edge: null,
+            signal: "PASS" as Signal,
+            reason: "No usable 2026 MLB game-log history found for this player/market.",
+            history: null,
+            market_data: quoteSummary,
+          };
+        }
 
-          stage: "player_props",
-
-          selected_event: {
-            event_id: selectedEvent.id,
-            commence_time:
-              selectedEvent.commence_time,
-            away_team:
-              selectedEvent.away_team,
-            home_team:
-              selectedEvent.home_team,
-          },
-
-          requested_markets: MARKETS,
-
-          status: propsResponse.status,
-
-          error:
-            propsText.slice(0, 2000),
-
-          usage: {
-            events_request: eventsUsage,
-            props_request: propsUsage,
-          },
-        },
-        { status: propsResponse.status }
-      );
-    }
-
-    let propsData: EventOdds;
-
-    try {
-      propsData =
-        JSON.parse(propsText);
-    } catch {
-      return NextResponse.json(
-        {
-          success: false,
-          stage: "player_props",
-          error:
-            "The Odds API returned invalid player-prop JSON.",
-          usage: {
-            events_request: eventsUsage,
-            props_request: propsUsage,
-          },
-        },
-        { status: 500 }
-      );
-    }
-
-    /*
-      ------------------------------------------------
-      Build diagnostics.
-
-      Keep the RAW sportsbook/player information
-      because we need to inspect exactly how MLB
-      props are structured before building RDG V1.
-      ------------------------------------------------
-    */
-
-    const bookmakers =
-      Array.isArray(propsData.bookmakers)
-        ? propsData.bookmakers
-        : [];
-
-    const marketSummary: Record<
-      string,
-      {
-        sportsbooks: number;
-        outcomes: number;
-        players: number;
-      }
-    > = {};
-
-    for (const market of MARKETS) {
-      marketSummary[market] = {
-        sportsbooks: 0,
-        outcomes: 0,
-        players: 0,
-      };
-    }
-
-    const playersByMarket: Record<
-      string,
-      Set<string>
-    > = {};
-
-    for (const market of MARKETS) {
-      playersByMarket[market] =
-        new Set<string>();
-    }
-
-    const sportsbookData =
-      bookmakers.map((bookmaker) => {
-        const markets =
-          Array.isArray(bookmaker.markets)
-            ? bookmaker.markets
-            : [];
-
-        const relevantMarkets =
-          markets
-            .filter((market) =>
-              MARKETS.includes(market.key)
-            )
-            .map((market) => {
-              const outcomes =
-                Array.isArray(market.outcomes)
-                  ? market.outcomes
-                  : [];
-
-              if (
-                marketSummary[market.key]
-              ) {
-                marketSummary[
-                  market.key
-                ].sportsbooks += 1;
-
-                marketSummary[
-                  market.key
-                ].outcomes +=
-                  outcomes.length;
-              }
-
-              for (
-                const outcome of outcomes
-              ) {
-                const player =
-                  outcome.description?.trim();
-
-                if (
-                  player &&
-                  playersByMarket[
-                    market.key
-                  ]
-                ) {
-                  playersByMarket[
-                    market.key
-                  ].add(player);
-                }
-              }
-
-              return {
-                market: market.key,
-
-                last_update:
-                  market.last_update ??
-                  bookmaker.last_update ??
-                  null,
-
-                outcome_count:
-                  outcomes.length,
-
-                outcomes:
-                  outcomes.map(
-                    (outcome) => ({
-                      side:
-                        outcome.name ??
-                        null,
-
-                      player:
-                        outcome.description ??
-                        null,
-
-                      line:
-                        outcome.point ??
-                        null,
-
-                      odds:
-                        outcome.price ??
-                        null,
-                    })
-                  ),
-              };
-            });
+        const model = projectFromMarketAndHistory(
+          group.market,
+          group.line,
+          history
+        );
 
         return {
-          sportsbook_key:
-            bookmaker.key,
-
-          sportsbook:
-            bookmaker.title,
-
-          last_update:
-            bookmaker.last_update ??
-            null,
-
-          markets:
-            relevantMarkets,
+          event_id: group.event_id,
+          commence_time: group.commence_time,
+          matchup: `${group.away_team} @ ${group.home_team}`,
+          player: group.player,
+          mlb_player_id: history.mlb_player_id,
+          market: group.market,
+          market_name: marketLabel(group.market),
+          market_line: group.line,
+          market_baseline: group.line,
+          rdg_projection: model.projection,
+          edge: model.edge,
+          signal: model.signal,
+          controlled_adjustment: model.controlled_adjustment,
+          history: {
+            games: history.games,
+            season_avg: history.season_avg,
+            last_10_avg: history.last_10_avg,
+            last_5_avg: history.last_5_avg,
+            weighted_history_avg: history.weighted_history_avg,
+            recent_values: history.recent_values,
+          },
+          market_data: quoteSummary,
+          model_status:
+            "V1 market-anchored projection. Not yet historically calibrated or graded.",
         };
-      });
+      })
+    );
 
-    for (const market of MARKETS) {
-      marketSummary[market].players =
-        playersByMarket[market].size;
-    }
+    const actionable = analyses
+      .filter((analysis) => analysis.signal !== "PASS")
+      .sort((a, b) => Math.abs(Number(b.edge ?? 0)) - Math.abs(Number(a.edge ?? 0)));
 
-    /*
-      ------------------------------------------------
-      Return everything needed for our first test.
-      ------------------------------------------------
-    */
+    const pass = analyses.filter((analysis) => analysis.signal === "PASS");
+
+    const byMarket = Object.fromEntries(
+      MARKETS.map((market) => {
+        const rows = analyses.filter((analysis) => analysis.market === market);
+        return [
+          market,
+          {
+            analyzed: rows.length,
+            over: rows.filter((row) => row.signal === "OVER").length,
+            under: rows.filter((row) => row.signal === "UNDER").length,
+            pass: rows.filter((row) => row.signal === "PASS").length,
+          },
+        ];
+      })
+    );
+
+    const propsUsage = eventResults.map((result) => ({
+      event_id: result.ok ? result.event.id : result.event.id,
+      matchup: result.ok
+        ? `${result.event.away_team} @ ${result.event.home_team}`
+        : `${result.event.away_team} @ ${result.event.home_team}`,
+      success: result.ok,
+      usage: result.usage,
+      ...(!result.ok ? { status: result.status, error: result.error } : {}),
+    }));
 
     return NextResponse.json({
       success: true,
-
-      version:
-        "1.0-mlb-player-props-odds-api-diagnostic",
-
+      version: "1.0-rdg-mlb-market-anchored-player-props",
       sport: "MLB",
-
-      provider: "The Odds API",
-
-      purpose:
-        "Phase 1 diagnostic for RDG MLB player props. Verify live sportsbook/player/line structure before building projections.",
-
-      requested_markets: MARKETS,
-
+      season: SEASON,
+      odds_provider: "The Odds API",
+      stats_provider: "MLB Stats API",
+      markets: MARKETS,
+      model: {
+        philosophy:
+          "Sportsbook line is the baseline. MLB player history makes only a controlled adjustment around the market line.",
+        history_blend: {
+          season: 0.55,
+          last_10: 0.30,
+          last_5: 0.15,
+        },
+        grading_enabled: false,
+        backtested: false,
+        warning:
+          "V1 thresholds and weights are provisional. Do not assign A+/A/B+/B until historical backtesting is complete.",
+      },
       events: {
-        returned:
-          events.length,
-
-        future:
-          upcomingEvents.length,
-
-        tested:
-          1,
+        returned: allEvents.length,
+        future: upcomingEvents.length,
+        analyzed: selectedEvents.length,
+        max_events_per_request: MAX_EVENTS_TO_ANALYZE,
       },
-
-      selected_event: {
-        event_id:
-          selectedEvent.id,
-
-        commence_time:
-          selectedEvent.commence_time,
-
-        away_team:
-          selectedEvent.away_team,
-
-        home_team:
-          selectedEvent.home_team,
-      },
-
       summary: {
-        sportsbooks_returned:
-          bookmakers.length,
-
-        markets:
-          marketSummary,
+        line_groups: analyses.length,
+        actionable: actionable.length,
+        pass: pass.length,
+        over: actionable.filter((row) => row.signal === "OVER").length,
+        under: actionable.filter((row) => row.signal === "UNDER").length,
+        by_market: byMarket,
       },
-
       usage: {
-        events_request: {
-          expected_cost: 0,
-          ...eventsUsage,
-        },
-
-        props_request: {
-          ...propsUsage,
-        },
+        events_request: eventsUsage,
+        event_prop_requests: propsUsage,
       },
-
-      sportsbooks:
-        sportsbookData,
-
+      actionable,
+      pass,
       next_step:
-        bookmakers.length > 0
-          ? "Verify players, lines, prices, sportsbook coverage and market structure. Then connect MLB player history and build RDG projections."
-          : "No sportsbooks returned props for this game. Check another upcoming event before building the projection model.",
+        "Inspect projections and player matching. If output is clean, build the controlled historical Odds API backtest before creating letter grades.",
     });
   } catch (error) {
+    console.error("RDG MLB Props V1 Error:", error);
+
     return NextResponse.json(
       {
         success: false,
-
-        version:
-          "1.0-mlb-player-props-odds-api-diagnostic",
-
-        error:
-          error instanceof Error
-            ? error.message
-            : "Unknown MLB player-props diagnostic error",
+        version: "1.0-rdg-mlb-market-anchored-player-props",
+        error: error instanceof Error ? error.message : String(error),
       },
       { status: 500 }
     );
