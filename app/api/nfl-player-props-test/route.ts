@@ -188,6 +188,28 @@ const TEST_SEASON = 2025;
 const DEFAULT_TEST_WEEK = 2;
 const SNAPSHOT_MINUTES_BEFORE_KICKOFF = 30;
 
+const WEEK_WINDOWS_2025: Record<number, { start: string; end: string; discovery: string }> = {
+  1:{start:"2025-09-04T00:00:00Z",end:"2025-09-09T12:00:00Z",discovery:"2025-09-03T12:00:00Z"},
+  2:{start:"2025-09-11T00:00:00Z",end:"2025-09-16T12:00:00Z",discovery:"2025-09-10T12:00:00Z"},
+  3:{start:"2025-09-18T00:00:00Z",end:"2025-09-23T12:00:00Z",discovery:"2025-09-17T12:00:00Z"},
+  4:{start:"2025-09-25T00:00:00Z",end:"2025-09-30T12:00:00Z",discovery:"2025-09-24T12:00:00Z"},
+  5:{start:"2025-10-02T00:00:00Z",end:"2025-10-07T12:00:00Z",discovery:"2025-10-01T12:00:00Z"},
+  6:{start:"2025-10-09T00:00:00Z",end:"2025-10-14T12:00:00Z",discovery:"2025-10-08T12:00:00Z"},
+  7:{start:"2025-10-16T00:00:00Z",end:"2025-10-21T12:00:00Z",discovery:"2025-10-15T12:00:00Z"},
+  8:{start:"2025-10-23T00:00:00Z",end:"2025-10-28T12:00:00Z",discovery:"2025-10-22T12:00:00Z"},
+  9:{start:"2025-10-30T00:00:00Z",end:"2025-11-04T12:00:00Z",discovery:"2025-10-29T12:00:00Z"},
+  10:{start:"2025-11-06T00:00:00Z",end:"2025-11-11T12:00:00Z",discovery:"2025-11-05T12:00:00Z"},
+  11:{start:"2025-11-13T00:00:00Z",end:"2025-11-18T12:00:00Z",discovery:"2025-11-12T12:00:00Z"},
+  12:{start:"2025-11-20T00:00:00Z",end:"2025-11-25T12:00:00Z",discovery:"2025-11-19T12:00:00Z"},
+  13:{start:"2025-11-27T00:00:00Z",end:"2025-12-02T12:00:00Z",discovery:"2025-11-26T12:00:00Z"},
+  14:{start:"2025-12-04T00:00:00Z",end:"2025-12-09T12:00:00Z",discovery:"2025-12-03T12:00:00Z"},
+  15:{start:"2025-12-11T00:00:00Z",end:"2025-12-16T12:00:00Z",discovery:"2025-12-10T12:00:00Z"},
+  16:{start:"2025-12-18T00:00:00Z",end:"2025-12-23T12:00:00Z",discovery:"2025-12-17T12:00:00Z"},
+  17:{start:"2025-12-24T00:00:00Z",end:"2025-12-30T12:00:00Z",discovery:"2025-12-23T12:00:00Z"},
+  18:{start:"2026-01-01T00:00:00Z",end:"2026-01-05T12:00:00Z",discovery:"2025-12-31T12:00:00Z"},
+};
+
+
 function normalizeName(value: string): string {
   return String(value || "")
     .toLowerCase()
@@ -343,22 +365,9 @@ export async function GET(request: Request) {
     // Historical-events returns events that had odds at the requested snapshot.
     // Week 1 spans Thursday through Monday, so use late pregame snapshots on each
     // NFL game day instead of querying noon. This endpoint itself is quota-free.
-    const targetDates = weekGames
-      .map(g => {
-        const m = g.gameId.match(/^2025_(\d{2})(\d{2})_/);
-        return m ? `2025-${m[1]}-${m[2]}T12:00:00Z` : null;
-      })
-      .filter(Boolean) as string[];
-
-    const uniqueDates = [...new Set(targetDates)].sort();
-    const firstGameDate = uniqueDates[0];
-    if (!firstGameDate) throw new Error(`Could not determine dates for Week ${TEST_WEEK}.`);
-
-    const discoveryDate = new Date(new Date(firstGameDate).getTime() - 24 * 60 * 60 * 1000)
-      .toISOString()
-      .replace(/\.\d{3}Z$/, "Z");
-
-    const week1DiscoverySnapshots = [discoveryDate];
+    const window = WEEK_WINDOWS_2025[TEST_WEEK];
+    if (!window) throw new Error(`No 2025 date window configured for Week ${TEST_WEEK}.`);
+    const week1DiscoverySnapshots = [window.discovery];
 
     for (const date of week1DiscoverySnapshots) {
       const r = await oddsJson(
@@ -388,9 +397,9 @@ export async function GET(request: Request) {
     for (const event of eventList) {
       const commence = String(event.commence_time || "");
       const kickoffMs = new Date(commence).getTime();
-      const dateOnly = commence.slice(0, 10);
-      const targetDateSet = new Set(uniqueDates.map(x => x.slice(0, 10)));
-      if (!Number.isFinite(kickoffMs) || !targetDateSet.has(dateOnly)) continue;
+      const weekStartMs = new Date(window.start).getTime();
+      const weekEndMs = new Date(window.end).getTime();
+      if (!Number.isFinite(kickoffMs) || kickoffMs < weekStartMs || kickoffMs > weekEndMs) continue;
 
       const snapshot = isoMinusMinutes(commence, SNAPSHOT_MINUTES_BEFORE_KICKOFF);
 
@@ -488,7 +497,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       success:true,
-      version:"2.0-rushing-v5-historical-sportsbook-week-runner",
+      version:"2.1-rushing-v5-historical-sportsbook-week-runner",
       purpose:"Verify frozen Rushing V5 against real pregame 2025 historical player_rush_yds lines before running a full-season sportsbook backtest.",
       model:"Frozen 5.0-rushing-v5-direct-yards",
       test_scope:{season:TEST_SEASON,week:TEST_WEEK,snapshot_minutes_before_kickoff:SNAPSHOT_MINUTES_BEFORE_KICKOFF,market:MARKET,region:"us"},
@@ -501,6 +510,6 @@ export async function GET(request: Request) {
       bets:results
     });
   } catch (error:any) {
-    return NextResponse.json({success:false,version:"2.0-rushing-v5-historical-sportsbook-week-runner",error:error?.message||String(error)},{status:500});
+    return NextResponse.json({success:false,version:"2.1-rushing-v5-historical-sportsbook-week-runner",error:error?.message||String(error)},{status:500});
   }
 }
