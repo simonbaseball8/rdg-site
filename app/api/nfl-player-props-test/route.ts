@@ -360,120 +360,42 @@ export async function GET() {
     }
 
     const eventList = [...eventsById.values()];
-    const results:any[] = [];
-    let historicalOddsCalls = 0;
-    let eventsMatched = 0;
 
-    function teamNorm(s:string){return String(s||"").toLowerCase().replace(/[^a-z]/g,"");}
+    const eventSamples = eventList.slice(0, 25).map((event: any) => ({
+      id: event?.id ?? null,
+      sport_key: event?.sport_key ?? null,
+      sport_title: event?.sport_title ?? null,
+      commence_time: event?.commence_time ?? null,
+      home_team: event?.home_team ?? null,
+      away_team: event?.away_team ?? null,
+    }));
 
-    // Match each nflverse game to Odds API by date/team abbreviations is unreliable,
-    // so player matching is performed inside all Week-1 NFL events returned around those dates.
-    for (const event of eventList) {
-      const commence = String(event.commence_time || "");
-      const kickoffMs = new Date(commence).getTime();
-      const week1StartMs = new Date("2025-09-04T00:00:00Z").getTime();
-      const week1EndMs = new Date("2025-09-09T12:00:00Z").getTime();
-      if (!Number.isFinite(kickoffMs) || kickoffMs < week1StartMs || kickoffMs > week1EndMs) continue;
-
-      const snapshot = isoMinusMinutes(commence, SNAPSHOT_MINUTES_BEFORE_KICKOFF);
-
-      let odds:any;
-      try {
-        const r = await oddsJson(
-          `${ODDS_BASE}/historical/sports/${SPORT}/events/${event.id}/odds?regions=us&markets=${MARKET}&oddsFormat=american&dateFormat=iso&date=${encodeURIComponent(snapshot)}`,
-          apiKey
-        );
-        lastUsage = r.usage;
-        odds = r.data?.data ?? r.data;
-        historicalOddsCalls++;
-      } catch {
-        continue;
-      }
-
-      const marketPlayers = new Set<string>();
-      for (const book of odds?.bookmakers || [])
-        for (const market of book.markets || [])
-          if (market.key === MARKET)
-            for (const o of market.outcomes || [])
-              if (o.description) marketPlayers.add(normalizeName(o.description));
-
-      const candidates = weekGames.filter(g => marketPlayers.has(normalizeName(g.playerName)));
-      if (!candidates.length) continue;
-      eventsMatched++;
-
-      for (const game of candidates) {
-        const playerHistory = history.get(game.playerId);
-        if (!playerHistory) continue;
-        const model = projectV5(playerHistory, game.position || "UNKNOWN");
-        if (!model) continue;
-
-        const market = chooseMainLine(odds?.bookmakers || [], game.playerName);
-        if (!market) continue;
-
-        const line = market.selected.line;
-        const edgeYards = model.projection - line;
-        const side:"OVER"|"UNDER" = edgeYards >= 0 ? "OVER" : "UNDER";
-        const price = side === "OVER" ? market.selected.over_odds : market.selected.under_odds;
-        const graded = gradeBet(side, line, game.rushYards, price);
-
-        results.push({
-          week: TEST_WEEK,
-          event_id: event.id,
-          commence_time: commence,
-          snapshot_requested: snapshot,
-          player: game.playerName,
-          team: game.team,
-          position: game.position,
-          actual_rushing_yards: game.rushYards,
-          actual_carries: game.carries,
-          v5_projection: Number(model.projection.toFixed(1)),
-          sportsbook: market.selected.sportsbook,
-          sportsbook_key: market.selected.sportsbook_key,
-          line,
-          side,
-          odds: price,
-          edge_yards: Number(edgeYards.toFixed(1)),
-          result: graded.result,
-          profit_units: Number(graded.profit.toFixed(3)),
-          prior_games: model.priorGames,
-        });
-      }
-    }
-
-    const graded = results.filter(x => x.result !== "PUSH");
-    const wins = graded.filter(x => x.result === "WIN").length;
-    const losses = graded.filter(x => x.result === "LOSS").length;
-    const profit = results.reduce((s,x) => s + x.profit_units, 0);
-    const roi = graded.length ? profit / graded.length * 100 : 0;
-
-    function bucket(min:number){
-      const x = results.filter(r => Math.abs(r.edge_yards) >= min && r.result !== "PUSH");
-      const w = x.filter(r => r.result === "WIN").length;
-      const p = x.reduce((s,r)=>s+r.profit_units,0);
-      return {
-        bets:x.length,
-        wins:w,
-        losses:x.length-w,
-        win_rate:x.length?Number((w/x.length*100).toFixed(2)):null,
-        profit_units:Number(p.toFixed(3)),
-        roi_percent:x.length?Number((p/x.length*100).toFixed(2)):null
-      };
-    }
+    const commenceTimes = eventList
+      .map((event: any) => String(event?.commence_time || ""))
+      .filter(Boolean)
+      .sort();
 
     return NextResponse.json({
-      success:true,
-      version:"1.3-rushing-v5-historical-sportsbook-week1-test",
-      purpose:"Verify frozen Rushing V5 against real pregame 2025 historical player_rush_yds lines before running a full-season sportsbook backtest.",
-      model:"Frozen 5.0-rushing-v5-direct-yards",
-      test_scope:{season:TEST_SEASON,week:TEST_WEEK,snapshot_minutes_before_kickoff:SNAPSHOT_MINUTES_BEFORE_KICKOFF,market:MARKET,region:"us"},
-      important:"This first run intentionally tests only Week 1 to verify historical event matching, player matching, grading, and API usage before spending credits on the full season.",
-      api_usage:lastUsage,
-      diagnostics:{nflverse_week_player_games:weekGames.length,historical_events_seen:eventList.length,events_with_matched_prop_players:eventsMatched,historical_event_odds_calls:historicalOddsCalls,graded_bets:graded.length},
-      overall:{bets:graded.length,wins,losses,win_rate:graded.length?Number((wins/graded.length*100).toFixed(2)):null,profit_units:Number(profit.toFixed(3)),roi_percent:graded.length?Number(roi.toFixed(2)):null},
-      edge_buckets:{edge_5_plus:bucket(5),edge_10_plus:bucket(10),edge_15_plus:bucket(15),edge_20_plus:bucket(20)},
-      bets:results
+      success: true,
+      version: "1.4-rushing-v5-historical-event-diagnostic",
+      purpose:
+        "Inspect the exact historical NFL event records returned by The Odds API before making any historical player-prop odds calls.",
+      model:
+        "Frozen 5.0-rushing-v5-direct-yards — model is not executed in this diagnostic.",
+      api_usage: lastUsage,
+      diagnostics: {
+        nflverse_week_player_games: weekGames.length,
+        historical_events_seen: eventList.length,
+        historical_event_odds_calls: 0,
+        credits_protected: true,
+      },
+      returned_event_time_range: {
+        earliest: commenceTimes[0] ?? null,
+        latest: commenceTimes[commenceTimes.length - 1] ?? null,
+      },
+      historical_event_samples: eventSamples,
     });
   } catch (error:any) {
-    return NextResponse.json({success:false,version:"1.3-rushing-v5-historical-sportsbook-week1-test",error:error?.message||String(error)},{status:500});
+    return NextResponse.json({success:false,version:"1.4-rushing-v5-historical-event-diagnostic",error:error?.message||String(error)},{status:500});
   }
 }
