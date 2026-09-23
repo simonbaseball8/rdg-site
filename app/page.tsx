@@ -218,45 +218,6 @@ type MLBAnalysis = {
   games_found: number; priority_reviews: number; strong_reviews: number; watch_reviews: number; updated_at: string; games: MLBGame[];
 };
 
-type MLBPlayerProp = {
-  event_id: string;
-  commence_time: string;
-  matchup: string;
-  player: string;
-  mlb_player_id: number | null;
-  market: "batter_hits" | "batter_total_bases" | "pitcher_strikeouts";
-  market_name: string;
-  market_line: number;
-  rdg_projection: number;
-  edge: number;
-  signal: "OVER" | "UNDER" | "PASS";
-  reasons?: string[];
-  history: {
-    games: number;
-    season_avg: number;
-    last_10_avg: number;
-    last_5_avg: number;
-    recent_values?: number[];
-  };
-  market_data?: {
-    sportsbooks?: number;
-    sportsbook_names?: string[];
-    median_over_odds?: number | null;
-    median_under_odds?: number | null;
-  };
-};
-
-type MLBPlayerPropsResponse = {
-  success: boolean;
-  summary?: {
-    actionable?: number;
-    pass?: number;
-    over?: number;
-    under?: number;
-  };
-  actionable?: MLBPlayerProp[];
-};
-
 type MLBBetCandidate = {
   event_id: string;
   matchup: string;
@@ -820,8 +781,6 @@ const [cfbError, setCfbError] =
   const [mlb, setMlb] = useState<MLBAnalysis | null>(null);
   const [mlbLoading, setMlbLoading] = useState(true);
   const [mlbError, setMlbError] = useState("");
-  const [mlbPlayerProps, setMlbPlayerProps] = useState<MLBPlayerPropsResponse | null>(null);
-  const [mlbPlayerPropsLoading, setMlbPlayerPropsLoading] = useState(true);
   const [nhl, setNhl] = useState<NHLAnalysis | null>(null);
   const [nhlLoading, setNhlLoading] = useState(true);
   const [nhlError, setNhlError] = useState("");
@@ -947,18 +906,6 @@ const [cfbError, setCfbError] =
       }
     }
 
-    async function loadMLBPlayerProps() {
-      try {
-        const response = await fetch("/api/mlb-props", { cache: "no-store" });
-        if (!response.ok) throw new Error(`MLB player props failed: ${response.status}`);
-        setMlbPlayerProps(await response.json());
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setMlbPlayerPropsLoading(false);
-      }
-    }
-
     async function loadNHL() {
       try {
         const response = await fetch("/api/nhl-picks", { cache: "no-store" });
@@ -977,7 +924,6 @@ const [cfbError, setCfbError] =
     loadNFLPlayerProps();
     loadCFB();
     loadMLB();
-    loadMLBPlayerProps();
     loadNHL();
   }, []);
 
@@ -1998,13 +1944,7 @@ const [cfbError, setCfbError] =
         )}
 
         {activeSport === "MLB" && (
-          <MLBSection
-            mlb={mlb}
-            loading={mlbLoading}
-            error={mlbError}
-            playerProps={mlbPlayerProps}
-            playerPropsLoading={mlbPlayerPropsLoading}
-          />
+          <MLBSection mlb={mlb} loading={mlbLoading} error={mlbError} />
         )}
         {activeSport === "NHL" && (
           <NHLSection nhl={nhl} loading={nhlLoading} error={nhlError} />
@@ -3396,38 +3336,8 @@ function americanOddsNumber(odds: string | null) {
   return Number.isFinite(value) ? value : null;
 }
 
-function MLBSection({
-  mlb,
-  loading,
-  error,
-  playerProps,
-  playerPropsLoading,
-}: {
-  mlb: MLBAnalysis | null;
-  loading: boolean;
-  error: string;
-  playerProps: MLBPlayerPropsResponse | null;
-  playerPropsLoading: boolean;
-}) {
+function MLBSection({ mlb, loading, error }: { mlb: MLBAnalysis | null; loading: boolean; error: string }) {
   const games = (mlb?.games || []).filter((game) => game && game.rdg);
-
-  const topPlayerProps = [...(playerProps?.actionable || [])]
-    .filter((prop) => prop.signal === "OVER" || prop.signal === "UNDER")
-    .sort((a, b) => {
-      const edgeDiff = Math.abs(Number(b.edge || 0)) - Math.abs(Number(a.edge || 0));
-      if (Math.abs(edgeDiff) > 0.01) return edgeDiff;
-
-      const aRecent = a.history?.recent_values || [];
-      const bRecent = b.history?.recent_values || [];
-      const aHits = aRecent.filter((v) =>
-        a.signal === "OVER" ? v > a.market_line : v < a.market_line
-      ).length;
-      const bHits = bRecent.filter((v) =>
-        b.signal === "OVER" ? v > b.market_line : v < b.market_line
-      ).length;
-      return bHits - aHits;
-    })
-    .slice(0, 8);
   const priority: Record<string, number> = {
     "Priority Review": 4,
     "Strong Review": 3,
@@ -3725,92 +3635,6 @@ function MLBSection({
 
       {!loading && !error && mlb && (
         <>
-          <div className="mt-10 border-t border-white/10 pt-8">
-            <p className="text-xs font-bold uppercase tracking-[0.25em] text-emerald-400">
-              TOP MLB PLAYER PROPS
-            </p>
-            <h2 className="mt-3 text-2xl font-bold">Best RDG Suggestions</h2>
-            <p className="mt-2 text-sm text-slate-400">
-              Simple sportsbook-line suggestions backed by season and recent performance.
-            </p>
-          </div>
-
-          {playerPropsLoading ? (
-            <div className="mt-6 rounded-xl border border-white/10 bg-white/[0.03] p-6 text-slate-400">
-              Loading MLB player props...
-            </div>
-          ) : topPlayerProps.length > 0 ? (
-            <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {topPlayerProps.map((prop) => {
-                const recent = prop.history?.recent_values || [];
-                const cleared = recent.filter((v) =>
-                  prop.signal === "OVER" ? v > prop.market_line : v < prop.market_line
-                ).length;
-
-                const statLabel =
-                  prop.market === "batter_hits"
-                    ? "hits/game"
-                    : prop.market === "batter_total_bases"
-                      ? "total bases/game"
-                      : "strikeouts/game";
-
-                return (
-                  <div
-                    key={`${prop.event_id}-${prop.player}-${prop.market}-${prop.market_line}`}
-                    className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
-                          {prop.market_name}
-                        </p>
-                        <h3 className="mt-2 text-xl font-black text-white">{prop.player}</h3>
-                        <p className="mt-1 text-sm text-slate-500">{prop.matchup}</p>
-                      </div>
-                      <span className="rounded-full bg-emerald-400/10 px-3 py-1 text-xs font-black text-emerald-400">
-                        RDG PICK
-                      </span>
-                    </div>
-
-                    <div className="mt-5 rounded-xl border border-emerald-400/20 bg-emerald-400/[0.06] p-4">
-                      <p className="text-2xl font-black text-emerald-400">
-                        {prop.signal} {prop.market_line}
-                      </p>
-                    </div>
-
-                    <div className="mt-4 space-y-2 text-sm text-slate-300">
-                      <p>
-                        Season: <span className="font-bold text-white">{Number(prop.history?.season_avg || 0).toFixed(2)} {statLabel}</span>
-                      </p>
-                      <p>
-                        Last 10: <span className="font-bold text-white">{Number(prop.history?.last_10_avg || 0).toFixed(2)} {statLabel}</span>
-                      </p>
-                      {recent.length > 0 && (
-                        <p>
-                          {prop.signal === "OVER" ? "Cleared" : "Stayed under"} in{" "}
-                          <span className="font-bold text-white">{cleared} of last {recent.length}</span>
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="mt-5 border-t border-white/10 pt-4">
-                      <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
-                        RDG Pick
-                      </p>
-                      <p className="mt-1 text-lg font-black text-white">
-                        {prop.player} — {prop.signal} {prop.market_line} {prop.market_name.replace("Batter ", "").replace("Pitcher ", "")}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })}
-            </section>
-          ) : (
-            <div className="mt-6 rounded-xl border border-white/10 bg-white/[0.03] p-6 text-slate-400">
-              No qualifying MLB player props right now.
-            </div>
-          )}
-
           {reviews.length > 0 ? (
             <section className="mt-8 grid gap-5 lg:grid-cols-2">
               {reviews.map((game, index) => (
