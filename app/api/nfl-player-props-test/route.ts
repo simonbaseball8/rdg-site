@@ -4,7 +4,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const VERSION = "3.0-rushing-v3-development";
+const VERSION = "4.0-rushing-v4-workload-efficiency";
 const MIN_CARRIES = 5;
 const MIN_PRIOR_GAMES = 3;
 const RECENT_GAMES = 4;
@@ -21,22 +21,15 @@ type PlayerGame = {
   rushYards: number;
 };
 
-type History = {
-  games: PlayerGame[];
-};
-
-type TeamWeek = {
-  carries: number;
-  yards: number;
-};
+type History = { games: PlayerGame[] };
 
 function num(v: unknown): number {
   const x = Number(v);
   return Number.isFinite(x) ? x : 0;
 }
 
-function avg(values: number[]): number {
-  return values.length ? values.reduce((s, x) => s + x, 0) / values.length : 0;
+function avg(a: number[]): number {
+  return a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0;
 }
 
 function clamp(x: number, lo: number, hi: number): number {
@@ -47,7 +40,7 @@ function parseCSV(text: string): Record<string, string>[] {
   const lines = text.split(/\r?\n/).filter(Boolean);
   if (!lines.length) return [];
 
-  function split(line: string): string[] {
+  const split = (line: string) => {
     const out: string[] = [];
     let cur = "";
     let quoted = false;
@@ -58,27 +51,21 @@ function parseCSV(text: string): Record<string, string>[] {
         if (quoted && line[i + 1] === '"') {
           cur += '"';
           i++;
-        } else {
-          quoted = !quoted;
-        }
+        } else quoted = !quoted;
       } else if (c === "," && !quoted) {
         out.push(cur);
         cur = "";
-      } else {
-        cur += c;
-      }
+      } else cur += c;
     }
-
     out.push(cur);
     return out;
-  }
+  };
 
   const headers = split(lines[0]);
-
   return lines.slice(1).map((line) => {
-    const vals = split(line);
+    const values = split(line);
     const row: Record<string, string> = {};
-    headers.forEach((h, i) => (row[h] = vals[i] ?? ""));
+    headers.forEach((h, i) => (row[h] = values[i] ?? ""));
     return row;
   });
 }
@@ -88,13 +75,11 @@ async function loadSeason(season: number): Promise<PlayerGame[]> {
     `https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_${season}.csv`;
 
   const res = await fetch(url, {
-    headers: { "User-Agent": "RDG-NFL-Rushing-V3/3.0" },
+    headers: { "User-Agent": "RDG-Rushing-V4/4.0" },
     next: { revalidate: 3600 },
   });
 
-  if (!res.ok) {
-    throw new Error(`nflverse ${season} weekly player stats failed: ${res.status}`);
-  }
+  if (!res.ok) throw new Error(`nflverse ${season} failed: ${res.status}`);
 
   const rows = parseCSV(await res.text());
   const games: PlayerGame[] = [];
@@ -128,184 +113,157 @@ async function loadSeason(season: number): Promise<PlayerGame[]> {
   return games.sort((a, b) => a.week - b.week || a.gameId.localeCompare(b.gameId));
 }
 
-function addHistory(map: Map<string, History>, game: PlayerGame) {
-  const h = map.get(game.playerId) ?? { games: [] };
-  h.games.push(game);
-  map.set(game.playerId, h);
-}
-
-function addTeamWeek(
-  map: Map<string, TeamWeek[]>,
-  games: PlayerGame[],
-) {
-  const byTeam = new Map<string, TeamWeek>();
-
-  for (const g of games) {
-    if (!g.team) continue;
-    const x = byTeam.get(g.team) ?? { carries: 0, yards: 0 };
-    x.carries += g.carries;
-    x.yards += g.rushYards;
-    byTeam.set(g.team, x);
-  }
-
-  for (const [team, tw] of byTeam) {
-    const arr = map.get(team) ?? [];
-    arr.push(tw);
-    map.set(team, arr);
-  }
+function addHistory(map: Map<string, History>, g: PlayerGame) {
+  const h = map.get(g.playerId) ?? { games: [] };
+  h.games.push(g);
+  map.set(g.playerId, h);
 }
 
 function metrics(errors: number[]) {
   if (!errors.length) return { n: 0, mae: null, rmse: null, mean_error: null };
 
-  const mae = avg(errors.map(Math.abs));
-  const rmse = Math.sqrt(avg(errors.map((e) => e * e)));
-  const mean = avg(errors);
-
   return {
     n: errors.length,
-    mae: Number(mae.toFixed(2)),
-    rmse: Number(rmse.toFixed(2)),
-    mean_error: Number(mean.toFixed(2)),
+    mae: Number(avg(errors.map(Math.abs)).toFixed(2)),
+    rmse: Number(Math.sqrt(avg(errors.map((e) => e * e))).toFixed(2)),
+    mean_error: Number(avg(errors).toFixed(2)),
   };
 }
 
 export async function GET() {
   try {
-    // IMPORTANT: 2026 is intentionally NOT loaded.
+    // Keep 2026 completely out of V4 development.
     const [train2024, test2025] = await Promise.all([
       loadSeason(2024),
       loadSeason(2025),
     ]);
 
-    const playerHistory = new Map<string, History>();
-    const teamHistory = new Map<string, TeamWeek[]>();
-
-    for (const g of train2024) addHistory(playerHistory, g);
-
-    const trainWeeks = [...new Set(train2024.map((g) => g.week))].sort(
-      (a, b) => a - b,
-    );
-    for (const week of trainWeeks) {
-      addTeamWeek(
-        teamHistory,
-        train2024.filter((g) => g.week === week),
-      );
-    }
+    const history = new Map<string, History>();
+    for (const g of train2024) addHistory(history, g);
 
     const baselineErrors: number[] = [];
-    const v3Errors: number[] = [];
+    const v4Errors: number[] = [];
+    const carryErrors: number[] = [];
     const predictions: any[] = [];
-    let skippedNoHistory = 0;
+    let skipped = 0;
 
-    const weeks = [...new Set(test2025.map((g) => g.week))].sort(
-      (a, b) => a - b,
-    );
+    const weeks = [...new Set(test2025.map((g) => g.week))].sort((a, b) => a - b);
 
     for (const week of weeks) {
-      const games = test2025.filter((g) => g.week === week);
+      const weekGames = test2025.filter((g) => g.week === week);
 
-      for (const game of games) {
-        const h = playerHistory.get(game.playerId);
+      for (const game of weekGames) {
+        const h = history.get(game.playerId);
+
         if (!h || h.games.length < MIN_PRIOR_GAMES) {
-          skippedNoHistory++;
+          skipped++;
           continue;
         }
 
         const all = h.games;
         const recent = all.slice(-RECENT_GAMES);
 
-        const longYpg = avg(all.map((x) => x.rushYards));
-        const longCarries = avg(all.map((x) => x.carries));
-        const recentCarries = avg(recent.map((x) => x.carries));
+        const careerCarries = avg(all.map((g) => g.carries));
+        const recentCarries = avg(recent.map((g) => g.carries));
 
-        const longTotalCarries = all.reduce((s, x) => s + x.carries, 0);
-        const longTotalYards = all.reduce((s, x) => s + x.rushYards, 0);
-        const longYpc = longTotalYards / Math.max(1, longTotalCarries);
+        const last1Carries = recent[recent.length - 1]?.carries ?? recentCarries;
+        const last2Carries = avg(recent.slice(-2).map((g) => g.carries));
 
-        const recentTotalCarries = recent.reduce((s, x) => s + x.carries, 0);
-        const recentTotalYards = recent.reduce((s, x) => s + x.rushYards, 0);
-        const recentYpc = recentTotalYards / Math.max(1, recentTotalCarries);
+        const careerYards = all.reduce((s, g) => s + g.rushYards, 0);
+        const careerCarryTotal = all.reduce((s, g) => s + g.carries, 0);
+        const careerYpc = careerYards / Math.max(1, careerCarryTotal);
 
-        const teamWeeks = teamHistory.get(game.team) ?? [];
-        const teamRecent = teamWeeks.slice(-RECENT_GAMES);
-        const teamLongCarries = avg(teamWeeks.map((x) => x.carries));
-        const teamRecentCarries = avg(teamRecent.map((x) => x.carries));
+        const recentYards = recent.reduce((s, g) => s + g.rushYards, 0);
+        const recentCarryTotal = recent.reduce((s, g) => s + g.carries, 0);
+        const recentYpc = recentYards / Math.max(1, recentCarryTotal);
 
-        const position = game.position || "UNKNOWN";
-        const isQB = position === "QB";
+        const careerYpg = avg(all.map((g) => g.rushYards));
 
-        // V3 workload:
-        // RB/other rushers react more to recent role and team opportunity.
-        // QBs are kept more conservative because designed/scramble rushing is volatile.
-        const recentWeight = isQB ? 0.40 : 0.65;
-        let expectedCarries =
-          recentWeight * recentCarries +
-          (1 - recentWeight) * longCarries;
+        const isQB = game.position === "QB";
 
-        // Role trend: cap the adjustment so one unusual game cannot dominate.
-        const workloadTrend =
-          longCarries > 0 ? recentCarries / longCarries : 1;
-        const cappedTrend = clamp(workloadTrend, 0.80, 1.20);
+        /*
+          V4 explicitly separates workload from efficiency.
 
-        // Team opportunity trend is deliberately small.
-        const teamTrend =
-          teamLongCarries > 0 ? teamRecentCarries / teamLongCarries : 1;
-        const cappedTeamTrend = clamp(teamTrend, 0.90, 1.10);
+          WORKLOAD:
+          RBs: recent role matters strongly.
+          QBs: workload is stabilized because scramble volume is noisy.
 
-        if (!isQB) {
-          expectedCarries *=
-            0.75 + 0.15 * cappedTrend + 0.10 * cappedTeamTrend;
+          This is a pre-declared V4 hypothesis. 2026 is not used.
+        */
+        let expectedCarries: number;
+
+        if (isQB) {
+          expectedCarries =
+            0.25 * last2Carries +
+            0.25 * recentCarries +
+            0.50 * careerCarries;
+        } else {
+          expectedCarries =
+            0.20 * last1Carries +
+            0.35 * last2Carries +
+            0.30 * recentCarries +
+            0.15 * careerCarries;
         }
 
-        // Efficiency is heavily stabilized to long-term YPC.
-        const recentYpcWeight = isQB ? 0.15 : 0.20;
-        const expectedYpc =
-          recentYpcWeight * recentYpc +
-          (1 - recentYpcWeight) * longYpc;
+        // Prevent extreme workload extrapolation.
+        expectedCarries = clamp(
+          expectedCarries,
+          Math.max(1, careerCarries * 0.60),
+          careerCarries * 1.45,
+        );
 
-        const baselineProjection = longYpg;
-        const v3Projection = expectedCarries * expectedYpc;
+        /*
+          EFFICIENCY:
+          YPC is noisy, so V4 shrinks recent efficiency heavily
+          toward the player's longer-term efficiency.
+        */
+        const expectedYpc = isQB
+          ? 0.90 * careerYpc + 0.10 * recentYpc
+          : 0.85 * careerYpc + 0.15 * recentYpc;
+
+        const baselineProjection = careerYpg;
+        const v4Projection = expectedCarries * expectedYpc;
 
         baselineErrors.push(baselineProjection - game.rushYards);
-        v3Errors.push(v3Projection - game.rushYards);
+        v4Errors.push(v4Projection - game.rushYards);
+        carryErrors.push(expectedCarries - game.carries);
 
         predictions.push({
           week,
           player: game.playerName,
           team: game.team,
-          position,
+          position: game.position || "UNKNOWN",
           actual_rushing_yards: game.rushYards,
           actual_carries: game.carries,
           prior_games: all.length,
           recent_games: recent.length,
-          long_term_yards_per_game: Number(longYpg.toFixed(1)),
-          long_term_carries_per_game: Number(longCarries.toFixed(2)),
+
+          career_carries_per_game: Number(careerCarries.toFixed(2)),
           recent_carries_per_game: Number(recentCarries.toFixed(2)),
-          workload_trend: Number(cappedTrend.toFixed(3)),
-          team_long_carries: Number(teamLongCarries.toFixed(2)),
-          team_recent_carries: Number(teamRecentCarries.toFixed(2)),
-          team_opportunity_trend: Number(cappedTeamTrend.toFixed(3)),
-          long_term_yards_per_carry: Number(longYpc.toFixed(2)),
-          recent_yards_per_carry: Number(recentYpc.toFixed(2)),
+          last_2_carries_per_game: Number(last2Carries.toFixed(2)),
+          last_game_carries: last1Carries,
           expected_carries: Number(expectedCarries.toFixed(2)),
+
+          career_yards_per_carry: Number(careerYpc.toFixed(2)),
+          recent_yards_per_carry: Number(recentYpc.toFixed(2)),
           expected_yards_per_carry: Number(expectedYpc.toFixed(2)),
+
           baseline_projection: Number(baselineProjection.toFixed(1)),
-          rushing_v3_projection: Number(v3Projection.toFixed(1)),
+          rushing_v4_projection: Number(v4Projection.toFixed(1)),
         });
       }
 
-      // No same-week leakage.
-      for (const game of games) addHistory(playerHistory, game);
-      addTeamWeek(teamHistory, games);
+      // Predict the full week before adding that week's results.
+      for (const g of weekGames) addHistory(history, g);
     }
 
     const baseline = metrics(baselineErrors);
-    const rushingV3 = metrics(v3Errors);
+    const v4 = metrics(v4Errors);
+    const carryModel = metrics(carryErrors);
 
     const improvement =
-      baseline.mae !== null && rushingV3.mae !== null
-        ? Number((baseline.mae - rushingV3.mae).toFixed(2))
+      baseline.mae !== null && v4.mae !== null
+        ? Number((baseline.mae - v4.mae).toFixed(2))
         : null;
 
     const improvementPct =
@@ -317,40 +275,48 @@ export async function GET() {
       success: true,
       version: VERSION,
       purpose:
-        "Develop Rushing V3 on 2024 prior history and held-out chronological 2025 results using recent workload, role trend, team rushing opportunity, and position-aware handling.",
+        "Rushing V4 development test that models expected rushing workload separately from rushing efficiency.",
       model_status: "DEVELOPMENT TEST ONLY — NOT LIVE",
-      data_source: "nflverse weekly player stats",
       development_guardrail:
-        "2026 data is intentionally not loaded or used anywhere in this route.",
+        "Only 2024 prior history and chronological 2025 evaluation are used. 2026 is not loaded.",
       samples: {
         training_2024_player_games: train2024.length,
         testing_2025_player_games: test2025.length,
         held_out_predictions: predictions.length,
-        skipped_no_prior_history: skippedNoHistory,
+        skipped_no_prior_history: skipped,
       },
       baseline: {
         description: "All prior rushing yards per game",
         ...baseline,
       },
-      rushing_v3: {
+      workload_model: {
+        description: "Expected carries compared with actual carries",
+        ...carryModel,
+      },
+      rushing_v4: {
         description:
-          "Position-aware recent workload + capped role trend + team rushing opportunity + stabilized rushing efficiency",
-        recent_window_games: RECENT_GAMES,
-        ...rushingV3,
+          "Expected carries × stabilized expected yards per carry",
+        ...v4,
       },
       comparison: {
         mae_improvement_yards: improvement,
         mae_improvement_percent: improvementPct,
-        v3_beats_baseline:
+        v4_beats_baseline:
           improvement !== null ? improvement > 0 : false,
-        note:
-          "This is a projection-development backtest, not a sportsbook betting win-rate test.",
+        v4_beats_baseline_rmse:
+          v4.rmse !== null && baseline.rmse !== null
+            ? v4.rmse < baseline.rmse
+            : false,
       },
       methodology: {
+        workload:
+          "RB workload emphasizes last game, last two games, and four-game recent usage. QB workload is more heavily stabilized toward long-term carries.",
+        efficiency:
+          "Recent YPC is heavily shrunk toward long-term YPC because rushing efficiency is volatile.",
         leakage_control:
-          "2024 initializes player/team history. Every 2025 week is predicted before that week's player and team results are added.",
-        next_step:
-          "If V3 materially improves 2025, do not call 2026 untouched validation because 2026 has already been inspected during V2 development. Use a genuinely future sample or another pre-declared out-of-sample validation design.",
+          "2024 initializes history. Every 2025 week is predicted before that week's results are added.",
+        important:
+          "This is a projection-development test, not a sportsbook prop backtest or betting win-rate test.",
       },
       sample_predictions: predictions.slice(0, 30),
     });
