@@ -65,7 +65,11 @@ function dateOnly(iso: string) {
 }
 
 function isoHoursBefore(iso: string, hours: number) {
-  return new Date(new Date(iso).getTime() - hours * 60 * 60 * 1000).toISOString();
+  return new Date(
+    new Date(iso).getTime() - hours * 60 * 60 * 1000
+  )
+    .toISOString()
+    .replace(".000Z", "Z");
 }
 
 function median(values: number[]) {
