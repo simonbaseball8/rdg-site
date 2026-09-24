@@ -1957,21 +1957,79 @@ const [cfbError, setCfbError] =
           </div>
 
           <div className="relative z-10 mt-7 grid gap-3 sm:grid-cols-3">
-            <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-              <p className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-500">NFL Props</p>
-              <p className="mt-1 text-xl font-black text-white">{nflPlayerProps?.actionable_props ?? "—"}</p>
-              <p className="mt-1 text-[10px] text-slate-500">Current qualifying plays</p>
-            </div>
-            <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-              <p className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-500">NFL Games</p>
-              <p className="mt-1 text-xl font-black text-white">{nfl?.games_found ?? "—"}</p>
-              <p className="mt-1 text-[10px] text-slate-500">Current board</p>
-            </div>
-            <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/[0.06] px-4 py-3">
-              <p className="text-[9px] font-black uppercase tracking-[0.18em] text-emerald-400">Elite A+ Props</p>
-              <p className="mt-1 text-xl font-black text-white">{nflPlayerProps?.grade_counts?.["A+"] ?? "—"}</p>
-              <p className="mt-1 text-[10px] text-slate-500">V6.3 elite grade</p>
-            </div>
+            {(() => {
+              const statCards =
+                activeSport === "NFL"
+                  ? [
+                      ["NFL Props", nflPlayerProps?.actionable_props ?? "—", "Current qualifying plays"],
+                      ["NFL Games", nfl?.games_found ?? "—", "Current board"],
+                      ["Elite A+ Props", nflPlayerProps?.grade_counts?.["A+"] ?? "—", "Top RDG prop grade"],
+                    ]
+                  : activeSport === "CFB"
+                    ? [
+                        ["CFB Games", cfb?.games_found ?? "—", "Current board"],
+                        ["Priority Reviews", cfb?.priority_reviews ?? "—", "Highest model review"],
+                        ["Strong Reviews", cfb?.strong_reviews ?? "—", "Strong model signals"],
+                      ]
+                    : activeSport === "MLB"
+                      ? [
+                          ["MLB Games", mlb?.games_found ?? "—", "Current board"],
+                          ["Priority Reviews", mlb?.priority_reviews ?? "—", "Highest model review"],
+                          ["Strong Reviews", mlb?.strong_reviews ?? "—", "Strong model signals"],
+                        ]
+                      : activeSport === "NHL"
+                        ? [
+                            ["NHL Games", nhl?.games_found ?? "—", "Current board"],
+                            ["Model Ready", nhl?.games_with_model ?? "—", "Games with RDG model"],
+                            [
+                              "Strong + Priority",
+                              (nhl?.review_summary?.strong_reviews ?? 0) + (nhl?.review_summary?.priority_reviews ?? 0),
+                              "Top model reviews",
+                            ],
+                          ]
+                        : activeSport === "NBA"
+                          ? [
+                              ["NBA", "—", "Coming soon"],
+                              ["Player Props", "—", "Coming soon"],
+                              ["Model Picks", "—", "Coming soon"],
+                            ]
+                          : [
+                              ["Eligible Plays", crossSportCandidates.length, "Next 96 hours"],
+                              [
+                                "Active Sports",
+                                new Set(crossSportCandidates.map((candidate) => candidate.sport)).size,
+                                "Sports with qualifying plays",
+                              ],
+                              [
+                                "Player Props",
+                                crossSportCandidates.filter((candidate) => candidate.is_player_prop).length,
+                                "Qualifying prop plays",
+                              ],
+                            ];
+
+              return statCards.map(([label, value, detail], index) => (
+                <div
+                  key={String(label)}
+                  className={
+                    index === 2
+                      ? "rounded-xl border border-emerald-400/20 bg-emerald-400/[0.06] px-4 py-3"
+                      : "rounded-xl border border-white/10 bg-black/20 px-4 py-3"
+                  }
+                >
+                  <p
+                    className={
+                      index === 2
+                        ? "text-[9px] font-black uppercase tracking-[0.18em] text-emerald-400"
+                        : "text-[9px] font-black uppercase tracking-[0.18em] text-slate-500"
+                    }
+                  >
+                    {label}
+                  </p>
+                  <p className="mt-1 text-xl font-black text-white">{value}</p>
+                  <p className="mt-1 text-[10px] text-slate-500">{detail}</p>
+                </div>
+              ));
+            })()}
           </div>
         </section>
 
