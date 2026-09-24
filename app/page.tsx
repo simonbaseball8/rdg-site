@@ -805,6 +805,7 @@ export default function Home() {
   const [nflInjuries, setNflInjuries] =
     useState<NFLInjuriesResponse | null>(null);
 const [activeSport, setActiveSport] =
+  const [parlayCountdown, setParlayCountdown] = useState("00:00:00");
   useState<"ALL" | "NFL" | "CFB" | "MLB" | "NHL" | "NBA">("NFL");
 
 const [cfb, setCfb] =
@@ -822,6 +823,28 @@ const [cfbError, setCfbError] =
   const [nhl, setNhl] = useState<NHLAnalysis | null>(null);
   const [nhlLoading, setNhlLoading] = useState(true);
   const [nhlError, setNhlError] = useState("");
+  useEffect(() => {
+    const updateParlayCountdown = () => {
+      const now = new Date();
+      const easternNow = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+      const nextReset = new Date(easternNow);
+      nextReset.setHours(24, 0, 0, 0);
+
+      const remaining = Math.max(0, nextReset.getTime() - easternNow.getTime());
+      const hours = Math.floor(remaining / 3_600_000);
+      const minutes = Math.floor((remaining % 3_600_000) / 60_000);
+      const seconds = Math.floor((remaining % 60_000) / 1_000);
+
+      setParlayCountdown(
+        `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+      );
+    };
+
+    updateParlayCountdown();
+    const timer = window.setInterval(updateParlayCountdown, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   useEffect(() => {
     setLastUpdatedDisplay(
       new Intl.DateTimeFormat("en-US", {
@@ -1512,7 +1535,7 @@ const [cfbError, setCfbError] =
   const editionStart = new Date(editionNow);
   const editionEnd = new Date(editionNow.getTime() + 96 * 60 * 60 * 1000);
 
-  const editionLabel = "CURRENT 96-HOUR BOARD";
+  const editionLabel = "CURRENT 96-HOUR BOARD <span className="mx-2 text-amber-300/50">•</span> RESET IN {parlayCountdown}";
   const editionDateRange = `${new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
@@ -1774,119 +1797,112 @@ const [cfbError, setCfbError] =
   function buildDiversifiedCrossSportParlays() {
     const cardSizes = [2, 3, 4, 5];
     const globalPickUsage = new Map<string, number>();
+    const globalEventUsage = new Map<string, number>();
     const globalSportUsage = new Map<string, number>();
+    const parlays: CrossSportCandidate[][] = [];
 
-    return cardSizes.map((count, cardIndex) => {
-      const selected: CrossSportCandidate[] = [];
+    const sorted = [...crossSportCandidates].sort((a, b) => b.score - a.score);
+
+    for (let cardIndex = 0; cardIndex < cardSizes.length; cardIndex++) {
+      const targetSize = cardSizes[cardIndex];
+      const chosen: CrossSportCandidate[] = [];
       const usedEvents = new Set<string>();
-      const localSportUsage = new Map<string, number>();
-      const hasQualifyingPlayerProp = crossSportCandidates.some(
-        (candidate) => candidate.is_player_prop
-      );
+      const localSports = new Map<string, number>();
 
-      while (selected.length < count) {
-        const remainingSlots = count - selected.length;
-        const alreadyHasPlayerProp = selected.some(
-          (candidate) => candidate.is_player_prop
-        );
-
-        let available = crossSportCandidates.filter((candidate) => {
-          if (usedEvents.has(candidate.event_key)) return false;
-
-          const pickUsage = globalPickUsage.get(candidate.id) || 0;
-          const unusedAlternatives = crossSportCandidates.filter(
-            (other) =>
-              !usedEvents.has(other.event_key) &&
-              (globalPickUsage.get(other.id) || 0) === 0
+      while (chosen.length < targetSize) {
+        const remainingSlots = targetSize - chosen.length;
+        const needsProp =
+          targetSize >= 3 &&
+          !chosen.some((pick) => pick.is_player_prop) &&
+          sorted.some(
+            (pick) =>
+              pick.is_player_prop &&
+              !usedEvents.has(pick.event_key) &&
+              (globalPickUsage.get(pick.id) ?? 0) === 0
           );
 
-          // Avoid putting the same wager on three different cards when
-          // enough unused qualifying alternatives are available.
-          if (pickUsage >= 2 && unusedAlternatives.length >= remainingSlots) {
-            return false;
-          }
+        let pool = sorted.filter((pick) => {
+          if (usedEvents.has(pick.event_key)) return false;
+
+          // Strong protection against one game sinking every card:
+          // the same exact pick may appear only once until unique options are exhausted.
+          const pickUses = globalPickUsage.get(pick.id) ?? 0;
+          const eventUses = globalEventUsage.get(pick.event_key) ?? 0;
+          const unusedPicksLeft = sorted.filter(
+            (candidate) =>
+              (globalPickUsage.get(candidate.id) ?? 0) === 0 &&
+              !usedEvents.has(candidate.event_key)
+          ).length;
+
+          if (pickUses > 0 && unusedPicksLeft >= remainingSlots) return false;
+
+          // Prefer entirely different games across cards. Allow a repeat only when
+          // the board cannot fill the requested card otherwise.
+          const unusedEventsLeft = new Set(
+            sorted
+              .filter(
+                (candidate) =>
+                  (globalEventUsage.get(candidate.event_key) ?? 0) === 0 &&
+                  !usedEvents.has(candidate.event_key)
+              )
+              .map((candidate) => candidate.event_key)
+          ).size;
+          if (eventUses > 0 && unusedEventsLeft >= remainingSlots) return false;
 
           return true;
         });
 
-        // Keep a qualifying player prop represented on 3+ leg cards.
-        // This never promotes PASS props because those never enter this pool.
-        if (
-          count >= 3 &&
-          hasQualifyingPlayerProp &&
-          !alreadyHasPlayerProp &&
-          remainingSlots === 1
-        ) {
-          const propOptions = available.filter(
-            (candidate) => candidate.is_player_prop
-          );
-          if (propOptions.length > 0) available = propOptions;
+        if (needsProp && remainingSlots === 1) {
+          const propPool = pool.filter((pick) => pick.is_player_prop);
+          if (propPool.length) pool = propPool;
         }
 
-        if (available.length === 0) break;
+        if (!pool.length) break;
 
-        const ranked = available
-          .map((candidate) => {
-            const pickUsage = globalPickUsage.get(candidate.id) || 0;
-            const localSportCount = localSportUsage.get(candidate.sport) || 0;
-            const globalSportCount = globalSportUsage.get(candidate.sport) || 0;
+        pool.sort((a, b) => {
+          const scoreFor = (pick: CrossSportCandidate) => {
+            const pickUses = globalPickUsage.get(pick.id) ?? 0;
+            const eventUses = globalEventUsage.get(pick.event_key) ?? 0;
+            const sportUses = globalSportUsage.get(pick.sport) ?? 0;
+            const localSportUses = localSports.get(pick.sport) ?? 0;
 
-            const repeatPenalty =
-              pickUsage === 0 ? 0 :
-              pickUsage === 1 ? 42 :
-              100;
+            // Repetition is much more expensive than a few model-score points.
+            const repeatPickPenalty = pickUses * 120;
+            const repeatEventPenalty = eventUses * 85;
+            const localSportPenalty = localSportUses * 18;
+            const globalSportPenalty = sportUses * 2.5;
 
-            const sportPenalty =
-              localSportCount * 20 +
-              globalSportCount * 2.5;
+            // Small deterministic rotation keeps equally-rated cards from cloning.
+            const rotation = ((pick.id.length + cardIndex * 7) % 11) * 0.15;
 
-            const propBonus =
-              candidate.is_player_prop &&
-              count >= 3 &&
-              !alreadyHasPlayerProp
-                ? 7
-                : 0;
+            return (
+              pick.score -
+              repeatPickPenalty -
+              repeatEventPenalty -
+              localSportPenalty -
+              globalSportPenalty +
+              rotation
+            );
+          };
+          return scoreFor(b) - scoreFor(a);
+        });
 
-            // Deterministic rotation prevents equal-score cards from cloning
-            // each other while keeping results stable between refreshes.
-            const candidateIndex = crossSportCandidates.indexOf(candidate);
-            const rotation =
-              ((candidateIndex + cardIndex * 3) % 11) * 0.12;
-
-            return {
-              candidate,
-              adjusted:
-                candidate.score -
-                repeatPenalty -
-                sportPenalty +
-                propBonus -
-                rotation,
-            };
-          })
-          .sort((a, b) => b.adjusted - a.adjusted);
-
-        const pick = ranked[0].candidate;
-        selected.push(pick);
-        usedEvents.add(pick.event_key);
-        localSportUsage.set(
-          pick.sport,
-          (localSportUsage.get(pick.sport) || 0) + 1
-        );
+        const selected = pool[0];
+        chosen.push(selected);
+        usedEvents.add(selected.event_key);
+        localSports.set(selected.sport, (localSports.get(selected.sport) ?? 0) + 1);
       }
 
-      selected.forEach((pick) => {
-        globalPickUsage.set(
-          pick.id,
-          (globalPickUsage.get(pick.id) || 0) + 1
-        );
-        globalSportUsage.set(
-          pick.sport,
-          (globalSportUsage.get(pick.sport) || 0) + 1
-        );
-      });
+      for (const pick of chosen) {
+        globalPickUsage.set(pick.id, (globalPickUsage.get(pick.id) ?? 0) + 1);
+        globalEventUsage.set(pick.event_key, (globalEventUsage.get(pick.event_key) ?? 0) + 1);
+        globalSportUsage.set(pick.sport, (globalSportUsage.get(pick.sport) ?? 0) + 1);
+      }
 
-      return selected;
-    });
+      parlays.push(chosen);
+    }
+
+    return parlays;
   }
 
   const diversifiedCrossSportCards = buildDiversifiedCrossSportParlays();
@@ -2104,7 +2120,7 @@ const [cfbError, setCfbError] =
                     🏆 Best Parlays Across All Sports
                   </h2>
                   <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400">
-                    RDG scans qualifying NFL, College Football, MLB, and NHL games starting within the next 96 hours.
+                    RDG scans qualifying NFL, College Football, MLB, and NHL plays starting within the next 96 hours.
                     Started games and games outside the four-day window are automatically excluded.
                   </p>
                 </div>
