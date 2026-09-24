@@ -332,9 +332,6 @@ type NFLInjury = {
   importance_score?: number | null;
   importance_tier?: string | null;
   current_injury?: boolean;
-  concern_type?: "CONFIRMED_INJURY" | "PRACTICE_CONCERN";
-  injury_confirmed?: boolean;
-  major_concern?: boolean;
 };
 
 type NFLInjuriesResponse = {
@@ -1083,24 +1080,13 @@ const [cfbError, setCfbError] =
 
   function injuryText(injury: NFLInjury) {
     const status = String(injury.game_status || "").toUpperCase();
-    const practice = String(injury.practice_status || "").toUpperCase();
-    const position = String(injury.position || "").toUpperCase();
-    const injuryName = String(injury.injury || "").trim();
+    const practice = String(injury.practice_status || "");
+    const statusText =
+      status && status !== "NO_DESIGNATION" && status !== "UNSPECIFIED"
+        ? status
+        : practice || "on the injury report";
 
-    if (injury.concern_type === "PRACTICE_CONCERN" || injury.injury_confirmed === false) {
-      const practiceLabel = practice === "DNP" ? "DNP" : practice === "LIMITED" ? "limited" : practice || "listed";
-      const majorLabel = injury.major_concern || position === "QB" ? " Major availability concern." : "";
-      return `${injury.player_name} (${position}) — ${practiceLabel} on latest practice report.${majorLabel}`;
-    }
-
-    const details = injuryName ? ` with ${injuryName.toLowerCase()}` : "";
-    if (status === "OUT" || status === "DOUBTFUL" || status === "QUESTIONABLE") {
-      return `${injury.player_name} (${position}) — ${status}${details}.`;
-    }
-
-    if (practice === "DNP") return `${injury.player_name} (${position}) — DNP${details}.`;
-    if (practice === "LIMITED") return `${injury.player_name} (${position}) — limited${details}.`;
-    return `${injury.player_name} (${position}) — listed on the latest injury report${details}.`;
+    return `${injury.player_name} (${injury.position}) — ${injury.injury}; ${statusText}.`;
   }
 
   function gameBetResearch(
@@ -1118,27 +1104,27 @@ const [cfbError, setCfbError] =
       .sort((a, b) => injuryPriority(b) - injuryPriority(a));
 
     const major = (x: NFLInjury) => {
-      if (x.major_concern === true) return true;
       const status = String(x.game_status || "").toUpperCase();
       const practice = String(x.practice_status || "").toUpperCase();
-      const position = String(x.position || "").toUpperCase();
       return (
+        x.position === "QB" ||
         status === "OUT" ||
         status === "DOUBTFUL" ||
         status === "QUESTIONABLE" ||
-        (position === "QB" && practice === "DNP") ||
+        practice.includes("DID NOT") ||
+        practice === "DNP" ||
         injuryPriority(x) >= 55
       );
     };
 
     const cons = [
-      ...teamInjuries.filter(major).slice(0, 3).map((x) => injuryText(x)),
+      ...teamInjuries.filter(major).slice(0, 3).map((x) => `Injury concern: ${injuryText(x)}`),
       ...baseCons,
     ].slice(0, 5);
 
     const pros = [
       ...basePros,
-      ...opponentInjuries.filter(major).slice(0, 2).map((x) => `Opponent: ${injuryText(x)}`),
+      ...opponentInjuries.filter(major).slice(0, 2).map((x) => `Opponent injury: ${injuryText(x)}`),
     ].slice(0, 5);
 
     return { pros, cons };
@@ -1516,35 +1502,17 @@ const [cfbError, setCfbError] =
     odds: string | null;
     score: number;
     detail: string;
+    logo_teams: string[];
+    is_player_prop: boolean;
   };
 
-  // Fixed twice-weekly editions:
-  // Monday edition = Monday through Wednesday
-  // Thursday edition = Thursday through Sunday
-  // The active edition changes only when Thursday or Monday begins.
+  // Rolling 96-hour board. This matches the copy shown to users and
+  // prevents Thursday-Sunday NFL games/props from disappearing on Mon-Wed.
   const editionNow = new Date();
-  const editionDay = editionNow.getDay(); // Sun=0, Mon=1 ... Sat=6
-
   const editionStart = new Date(editionNow);
-  editionStart.setHours(0, 0, 0, 0);
+  const editionEnd = new Date(editionNow.getTime() + 96 * 60 * 60 * 1000);
 
-  if (editionDay === 0) {
-    // Sunday belongs to the Thursday edition.
-    editionStart.setDate(editionStart.getDate() - 3);
-  } else if (editionDay >= 1 && editionDay <= 3) {
-    // Monday-Wednesday: move back to Monday.
-    editionStart.setDate(editionStart.getDate() - (editionDay - 1));
-  } else {
-    // Thursday-Saturday: move back to Thursday.
-    editionStart.setDate(editionStart.getDate() - (editionDay - 4));
-  }
-
-  const isMondayEdition = editionStart.getDay() === 1;
-  const editionEnd = new Date(editionStart);
-  editionEnd.setDate(editionEnd.getDate() + (isMondayEdition ? 2 : 3));
-  editionEnd.setHours(23, 59, 59, 999);
-
-  const editionLabel = isMondayEdition ? "MONDAY EDITION" : "THURSDAY EDITION";
+  const editionLabel = "CURRENT 96-HOUR BOARD";
   const editionDateRange = `${new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
@@ -1559,7 +1527,6 @@ const [cfbError, setCfbError] =
     return (
       Number.isFinite(time) &&
       time > nowMs &&
-      time >= editionStart.getTime() &&
       time <= editionEnd.getTime()
     );
   };
@@ -1583,6 +1550,37 @@ const [cfbError, setCfbError] =
 
     if (!isInEditionWindow(startTime)) return;
 
+    const [awayTeam, homeTeam] = candidate.matchup.split(" @ ").map((value) => value.trim());
+    let logoTeams = candidate.team ? [candidate.team] : [awayTeam, homeTeam].filter(Boolean);
+    let crossSportScore = candidate.score;
+
+    if (candidate.market_type === "passing_prop") {
+      const prop = (nflPlayerProps?.parlay_pool || []).find(
+        (item) => `prop-${item.event_id}-${item.player_id}-${item.provider_market}` === candidate.event_id
+      );
+      const opponent = String(prop?.research?.opponent || "").trim().toUpperCase();
+      const awayKey = String(awayTeam || "").toUpperCase();
+      const homeKey = String(homeTeam || "").toUpperCase();
+      const playerTeam =
+        opponent && opponent === awayKey ? homeTeam :
+        opponent && opponent === homeKey ? awayTeam :
+        null;
+
+      logoTeams = playerTeam ? [playerTeam] : [awayTeam, homeTeam].filter(Boolean);
+
+      const propGradeScore =
+        candidate.grade === "A+" ? 96 :
+        candidate.grade === "A" ? 91 :
+        candidate.grade === "B+" ? 85 :
+        candidate.grade === "B" ? 79 : 70;
+
+      crossSportScore = propGradeScore + Math.min(Math.abs(candidate.difference || 0), 10) * 0.5;
+    } else if (candidate.market_type === "moneyline") {
+      crossSportScore = 72 + Math.min(Math.abs(candidate.projected_margin || 0), 14) * 1.4;
+    } else {
+      crossSportScore = 70 + Math.min(Math.abs(candidate.difference || 0), 10) * 2.2;
+    }
+
     crossSportCandidates.push({
       id: `NFL-${candidate.event_id}`,
       sport: "NFL",
@@ -1591,7 +1589,9 @@ const [cfbError, setCfbError] =
       display_bet: candidate.display_bet,
       matchup: candidate.matchup,
       odds: candidate.odds,
-      score: candidate.score,
+      score: crossSportScore,
+      logo_teams: logoTeams,
+      is_player_prop: candidate.market_type === "passing_prop",
       detail:
         candidate.market_type === "passing_prop"
           ? `${candidate.grade || candidate.review || "RDG"} • ${candidate.prop_market || "Player Prop"}`
@@ -1630,6 +1630,8 @@ const [cfbError, setCfbError] =
       matchup: `${game.away_team} @ ${game.home_team}`,
       odds,
       score: edge * 10 + signalBonus,
+      logo_teams: [team],
+      is_player_prop: false,
       detail: `${game.rdg.signal} • ${edge.toFixed(1)} pt model/market difference`,
     });
   });
@@ -1672,6 +1674,8 @@ const [cfbError, setCfbError] =
             matchup: `${game.away_team} @ ${game.home_team}`,
             odds,
             score: modelProbability + Math.max(0, edge) * 3,
+            logo_teams: [team],
+            is_player_prop: false,
             detail: `Model ${modelProbability.toFixed(1)}% • ${edge.toFixed(1)}% vs market`,
           });
         }
@@ -1708,6 +1712,8 @@ const [cfbError, setCfbError] =
             matchup: `${game.away_team} @ ${game.home_team}`,
             odds,
             score: modelProbability + edge * 3,
+            logo_teams: [game.away_team, game.home_team],
+            is_player_prop: false,
             detail: `Experimental total review • ${edge.toFixed(1)}% vs market`,
           });
         }
@@ -1757,6 +1763,8 @@ const [cfbError, setCfbError] =
       matchup: game.matchup,
       odds: odds ?? null,
       score: modelProbability + edge * 3 + signalBonus,
+      logo_teams: [team],
+      is_player_prop: false,
       detail: `${game.signal} • Model ${modelProbability.toFixed(1)}%`,
     });
   });
@@ -1767,6 +1775,7 @@ const [cfbError, setCfbError] =
     const selected: CrossSportCandidate[] = [];
     const usedEvents = new Set<string>();
     const sportCounts = new Map<string, number>();
+    const hasQualifyingPlayerProp = crossSportCandidates.some((candidate) => candidate.is_player_prop);
 
     const ranked = crossSportCandidates
       .map((candidate, index) => ({
@@ -1776,13 +1785,31 @@ const [cfbError, setCfbError] =
       .sort((a, b) => b.baseRank - a.baseRank);
 
     while (selected.length < count) {
-      const available = ranked
-        .filter(({ candidate }) => !usedEvents.has(candidate.event_key))
+      const remainingSlots = count - selected.length;
+      const alreadyHasPlayerProp = selected.some((candidate) => candidate.is_player_prop);
+
+      let eligible = ranked.filter(
+        ({ candidate }) => !usedEvents.has(candidate.event_key)
+      );
+
+      // If a qualifying player prop exists, reserve the final open slot for one.
+      // This keeps props represented without forcing weak/PASS props onto a card.
+      if (
+        hasQualifyingPlayerProp &&
+        !alreadyHasPlayerProp &&
+        remainingSlots === 1
+      ) {
+        const propOptions = eligible.filter(({ candidate }) => candidate.is_player_prop);
+        if (propOptions.length > 0) eligible = propOptions;
+      }
+
+      const available = eligible
         .map(({ candidate, baseRank }) => ({
           candidate,
           adjusted:
             baseRank -
-            (sportCounts.get(candidate.sport) || 0) * 8,
+            (sportCounts.get(candidate.sport) || 0) * 18 +
+            (candidate.is_player_prop && !alreadyHasPlayerProp ? 5 : 0),
         }))
         .sort((a, b) => b.adjusted - a.adjusted);
 
@@ -1949,9 +1976,18 @@ const [cfbError, setCfbError] =
                         {selections.map((pick, index) => (
                           <div key={pick.id} className="rounded-xl border border-white/10 bg-black/25 p-4">
                             <div className="flex items-center justify-between gap-3">
-                              <span className="rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-black text-emerald-300">
-                                {pick.sport}
-                              </span>
+                              <div className="flex items-center gap-2">
+                                <div className="flex -space-x-1">
+                                  {pick.logo_teams.slice(0, 2).map((team) => (
+                                    <div key={`${pick.id}-${team}`} className="rounded-full bg-[#071019] p-0.5">
+                                      <TeamLogo sport={pick.sport} team={team} />
+                                    </div>
+                                  ))}
+                                </div>
+                                <span className="rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-black text-emerald-300">
+                                  {pick.is_player_prop ? `${pick.sport} PROP` : pick.sport}
+                                </span>
+                              </div>
                               <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
                                 LEG {index + 1}
                               </span>
