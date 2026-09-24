@@ -805,8 +805,8 @@ export default function Home() {
   const [nflInjuries, setNflInjuries] =
     useState<NFLInjuriesResponse | null>(null);
 const [activeSport, setActiveSport] =
-  const [parlayCountdown, setParlayCountdown] = useState("00:00:00");
   useState<"ALL" | "NFL" | "CFB" | "MLB" | "NHL" | "NBA">("NFL");
+const [parlayCountdown, setParlayCountdown] = useState("00:00:00");
 
 const [cfb, setCfb] =
   useState<CFBAnalysis | null>(null);
