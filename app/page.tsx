@@ -1895,6 +1895,53 @@ const [cfbError, setCfbError] =
   const crossSportFour = diversifiedCrossSportCards[2] || [];
   const crossSportFive = diversifiedCrossSportCards[3] || [];
 
+  const heroConfig = {
+    ALL: {
+      eyebrow: "RDG SPORTS ANALYTICS",
+      title: "Better data. Smarter parlays.",
+      description: "Explore RDG model picks, player props, current sportsbook lines, and automatically built parlays without digging through a wall of data.",
+      background: "radial-gradient(circle at 12% 15%,rgba(16,185,129,0.16),transparent 30%),radial-gradient(circle at 78% 20%,rgba(30,64,175,0.24),transparent 34%),linear-gradient(135deg,#07131d,#071019 55%,#061018)",
+      watermark: "RDG",
+    },
+    NFL: {
+      eyebrow: "RDG NFL ANALYTICS",
+      title: "NFL Picks & Player Props",
+      description: "NFL model picks, player props, sportsbook lines, matchup research, injuries, and RDG-built parlays in one place.",
+      background: "linear-gradient(180deg,rgba(3,7,18,.12),rgba(2,6,23,.78)),repeating-linear-gradient(90deg,transparent 0 9.6%,rgba(255,255,255,.04) 9.6% 10%),radial-gradient(ellipse at 50% 110%,rgba(34,197,94,.30),transparent 45%),linear-gradient(135deg,#07130c,#07101d 60%,#101827)",
+      watermark: "NFL",
+    },
+    CFB: {
+      eyebrow: "RDG COLLEGE FOOTBALL",
+      title: "College Football Model Picks",
+      description: "College football spreads, moneylines, model edges, and qualifying RDG parlay combinations.",
+      background: "linear-gradient(180deg,rgba(4,7,15,.12),rgba(4,8,18,.82)),repeating-linear-gradient(90deg,transparent 0 9.6%,rgba(255,255,255,.035) 9.6% 10%),radial-gradient(ellipse at 50% 110%,rgba(245,158,11,.26),transparent 45%),linear-gradient(135deg,#171006,#0a111b 58%,#15111f)",
+      watermark: "CFB",
+    },
+    MLB: {
+      eyebrow: "RDG MLB ANALYTICS",
+      title: "MLB Picks & Matchup Analysis",
+      description: "MLB model picks, current lines, game analysis, and the strongest qualifying RDG opportunities.",
+      background: "radial-gradient(ellipse at 50% 112%,rgba(34,197,94,.18),transparent 44%),radial-gradient(circle at 78% 16%,rgba(59,130,246,.18),transparent 28%),linear-gradient(180deg,#07111b,#071018 55%,#10140d)",
+      watermark: "MLB",
+    },
+    NHL: {
+      eyebrow: "RDG NHL ANALYTICS",
+      title: "NHL Picks & Model Analysis",
+      description: "NHL moneylines, model-ready matchups, current sportsbook lines, and RDG review signals.",
+      background: "linear-gradient(180deg,rgba(3,7,18,.10),rgba(2,6,23,.78)),repeating-linear-gradient(90deg,transparent 0 24.7%,rgba(186,230,253,.10) 24.7% 25%),radial-gradient(ellipse at 50% 110%,rgba(186,230,253,.28),transparent 48%),linear-gradient(135deg,#07151e,#081426 55%,#101827)",
+      watermark: "NHL",
+    },
+    NBA: {
+      eyebrow: "RDG NBA ANALYTICS",
+      title: "NBA — Coming Soon",
+      description: "NBA model picks, player props, and RDG parlay analysis are being prepared for a future release.",
+      background: "radial-gradient(circle at 78% 30%,rgba(249,115,22,.24),transparent 28%),linear-gradient(135deg,#160c07,#0b101b 58%,#17100b)",
+      watermark: "NBA",
+    },
+  } as const;
+
+  const activeHero = heroConfig[activeSport];
+
   return (
     <main className="min-h-screen bg-[#050b10] text-white">
       <header className="sticky top-0 z-40 border-b border-white/10 bg-[#071019]/95 backdrop-blur-xl">
@@ -1926,11 +1973,18 @@ const [cfbError, setCfbError] =
       </header>
 
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
-        <section className="relative mb-6 overflow-hidden rounded-2xl border border-white/10 bg-[radial-gradient(circle_at_78%_20%,rgba(30,64,175,0.22),transparent_34%),radial-gradient(circle_at_12%_15%,rgba(16,185,129,0.12),transparent_30%),linear-gradient(135deg,#07131d_0%,#071019_55%,#061018_100%)] px-6 py-8 shadow-[0_22px_60px_rgba(0,0,0,0.28)] sm:px-8 sm:py-10">
+        <section
+          className="relative mb-6 overflow-hidden rounded-2xl border border-white/10 px-6 py-8 shadow-[0_22px_60px_rgba(0,0,0,0.28)] transition-all duration-500 sm:px-8 sm:py-10"
+          style={{ background: activeHero.background }}
+        >
+          <div aria-hidden="true" className="pointer-events-none absolute -right-4 top-1/2 -translate-y-1/2 select-none text-[9rem] font-black italic tracking-[-0.08em] text-white/[0.035] transition-all duration-500 sm:text-[13rem] lg:text-[16rem]">
+            {activeHero.watermark}
+          </div>
+          <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-emerald-400/35 to-transparent" />
           <div className="relative z-10 max-w-3xl">
-            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-emerald-400">RDG SPORTS ANALYTICS</p>
-            <h1 className="mt-3 text-4xl font-black tracking-tight text-white sm:text-5xl">Better data. Smarter parlays.</h1>
-            <p className="mt-3 max-w-2xl text-base text-slate-400 sm:text-lg">Explore RDG model picks, player props, current sportsbook lines, and automatically built parlays without digging through a wall of data.</p>
+            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-emerald-400">{activeHero.eyebrow}</p>
+            <h1 className="mt-3 text-4xl font-black tracking-tight text-white sm:text-5xl">{activeHero.title}</h1>
+            <p className="mt-3 max-w-2xl text-base text-slate-400 sm:text-lg">{activeHero.description}</p>
           </div>
 
           <div className="relative z-10 mt-7 flex gap-2 overflow-x-auto pb-1">
