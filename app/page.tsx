@@ -1535,7 +1535,7 @@ const [cfbError, setCfbError] =
   const editionStart = new Date(editionNow);
   const editionEnd = new Date(editionNow.getTime() + 96 * 60 * 60 * 1000);
 
-  const editionLabel = "CURRENT 96-HOUR BOARD <span className="mx-2 text-amber-300/50">•</span> RESET IN {parlayCountdown}";
+  const editionLabel = "CURRENT 96-HOUR BOARD";
   const editionDateRange = `${new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
@@ -2114,7 +2114,7 @@ const [cfbError, setCfbError] =
               <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
                 <div>
                   <span className="inline-flex rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-amber-300">
-                    {editionLabel} • {editionDateRange}
+                    {editionLabel} <span className="mx-2 text-amber-300/50">•</span> RESET IN {parlayCountdown} • {editionDateRange}
                   </span>
                   <h2 className="mt-4 text-3xl font-black tracking-tight text-white sm:text-4xl">
                     🏆 Best Parlays Across All Sports
