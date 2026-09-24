@@ -1900,45 +1900,107 @@ const [cfbError, setCfbError] =
       eyebrow: "RDG SPORTS ANALYTICS",
       title: "Better data. Smarter parlays.",
       description: "Explore RDG model picks, player props, current sportsbook lines, and automatically built parlays without digging through a wall of data.",
-      background: "radial-gradient(circle at 12% 15%,rgba(16,185,129,0.16),transparent 30%),radial-gradient(circle at 78% 20%,rgba(30,64,175,0.24),transparent 34%),linear-gradient(135deg,#07131d,#071019 55%,#061018)",
-      watermark: "RDG",
+      scene: "ALL",
+      accent: "emerald",
     },
     NFL: {
       eyebrow: "RDG NFL ANALYTICS",
       title: "NFL Picks & Player Props",
-      description: "NFL model picks, player props, sportsbook lines, matchup research, injuries, and RDG-built parlays in one place.",
-      background: "linear-gradient(180deg,rgba(3,7,18,.12),rgba(2,6,23,.78)),repeating-linear-gradient(90deg,transparent 0 9.6%,rgba(255,255,255,.04) 9.6% 10%),radial-gradient(ellipse at 50% 110%,rgba(34,197,94,.30),transparent 45%),linear-gradient(135deg,#07130c,#07101d 60%,#101827)",
-      watermark: "NFL",
+      description: "Data-driven NFL picks, player props, sportsbook lines, injuries, and matchup analysis powered by RDG.",
+      scene: "FOOTBALL",
+      accent: "emerald",
     },
     CFB: {
       eyebrow: "RDG COLLEGE FOOTBALL",
       title: "College Football Model Picks",
-      description: "College football spreads, moneylines, model edges, and qualifying RDG parlay combinations.",
-      background: "linear-gradient(180deg,rgba(4,7,15,.12),rgba(4,8,18,.82)),repeating-linear-gradient(90deg,transparent 0 9.6%,rgba(255,255,255,.035) 9.6% 10%),radial-gradient(ellipse at 50% 110%,rgba(245,158,11,.26),transparent 45%),linear-gradient(135deg,#171006,#0a111b 58%,#15111f)",
-      watermark: "CFB",
+      description: "In-depth CFB analysis, matchup breakdowns, sportsbook lines, and model-driven picks for the biggest games.",
+      scene: "COLLEGE",
+      accent: "emerald",
     },
     MLB: {
       eyebrow: "RDG MLB ANALYTICS",
       title: "MLB Picks & Matchup Analysis",
-      description: "MLB model picks, current lines, game analysis, and the strongest qualifying RDG opportunities.",
-      background: "radial-gradient(ellipse at 50% 112%,rgba(34,197,94,.18),transparent 44%),radial-gradient(circle at 78% 16%,rgba(59,130,246,.18),transparent 28%),linear-gradient(180deg,#07111b,#071018 55%,#10140d)",
-      watermark: "MLB",
+      description: "Model-driven MLB picks, totals, current sportsbook lines, and matchup insights using the latest RDG data.",
+      scene: "BASEBALL",
+      accent: "emerald",
     },
     NHL: {
       eyebrow: "RDG NHL ANALYTICS",
       title: "NHL Picks & Model Analysis",
       description: "NHL moneylines, model-ready matchups, current sportsbook lines, and RDG review signals.",
-      background: "linear-gradient(180deg,rgba(3,7,18,.10),rgba(2,6,23,.78)),repeating-linear-gradient(90deg,transparent 0 24.7%,rgba(186,230,253,.10) 24.7% 25%),radial-gradient(ellipse at 50% 110%,rgba(186,230,253,.28),transparent 48%),linear-gradient(135deg,#07151e,#081426 55%,#101827)",
-      watermark: "NHL",
+      scene: "HOCKEY",
+      accent: "cyan",
     },
     NBA: {
       eyebrow: "RDG NBA ANALYTICS",
       title: "NBA — Coming Soon",
-      description: "NBA model picks, player props, and RDG parlay analysis are being prepared for a future release.",
-      background: "radial-gradient(circle at 78% 30%,rgba(249,115,22,.24),transparent 28%),linear-gradient(135deg,#160c07,#0b101b 58%,#17100b)",
-      watermark: "NBA",
+      description: "NBA model picks, player props, and matchup analysis are coming soon to RDG.",
+      scene: "BASKETBALL",
+      accent: "orange",
     },
   } as const;
+
+  function SportHeroScene({ scene }: { scene: string }) {
+    if (scene === "FOOTBALL" || scene === "COLLEGE") {
+      return (
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_-8%,rgba(191,219,254,0.28),transparent_30%),radial-gradient(circle_at_12%_8%,rgba(255,255,255,0.14),transparent_11%),radial-gradient(circle_at_88%_8%,rgba(255,255,255,0.14),transparent_11%),linear-gradient(180deg,#07101a_0%,#07131a_43%,#0b2817_100%)]" />
+          <div className="absolute inset-x-0 bottom-0 h-[48%] origin-bottom [transform:perspective(700px)_rotateX(58deg)] bg-[repeating-linear-gradient(90deg,transparent_0_9.65%,rgba(255,255,255,0.15)_9.65%_10%),repeating-linear-gradient(0deg,transparent_0_18%,rgba(255,255,255,0.12)_18%_19%),linear-gradient(90deg,#123b22,#0b4a27_50%,#123b22)] opacity-80" />
+          <div className="absolute bottom-[6%] left-1/2 h-[38%] w-[2px] -translate-x-1/2 bg-white/35 shadow-[0_0_18px_rgba(255,255,255,0.25)]" />
+          <div className="absolute inset-0 bg-gradient-to-r from-[#03070d]/80 via-[#03070d]/25 to-[#03070d]/65" />
+        </div>
+      );
+    }
+
+    if (scene === "BASEBALL") {
+      return (
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_5%,rgba(255,255,255,0.16),transparent_10%),radial-gradient(circle_at_82%_5%,rgba(255,255,255,0.16),transparent_10%),linear-gradient(180deg,#111425_0%,#15162a_42%,#142b19_100%)]" />
+          <div className="absolute -bottom-[43%] left-1/2 aspect-square w-[74%] -translate-x-1/2 rotate-45 rounded-[16%] border-[2px] border-white/25 bg-[linear-gradient(135deg,#8b5a2b_0_20%,#1d5429_20%_80%,#8b5a2b_80%)] opacity-75 shadow-[0_0_70px_rgba(34,197,94,0.12)]" />
+          <div className="absolute bottom-[5%] left-1/2 h-[38%] w-[2px] origin-bottom -translate-x-1/2 rotate-[45deg] bg-white/25" />
+          <div className="absolute bottom-[5%] left-1/2 h-[38%] w-[2px] origin-bottom -translate-x-1/2 -rotate-[45deg] bg-white/25" />
+          <div className="absolute inset-0 bg-gradient-to-r from-[#03070d]/85 via-[#03070d]/30 to-[#03070d]/58" />
+        </div>
+      );
+    }
+
+    if (scene === "HOCKEY") {
+      return (
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_0%,rgba(125,211,252,0.25),transparent_35%),linear-gradient(180deg,#071322_0%,#0a1a2c_42%,#b9ddea_100%)]" />
+          <div className="absolute inset-x-[12%] bottom-[-18%] h-[64%] rounded-[48%] border-2 border-red-400/25 bg-sky-50/55 shadow-[inset_0_0_50px_rgba(14,165,233,0.16)] [transform:perspective(650px)_rotateX(55deg)]" />
+          <div className="absolute bottom-[5%] left-1/2 h-[38%] w-[3px] -translate-x-1/2 bg-red-400/35" />
+          <div className="absolute bottom-[5%] left-[36%] h-[38%] w-[2px] bg-blue-500/30" />
+          <div className="absolute bottom-[5%] right-[36%] h-[38%] w-[2px] bg-blue-500/30" />
+          <div className="absolute bottom-[17%] left-1/2 aspect-square w-24 -translate-x-1/2 rounded-full border-2 border-blue-500/30" />
+          <div className="absolute inset-0 bg-gradient-to-r from-[#020711]/88 via-[#020711]/32 to-[#020711]/58" />
+        </div>
+      );
+    }
+
+    if (scene === "BASKETBALL") {
+      return (
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_78%_8%,rgba(249,115,22,0.26),transparent_24%),linear-gradient(180deg,#150b08_0%,#17100d_42%,#6e3a16_100%)]" />
+          <div className="absolute inset-x-[13%] bottom-[-32%] h-[78%] rounded-[12%] border-2 border-orange-100/20 bg-[repeating-linear-gradient(90deg,rgba(255,255,255,0.025)_0_2px,transparent_2px_34px),linear-gradient(90deg,#7b451f,#9a5a29_50%,#7b451f)] opacity-80 [transform:perspective(650px)_rotateX(55deg)]" />
+          <div className="absolute bottom-[4%] left-1/2 h-[43%] w-[2px] -translate-x-1/2 bg-orange-50/25" />
+          <div className="absolute bottom-[12%] left-1/2 aspect-square w-28 -translate-x-1/2 rounded-full border-2 border-orange-50/25" />
+          <div className="absolute right-[13%] top-[15%] h-28 w-1 bg-white/20">
+            <div className="absolute -left-20 top-0 h-16 w-20 border-2 border-white/25" />
+            <div className="absolute -left-[54px] top-14 h-3 w-12 rounded-[50%] border-2 border-orange-400/50" />
+          </div>
+          <div className="absolute inset-0 bg-gradient-to-r from-[#050507]/88 via-[#050507]/32 to-[#050507]/58" />
+        </div>
+      );
+    }
+
+    return (
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_12%_15%,rgba(16,185,129,0.18),transparent_30%),radial-gradient(circle_at_78%_20%,rgba(30,64,175,0.28),transparent_34%),linear-gradient(135deg,#07131d,#071019_55%,#061018)]" />
+        <div className="absolute -right-4 top-1/2 -translate-y-1/2 select-none text-[9rem] font-black italic tracking-[-0.08em] text-white/[0.035] sm:text-[13rem] lg:text-[16rem]">RDG</div>
+      </div>
+    );
+  }
 
   const activeHero = heroConfig[activeSport];
 
@@ -1973,13 +2035,8 @@ const [cfbError, setCfbError] =
       </header>
 
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
-        <section
-          className="relative mb-6 overflow-hidden rounded-2xl border border-white/10 px-6 py-8 shadow-[0_22px_60px_rgba(0,0,0,0.28)] transition-all duration-500 sm:px-8 sm:py-10"
-          style={{ background: activeHero.background }}
-        >
-          <div aria-hidden="true" className="pointer-events-none absolute -right-4 top-1/2 -translate-y-1/2 select-none text-[9rem] font-black italic tracking-[-0.08em] text-white/[0.035] transition-all duration-500 sm:text-[13rem] lg:text-[16rem]">
-            {activeHero.watermark}
-          </div>
+        <section className="relative mb-6 overflow-hidden rounded-2xl border border-white/10 px-6 py-8 shadow-[0_22px_60px_rgba(0,0,0,0.28)] transition-all duration-500 sm:px-8 sm:py-10">
+          <SportHeroScene scene={activeHero.scene} />
           <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-emerald-400/35 to-transparent" />
           <div className="relative z-10 max-w-3xl">
             <p className="text-[10px] font-black uppercase tracking-[0.24em] text-emerald-400">{activeHero.eyebrow}</p>
