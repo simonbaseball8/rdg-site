@@ -1771,63 +1771,129 @@ const [cfbError, setCfbError] =
 
   crossSportCandidates.sort((a, b) => b.score - a.score);
 
-  function buildCrossSportParlay(count: number, offset = 0) {
-    const selected: CrossSportCandidate[] = [];
-    const usedEvents = new Set<string>();
-    const sportCounts = new Map<string, number>();
-    const hasQualifyingPlayerProp = crossSportCandidates.some((candidate) => candidate.is_player_prop);
+  function buildDiversifiedCrossSportParlays() {
+    const cardSizes = [2, 3, 4, 5];
+    const globalPickUsage = new Map<string, number>();
+    const globalSportUsage = new Map<string, number>();
 
-    const ranked = crossSportCandidates
-      .map((candidate, index) => ({
-        candidate,
-        baseRank: candidate.score - Math.abs(index - offset) * 0.15,
-      }))
-      .sort((a, b) => b.baseRank - a.baseRank);
-
-    while (selected.length < count) {
-      const remainingSlots = count - selected.length;
-      const alreadyHasPlayerProp = selected.some((candidate) => candidate.is_player_prop);
-
-      let eligible = ranked.filter(
-        ({ candidate }) => !usedEvents.has(candidate.event_key)
+    return cardSizes.map((count, cardIndex) => {
+      const selected: CrossSportCandidate[] = [];
+      const usedEvents = new Set<string>();
+      const localSportUsage = new Map<string, number>();
+      const hasQualifyingPlayerProp = crossSportCandidates.some(
+        (candidate) => candidate.is_player_prop
       );
 
-      // If a qualifying player prop exists, reserve the final open slot for one.
-      // This keeps props represented without forcing weak/PASS props onto a card.
-      if (
-        hasQualifyingPlayerProp &&
-        !alreadyHasPlayerProp &&
-        remainingSlots === 1
-      ) {
-        const propOptions = eligible.filter(({ candidate }) => candidate.is_player_prop);
-        if (propOptions.length > 0) eligible = propOptions;
+      while (selected.length < count) {
+        const remainingSlots = count - selected.length;
+        const alreadyHasPlayerProp = selected.some(
+          (candidate) => candidate.is_player_prop
+        );
+
+        let available = crossSportCandidates.filter((candidate) => {
+          if (usedEvents.has(candidate.event_key)) return false;
+
+          const pickUsage = globalPickUsage.get(candidate.id) || 0;
+          const unusedAlternatives = crossSportCandidates.filter(
+            (other) =>
+              !usedEvents.has(other.event_key) &&
+              (globalPickUsage.get(other.id) || 0) === 0
+          );
+
+          // Avoid putting the same wager on three different cards when
+          // enough unused qualifying alternatives are available.
+          if (pickUsage >= 2 && unusedAlternatives.length >= remainingSlots) {
+            return false;
+          }
+
+          return true;
+        });
+
+        // Keep a qualifying player prop represented on 3+ leg cards.
+        // This never promotes PASS props because those never enter this pool.
+        if (
+          count >= 3 &&
+          hasQualifyingPlayerProp &&
+          !alreadyHasPlayerProp &&
+          remainingSlots === 1
+        ) {
+          const propOptions = available.filter(
+            (candidate) => candidate.is_player_prop
+          );
+          if (propOptions.length > 0) available = propOptions;
+        }
+
+        if (available.length === 0) break;
+
+        const ranked = available
+          .map((candidate) => {
+            const pickUsage = globalPickUsage.get(candidate.id) || 0;
+            const localSportCount = localSportUsage.get(candidate.sport) || 0;
+            const globalSportCount = globalSportUsage.get(candidate.sport) || 0;
+
+            const repeatPenalty =
+              pickUsage === 0 ? 0 :
+              pickUsage === 1 ? 42 :
+              100;
+
+            const sportPenalty =
+              localSportCount * 20 +
+              globalSportCount * 2.5;
+
+            const propBonus =
+              candidate.is_player_prop &&
+              count >= 3 &&
+              !alreadyHasPlayerProp
+                ? 7
+                : 0;
+
+            // Deterministic rotation prevents equal-score cards from cloning
+            // each other while keeping results stable between refreshes.
+            const candidateIndex = crossSportCandidates.indexOf(candidate);
+            const rotation =
+              ((candidateIndex + cardIndex * 3) % 11) * 0.12;
+
+            return {
+              candidate,
+              adjusted:
+                candidate.score -
+                repeatPenalty -
+                sportPenalty +
+                propBonus -
+                rotation,
+            };
+          })
+          .sort((a, b) => b.adjusted - a.adjusted);
+
+        const pick = ranked[0].candidate;
+        selected.push(pick);
+        usedEvents.add(pick.event_key);
+        localSportUsage.set(
+          pick.sport,
+          (localSportUsage.get(pick.sport) || 0) + 1
+        );
       }
 
-      const available = eligible
-        .map(({ candidate, baseRank }) => ({
-          candidate,
-          adjusted:
-            baseRank -
-            (sportCounts.get(candidate.sport) || 0) * 18 +
-            (candidate.is_player_prop && !alreadyHasPlayerProp ? 5 : 0),
-        }))
-        .sort((a, b) => b.adjusted - a.adjusted);
+      selected.forEach((pick) => {
+        globalPickUsage.set(
+          pick.id,
+          (globalPickUsage.get(pick.id) || 0) + 1
+        );
+        globalSportUsage.set(
+          pick.sport,
+          (globalSportUsage.get(pick.sport) || 0) + 1
+        );
+      });
 
-      if (available.length === 0) break;
-
-      const pick = available[0].candidate;
-      selected.push(pick);
-      usedEvents.add(pick.event_key);
-      sportCounts.set(pick.sport, (sportCounts.get(pick.sport) || 0) + 1);
-    }
-
-    return selected;
+      return selected;
+    });
   }
 
-  const crossSportBest = buildCrossSportParlay(2, 0);
-  const crossSportThree = buildCrossSportParlay(3, 1);
-  const crossSportFour = buildCrossSportParlay(4, 2);
-  const crossSportFive = buildCrossSportParlay(5, 3);
+  const diversifiedCrossSportCards = buildDiversifiedCrossSportParlays();
+  const crossSportBest = diversifiedCrossSportCards[0] || [];
+  const crossSportThree = diversifiedCrossSportCards[1] || [];
+  const crossSportFour = diversifiedCrossSportCards[2] || [];
+  const crossSportFive = diversifiedCrossSportCards[3] || [];
 
   return (
     <main className="min-h-screen bg-[#050b10] text-white">
@@ -1945,9 +2011,9 @@ const [cfbError, setCfbError] =
               <div className="mt-6 grid gap-5 lg:grid-cols-2">
                 {[
                   ["BEST 2-LEG", "Strongest cross-sport combination", crossSportBest, 2],
-                  ["BALANCED 3-LEG", "Diversified across qualifying sports", crossSportThree, 3],
-                  ["4-LEG PARLAY", "Wider edition model mix", crossSportFour, 4],
-                  ["5-LEG • HIGHER RISK", "Extended edition model mix", crossSportFive, 5],
+                  ["BALANCED 3-LEG", "Different mix of qualifying plays", crossSportThree, 3],
+                  ["4-LEG PARLAY", "Fresh picks across qualifying sports", crossSportFour, 4],
+                  ["5-LEG • HIGHER RISK", "Broader cross-sport combination", crossSportFive, 5],
                 ].map(([title, subtitle, picks, required]) => {
                   const selections = picks as CrossSportCandidate[];
                   const needed = required as number;
