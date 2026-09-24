@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const maxDuration = 30;
 
-const VERSION = "3.0-official-nfl-injury-page";
+const VERSION = "3.1-official-nfl-clean-parser";
 const NFL_URL = "https://www.nfl.com/injuries/";
 
 type Injury = {
@@ -39,6 +39,10 @@ function cleanText(value: string): string {
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&")
     .replace(/&#39;/gi, "'")
+    .replace(/&#x27;/gi, "'")
+    .replace(/&#x2F;/gi, "/")
+    .replace(/&#47;/gi, "/")
+    .replace(/&apos;/gi, "'")
     .replace(/&quot;/gi, '"')
     .replace(/\s+/g, " ")
     .trim();
@@ -143,20 +147,27 @@ function parseOfficialNFL(html: string): Injury[] {
       // Player | Position | Injuries | Practice Status | Game Status
       const playerName = cells[0]?.trim() || "";
       const position = (cells[1] || "").trim().toUpperCase();
-      const injury = (cells[2] || "").trim() || "Injury report";
+      const injury = (cells[2] || "").trim();
       const practice = normalizePractice(cells[3] || "");
       const gameStatus = normalizeStatus(cells[4] || "");
 
       if (!playerName || !position) continue;
 
-      const current =
+      const hasGameDesignation =
         gameStatus === "OUT" ||
         gameStatus === "DOUBTFUL" ||
-        gameStatus === "QUESTIONABLE" ||
-        practice === "DNP" ||
-        practice === "LIMITED";
+        gameStatus === "QUESTIONABLE";
 
-      // Do not treat full-practice/no-designation entries as injury concerns.
+      const hasNamedInjury = injury.length > 0;
+      const hasPracticeConcern =
+        practice === "DNP" || practice === "LIMITED";
+
+      // A DNP/LIMITED row with a blank injury and no game designation can be
+      // rest, maintenance, or another non-injury reason. Do not tell RDG it is
+      // an injury unless NFL.com actually supplies an injury or designation.
+      const current =
+        hasGameDesignation || (hasNamedInjury && hasPracticeConcern);
+
       if (!current) continue;
 
       const imp = importance(position, gameStatus, practice);
@@ -324,7 +335,7 @@ export async function GET(request: Request) {
         parsed_html: true,
         fail_closed: true,
         note:
-          "Only current concerns are returned: OUT, DOUBTFUL, QUESTIONABLE, DNP, or LIMITED. Full-practice players with no designation are excluded.",
+          "Current concerns require an NFL game designation, or a named injury plus DNP/LIMITED practice status. Blank-injury maintenance/rest rows are excluded.",
       },
       generated_at: new Date().toISOString(),
     });
