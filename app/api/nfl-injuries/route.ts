@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const maxDuration = 30;
 
-const VERSION = "3.1-official-nfl-clean-parser";
+const VERSION = "3.2-official-nfl-tiered-concerns";
 const NFL_URL = "https://www.nfl.com/injuries/";
 
 type Injury = {
@@ -15,6 +15,9 @@ type Injury = {
   game_status: string;
   practice_status: string;
   current_injury: boolean;
+  concern_type: "CONFIRMED_INJURY" | "PRACTICE_CONCERN";
+  injury_confirmed: boolean;
+  major_concern: boolean;
   importance_score: number | null;
   importance_tier: string | null;
   source: "NFL.com";
@@ -162,13 +165,22 @@ function parseOfficialNFL(html: string): Injury[] {
       const hasPracticeConcern =
         practice === "DNP" || practice === "LIMITED";
 
-      // A DNP/LIMITED row with a blank injury and no game designation can be
-      // rest, maintenance, or another non-injury reason. Do not tell RDG it is
-      // an injury unless NFL.com actually supplies an injury or designation.
-      const current =
-        hasGameDesignation || (hasNamedInjury && hasPracticeConcern);
-
+      // Keep both confirmed injuries and broader practice concerns.
+      // A blank-injury DNP/LIMITED row is NOT labeled as a confirmed injury.
+      const current = hasGameDesignation || hasPracticeConcern;
       if (!current) continue;
+
+      const concern_type =
+        hasGameDesignation || hasNamedInjury
+          ? "CONFIRMED_INJURY"
+          : "PRACTICE_CONCERN";
+
+      const injury_confirmed = hasGameDesignation || hasNamedInjury;
+
+      const major_concern =
+        hasGameDesignation ||
+        (position === "QB" && practice === "DNP") ||
+        (hasNamedInjury && practice === "DNP");
 
       const imp = importance(position, gameStatus, practice);
 
@@ -180,6 +192,9 @@ function parseOfficialNFL(html: string): Injury[] {
         game_status: gameStatus,
         practice_status: practice,
         current_injury: true,
+        concern_type,
+        injury_confirmed,
+        major_concern,
         importance_score: imp.score,
         importance_tier: imp.tier,
         source: "NFL.com",
@@ -335,7 +350,7 @@ export async function GET(request: Request) {
         parsed_html: true,
         fail_closed: true,
         note:
-          "Current concerns require an NFL game designation, or a named injury plus DNP/LIMITED practice status. Blank-injury maintenance/rest rows are excluded.",
+          "Returns confirmed injuries plus practice concerns. Blank-injury DNP/LIMITED rows are labeled PRACTICE_CONCERN rather than confirmed injuries. QB DNP rows are flagged major_concern.",
       },
       generated_at: new Date().toISOString(),
     });
