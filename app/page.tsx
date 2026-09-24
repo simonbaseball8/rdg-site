@@ -332,6 +332,9 @@ type NFLInjury = {
   importance_score?: number | null;
   importance_tier?: string | null;
   current_injury?: boolean;
+  concern_type?: "CONFIRMED_INJURY" | "PRACTICE_CONCERN";
+  injury_confirmed?: boolean;
+  major_concern?: boolean;
 };
 
 type NFLInjuriesResponse = {
@@ -1080,13 +1083,24 @@ const [cfbError, setCfbError] =
 
   function injuryText(injury: NFLInjury) {
     const status = String(injury.game_status || "").toUpperCase();
-    const practice = String(injury.practice_status || "");
-    const statusText =
-      status && status !== "NO_DESIGNATION" && status !== "UNSPECIFIED"
-        ? status
-        : practice || "on the injury report";
+    const practice = String(injury.practice_status || "").toUpperCase();
+    const position = String(injury.position || "").toUpperCase();
+    const injuryName = String(injury.injury || "").trim();
 
-    return `${injury.player_name} (${injury.position}) — ${injury.injury}; ${statusText}.`;
+    if (injury.concern_type === "PRACTICE_CONCERN" || injury.injury_confirmed === false) {
+      const practiceLabel = practice === "DNP" ? "DNP" : practice === "LIMITED" ? "limited" : practice || "listed";
+      const majorLabel = injury.major_concern || position === "QB" ? " Major availability concern." : "";
+      return `${injury.player_name} (${position}) — ${practiceLabel} on latest practice report.${majorLabel}`;
+    }
+
+    const details = injuryName ? ` with ${injuryName.toLowerCase()}` : "";
+    if (status === "OUT" || status === "DOUBTFUL" || status === "QUESTIONABLE") {
+      return `${injury.player_name} (${position}) — ${status}${details}.`;
+    }
+
+    if (practice === "DNP") return `${injury.player_name} (${position}) — DNP${details}.`;
+    if (practice === "LIMITED") return `${injury.player_name} (${position}) — limited${details}.`;
+    return `${injury.player_name} (${position}) — listed on the latest injury report${details}.`;
   }
 
   function gameBetResearch(
@@ -1104,27 +1118,27 @@ const [cfbError, setCfbError] =
       .sort((a, b) => injuryPriority(b) - injuryPriority(a));
 
     const major = (x: NFLInjury) => {
+      if (x.major_concern === true) return true;
       const status = String(x.game_status || "").toUpperCase();
       const practice = String(x.practice_status || "").toUpperCase();
+      const position = String(x.position || "").toUpperCase();
       return (
-        x.position === "QB" ||
         status === "OUT" ||
         status === "DOUBTFUL" ||
         status === "QUESTIONABLE" ||
-        practice.includes("DID NOT") ||
-        practice === "DNP" ||
+        (position === "QB" && practice === "DNP") ||
         injuryPriority(x) >= 55
       );
     };
 
     const cons = [
-      ...teamInjuries.filter(major).slice(0, 3).map((x) => `Injury concern: ${injuryText(x)}`),
+      ...teamInjuries.filter(major).slice(0, 3).map((x) => injuryText(x)),
       ...baseCons,
     ].slice(0, 5);
 
     const pros = [
       ...basePros,
-      ...opponentInjuries.filter(major).slice(0, 2).map((x) => `Opponent injury: ${injuryText(x)}`),
+      ...opponentInjuries.filter(major).slice(0, 2).map((x) => `Opponent: ${injuryText(x)}`),
     ].slice(0, 5);
 
     return { pros, cons };
