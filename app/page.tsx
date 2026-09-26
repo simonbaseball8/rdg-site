@@ -309,68 +309,14 @@ export default function Home() {
                 </div>
               </div>
               <div className="hero-image">
-                <svg
-                  className="field-art"
-                  viewBox="0 0 640 400"
-                  aria-hidden="true"
-                >
-                  <defs>
-                    <linearGradient id="field-turf" x2="1" y2="1">
-                      <stop stopColor="#294f31" />
-                      <stop offset="1" stopColor="#14261c" />
-                    </linearGradient>
-                  </defs>
-                  <g transform="translate(310 130) rotate(-24) translate(-320 -200)">
-                    <rect
-                      x="50"
-                      y="20"
-                      width="560"
-                      height="330"
-                      rx="8"
-                      fill="url(#field-turf)"
-                      stroke="#a1c57e"
-                      strokeOpacity=".35"
-                    />
-                    {[120, 190, 260, 330, 400, 470, 540].map((x, i) => (
-                      <g key={x} stroke="#c4e89b" strokeOpacity=".23">
-                        <path d={`M${x} 20v330`} />
-                        <text
-                          x={x + 12}
-                          y="88"
-                          fill="#d1edb7"
-                          stroke="none"
-                          fillOpacity=".35"
-                          fontSize="22"
-                          fontFamily="monospace"
-                        >
-                          {[20, 30, 40, 50, 40, 30, 20][i]}
-                        </text>
-                        {[145, 155, 215, 225].map((y) => (
-                          <path
-                            key={y}
-                            d={`M${x - 22} ${y}h8 M${x + 15} ${y}h8`}
-                          />
-                        ))}
-                      </g>
-                    ))}
-                    <ellipse
-                      cx="330"
-                      cy="185"
-                      rx="49"
-                      ry="27"
-                      fill="#c9f578"
-                      fillOpacity=".08"
-                      stroke="#c9f578"
-                      strokeOpacity=".55"
-                    />
-                    <path
-                      d="M307 185h46m-35-7v14m12-14v14m12-14v14"
-                      stroke="#c9f578"
-                      strokeWidth="2"
-                      strokeOpacity=".8"
-                    />
-                  </g>
-                </svg>
+                <Image
+                  src="/rdg-stadium-hero.webp"
+                  alt="Football on stadium turf under the evening lights"
+                  fill
+                  sizes="(max-width: 700px) 100vw, 50vw"
+                  preload
+                  unoptimized
+                />
                 <div className="image-caption">
                   <span>THE RDG APPROACH</span>
                   <p>
@@ -476,14 +422,17 @@ export default function Home() {
             </div>
             {view === "today" ? (
               <>
-                <label className="notice reference-toggle">
+                <label className={`notice reference-toggle ${allowReference ? "is-enabled" : ""}`}>
                   <input
                     type="checkbox"
                     checked={allowReference}
                     onChange={(e) => setAllowReference(e.target.checked)}
                   />{" "}
-                  Include standard Hard Rock reference prices when Florida
-                  prices are unavailable. Verify these lines in the Florida app.
+                  <span className="reference-toggle-copy">
+                    <strong>Include standard Hard Rock reference prices</strong>
+                    <small>Show more qualifying parlays when Florida prices are unavailable. Verify these lines in the Florida app.</small>
+                  </span>
+                  <span className="reference-toggle-state" aria-hidden="true">{allowReference ? "ON" : "OFF"}</span>
                 </label>
                 <div className="slip-controls">
                   <div className="control-group">

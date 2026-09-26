@@ -1158,19 +1158,6 @@
   }
 }
 
-/* Decorative field is vector artwork, without text baked into a hero image. */
-.field-art {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  filter: drop-shadow(0 0 45px #42663255);
-}
-.hero-image {
-  overflow: hidden;
-  background: radial-gradient(ellipse at 65% 30%, #35543266, transparent 70%);
-}
 .skip-link {
   transform: translateY(-200%);
 }
@@ -1338,3 +1325,30 @@
 .reference-toggle { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
 .reference-toggle input { margin-top: 3px; accent-color: #cff578; }
 .reference-label { color: #e1bc7c !important; font-size: 11px !important; }
+
+/* Photo-led hero and a clearly visible, keyboard-accessible price toggle. */
+.hero-image { overflow: hidden; background: #10201b; }
+.hero-image > img { object-position: 70% 55%; }
+.hero-image:after { background: linear-gradient(90deg, #16201c 0%, rgba(22,32,28,.12) 30%, transparent 65%), linear-gradient(0deg, rgba(7,13,10,.85), transparent 55%); }
+.image-caption { text-shadow: 0 2px 14px #000; }
+.reference-toggle { padding: 18px 20px; gap: 16px; align-items: center; border: 2px solid #799947; background: #17251b; border-radius: 12px; transition: border-color .15s, background .15s; }
+.reference-toggle:hover { border-color: #cff578; background: #1d3021; }
+.reference-toggle.is-enabled { border-color: #cff578; background: #22371e; }
+.reference-toggle input { appearance: none; -webkit-appearance: none; flex: 0 0 30px; width: 30px; height: 30px; margin: 0; border: 2px solid #cff578; border-radius: 6px; background: #0e1711; cursor: pointer; display: grid; place-content: center; }
+.reference-toggle input:checked { background: #cff578; border-color: #cff578; }
+.reference-toggle input:checked::after { content: ""; width: 9px; height: 16px; border: solid #14200d; border-width: 0 3px 3px 0; transform: translateY(-2px) rotate(45deg); }
+.reference-toggle input:focus-visible { outline: 3px solid white; outline-offset: 4px; }
+.reference-toggle-copy { display: grid; gap: 5px; flex: 1; }
+.reference-toggle-copy strong { color: #f5f9ee; font-size: 15px; line-height: 1.4; }
+.reference-toggle-copy small { color: #c0ccb9; font-size: 12px; line-height: 1.5; }
+.reference-toggle-state { color: #d5e3c4; background: #111d15; border: 1px solid #647653; border-radius: 5px; padding: 5px 9px; font-size: 11px; font-weight: 800; letter-spacing: 1px; }
+.is-enabled .reference-toggle-state { color: #14200d; background: #cff578; border-color: #cff578; }
+@media (max-width: 700px) {
+ .hero-image { position: relative; inset: auto; min-height: 185px; opacity: 1; }
+ .hero-image > img { object-position: 70% 61%; }
+ .hero-image:after { background: linear-gradient(180deg, #16201c 0%, transparent 30%, rgba(7,13,10,.15) 100%); }
+ .hero-copy { background: #16201c; padding-bottom: 22px; }
+ .reference-toggle { padding: 16px 13px; gap: 12px; }
+ .reference-toggle-copy strong { font-size: 14px; }
+ .reference-toggle-state { padding: 4px 6px; font-size: 10px; }
+}
