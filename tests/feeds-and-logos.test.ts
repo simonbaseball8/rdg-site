@@ -173,3 +173,24 @@ test("college sportsbook mascot names and renamed schools resolve to correct log
   };
   for (const [name,id] of Object.entries(cases)) assert.equal(teamLogoUrl("CFB",name),`https://a.espncdn.com/i/teamlogos/ncaa/500/${id}.png`);
 });
+
+test("CFB moneylines use the projected winner independently of spreads and preserve eligibility gates", () => {
+  const now = Date.parse("2026-09-26T12:00:00Z");
+  const game = {event_id:"cfb-ml",start_date:"2026-09-27T17:00:00Z",away_team:"Away",home_team:"Home",stats_connected:true,
+    hard_rock:{moneyline:{home_odds:-150,away_odds:130}},
+    rdg:{projected_winner:"Home",projected_margin:6,spread_lean:null,signal:"Pass",sample_status:"Established",minimum_core_plays:200}};
+  const run = (g:any, loadedAt=now, allow=false) => normalizeBoard({CFB:{loadedAt,data:{games:[g]}}},now,allow).find(p=>p.market==="Moneyline");
+  assert.equal(run(game)?.eligible,true);
+  assert.equal(run(game)?.odds,-150);
+  assert.equal(run({...game,rdg:{...game.rdg,projected_winner:"Away"}})?.odds,130);
+  assert.equal(run({...game,rdg:{...game.rdg,projected_margin:2.9}})?.eligible,false);
+  assert.equal(run({...game,rdg:{...game.rdg,minimum_core_plays:74}})?.eligible,false);
+  assert.equal(run({...game,rdg:{...game.rdg,sample_status:"Small Sample"}})?.eligible,false);
+  assert.equal(run({...game,hard_rock:{}})?.eligible,false);
+  assert.equal(run({...game,stats_connected:false}),undefined);
+  assert.equal(run({...game,rdg:{...game.rdg,projected_winner:"Other"}}),undefined);
+  assert.equal(run(game,now-16*60_000)?.eligible,false);
+  const reference={...game,sportsbook:"Hard Rock Bet (IN reference)",requires_florida_verification:true};
+  assert.equal(run(reference)?.eligible,false);
+  assert.equal(run(reference,now,true)?.eligible,true);
+});

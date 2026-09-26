@@ -351,6 +351,44 @@ export function normalizeBoard(
         fresh(feeds.CFB, now),
     });
   }
+  // Straight-up research picks are independent of the ATS/spread signal.
+  // Three projected points is a shortlist filter, not a calibrated win probability.
+  for (const g of cfb?.games ?? []) {
+    const r = g.rdg;
+    if (!r || !g.stats_connected) continue;
+    const home = r.projected_winner === g.home_team;
+    if (!home && r.projected_winner !== g.away_team) continue;
+    const odds = oddsNumber(home
+      ? g.hard_rock?.moneyline?.home_odds
+      : g.hard_rock?.moneyline?.away_odds);
+    picks.push({
+      id: `cfb-ml-${g.event_id}`,
+      event: `CFB-${g.event_id}`,
+      sport: "CFB",
+      starts: g.start_date,
+      matchup: `${g.away_team} @ ${g.home_team}`,
+      title: `${r.projected_winner} moneyline`,
+      market: "Moneyline",
+      odds,
+      book: g.sportsbook ?? "Hard Rock Bet (FL)",
+      referencePrice: g.requires_florida_verification === true,
+      score: 3,
+      reasons: [
+        `RDG projects ${r.projected_winner} to win${finite(r.projected_margin) ? ` by ${r.projected_margin.toFixed(1)}` : ""}.`,
+        "Straight-up winner selection; the spread does not need to be covered.",
+      ],
+      concerns: [
+        `College moneyline research (${r.sample_status}); no calibrated win probability or proven edge at this price.`,
+        ...context,
+      ],
+      eligible:
+        finite(r.projected_margin) && r.projected_margin >= 3 &&
+        odds !== null &&
+        ["Established", "Developing"].includes(r.sample_status) &&
+        finite(r.minimum_core_plays) && r.minimum_core_plays >= 75 &&
+        fresh(feeds.CFB, now),
+    });
+  }
   const mlb = feeds.MLB?.data as MLBAnalysis | undefined;
   for (const g of mlb?.games ?? []) {
     const r = g.rdg;

@@ -197,6 +197,11 @@ function IdeaCard({
 export default function Home() {
   const [view, setView] = useState<View>("today");
   const [sport, setSport] = useState<SportFilter>("ALL");
+  const hero = sport === "MLB"
+    ? { src: "/rdg-baseball-hero.webp", alt: "Baseball stadium and diamond under evening floodlights" }
+    : sport === "NHL"
+      ? { src: "/rdg-hockey-hero.webp", alt: "Ice hockey rink inside a professional arena" }
+      : { src: "/rdg-stadium-hero.webp", alt: "Football on stadium turf under the evening lights" };
   const [horizon, setHorizon] = useState<"today" | "week">("week");
   const [mix, setMix] = useState<
     "balanced" | "props" | "games" | "no-spreads" | "moneylines"
@@ -310,8 +315,9 @@ export default function Home() {
               </div>
               <div className="hero-image">
                 <Image
-                  src="/rdg-stadium-hero.webp"
-                  alt="Football on stadium turf under the evening lights"
+                  key={hero.src}
+                  src={hero.src}
+                  alt={hero.alt}
                   fill
                   sizes="(max-width: 700px) 100vw, 50vw"
                   preload
@@ -484,10 +490,10 @@ export default function Home() {
                 </div>
                 {sport === "CFB" && (
                   <p className="notice">
-                    College parlay selections currently use the spread model.
-                    Moneylines are shown on the game board for reference. Select
-                    All sports for a mix of supported moneylines, player props
-                    and spreads.
+                    College picks include spreads and moneylines. Choose Moneylines only
+                    to focus on outright winners, or Balanced mix for both.
+                    Moneylines require a projected margin of at least 3 points and
+                    sufficient team data; these are research picks, not proven value bets.
                   </p>
                 )}
                 {!validStake && (
@@ -520,10 +526,8 @@ export default function Home() {
                     </h3>
                     <p>
                       {sport === "CFB" &&
-                      (mix === "props" ||
-                        mix === "moneylines" ||
-                        mix === "no-spreads")
-                        ? "The college model does not yet qualify moneylines or player props. Choose Balanced mix for college spreads, or All sports for other bet types."
+                      mix === "props"
+                        ? "College player props are not connected. Choose Balanced mix or Moneylines only for college picks, or All sports for available player props."
                         : errors.length
                           ? "Some data is unavailable. Try refreshing or browse the available research."
                           : nfl?.market_data_available === false &&
