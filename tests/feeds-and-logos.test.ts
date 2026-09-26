@@ -163,3 +163,13 @@ test("game aliases cannot produce duplicate NFL legs", () => {
   ];
   assert.deepEqual(buildIdeas(picks, 2, now), []);
 });
+
+test("college sportsbook mascot names and renamed schools resolve to correct logos", () => {
+  const cases: Record<string,string> = {
+    "Alabama Crimson Tide":"333", "Florida Gators":"57",
+    "Sam Houston State Bearkats":"2534", "William and Mary Tribe":"2729",
+    "LIU Sharks":"2341", "Southern Mississippi Golden Eagles":"2572",
+    "Appalachian State Mountaineers":"2026", "Houston Baptist Huskies":"2277", "UMass Minutemen":"113",
+  };
+  for (const [name,id] of Object.entries(cases)) assert.equal(teamLogoUrl("CFB",name),`https://a.espncdn.com/i/teamlogos/ncaa/500/${id}.png`);
+});

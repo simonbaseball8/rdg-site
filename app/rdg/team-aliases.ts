@@ -1,3 +1,4 @@
+import { COLLEGE_TEAM_IDS } from "./college-team-ids.ts";
 export const TEAM_ALIASES: Record<string, Record<string, string>> = {
   NFL: {
     ARI: "ari",
@@ -735,7 +736,8 @@ const fullNames: Record<string, Record<string, string>> = {
 };
 export function canonicalTeamKey(sport: string, team: string): string {
   const key = team
-    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .trim()
     .toUpperCase()
     .replace(/\./g, "")
@@ -746,12 +748,16 @@ export function canonicalTeamKey(sport: string, team: string): string {
     TEAM_ALIASES[sport]?.[key] ||
     TEAM_ALIASES[sport]?.[spaced] ||
     fullNames[sport]?.[key] ||
-    fullNames[sport]?.[spaced];
+    fullNames[sport]?.[spaced] ||
+    (sport === "CFB"
+      ? COLLEGE_TEAM_IDS[key] || COLLEGE_TEAM_IDS[spaced]
+      : undefined);
   return code ?? spaced.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 export function teamLogoUrl(sport: string, team: string): string | null {
   const key = team
-    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .trim()
     .toUpperCase()
     .replace(/\./g, "")
@@ -762,7 +768,10 @@ export function teamLogoUrl(sport: string, team: string): string | null {
     TEAM_ALIASES[sport]?.[key] ||
     TEAM_ALIASES[sport]?.[spaced] ||
     fullNames[sport]?.[key] ||
-    fullNames[sport]?.[spaced];
+    fullNames[sport]?.[spaced] ||
+    (sport === "CFB"
+      ? COLLEGE_TEAM_IDS[key] || COLLEGE_TEAM_IDS[spaced]
+      : undefined);
   return known
     ? `https://a.espncdn.com/i/teamlogos/${sport === "CFB" ? "ncaa" : sport.toLowerCase()}/500/${known}.png`
     : null;

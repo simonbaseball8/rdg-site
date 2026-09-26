@@ -198,7 +198,9 @@ export default function Home() {
   const [view, setView] = useState<View>("today");
   const [sport, setSport] = useState<SportFilter>("ALL");
   const [horizon, setHorizon] = useState<"today" | "week">("week");
-  const [mix, setMix] = useState<"balanced" | "props" | "games">("balanced");
+  const [mix, setMix] = useState<
+    "balanced" | "props" | "games" | "no-spreads" | "moneylines"
+  >("balanced");
   const [allowReference, setAllowReference] = useState(false);
   const [size, setSize] = useState(2);
   const [stake, setStake] = useState("10");
@@ -510,6 +512,8 @@ export default function Home() {
                       <option value="balanced">Balanced mix</option>
                       <option value="props">Player props</option>
                       <option value="games">Game picks</option>
+                      <option value="no-spreads">No spreads</option>
+                      <option value="moneylines">Moneylines only</option>
                     </select>
                   </label>
                   <label className="stake-input">
@@ -529,6 +533,14 @@ export default function Home() {
                     </span>
                   </label>
                 </div>
+                {sport === "CFB" && (
+                  <p className="notice">
+                    College parlay selections currently use the spread model.
+                    Moneylines are shown on the game board for reference. Select
+                    All sports for a mix of supported moneylines, player props
+                    and spreads.
+                  </p>
+                )}
                 {!validStake && (
                   <p className="copy-error" role="status">
                     Enter a stake greater than $0 and no more than $10,000 to
@@ -558,14 +570,29 @@ export default function Home() {
                       {horizon === "today" ? "for today" : "in this window"}.
                     </h3>
                     <p>
-                      {errors.length
-                        ? "Some data is unavailable. Try refreshing or browse the available research."
-                        : nfl?.market_data_available === false &&
-                            sport === "NFL"
-                          ? "NFL predictions are available below, but Hard Rock prices are unavailable for this deployment. Parlays need actual prices."
-                          : "There aren’t enough eligible picks from separate games. No extra legs have been forced."}
+                      {sport === "CFB" &&
+                      (mix === "props" ||
+                        mix === "moneylines" ||
+                        mix === "no-spreads")
+                        ? "The college model does not yet qualify moneylines or player props. Choose Balanced mix for college spreads, or All sports for other bet types."
+                        : errors.length
+                          ? "Some data is unavailable. Try refreshing or browse the available research."
+                          : nfl?.market_data_available === false &&
+                              sport === "NFL"
+                            ? "NFL predictions are available below, but Hard Rock prices are unavailable for this deployment. Parlays need actual prices."
+                            : "There aren’t enough eligible picks from separate games. No extra legs have been forced."}
                     </p>
                     <div className="empty-actions">
+                      {sport === "CFB" && (
+                        <button onClick={() => setSport("ALL")}>
+                          Show all sports
+                        </button>
+                      )}
+                      {mix !== "balanced" && (
+                        <button onClick={() => setMix("balanced")}>
+                          Use balanced mix
+                        </button>
+                      )}
                       {horizon === "today" && (
                         <button
                           className="primary-button"

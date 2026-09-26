@@ -190,3 +190,11 @@ test("NHL live API moneyline fields populate reference ideas without including p
  assert.equal(picks[0].odds,-125);assert.equal(picks[0].eligible,true);assert.equal(normalizeBoard(feeds,now)[0].eligible,false);
  assert.equal(normalizeBoard({NHL:{loadedAt:now,data:{games:[{...game,game_type:1}]}}},now,true).length,0);
 });
+
+test("no-spread and moneyline filters work while balanced cards diversify markets across cards",()=>{
+ const now=Date.parse("2026-09-26T12:00:00Z");
+ const picks:Pick[]=Array.from({length:18},(_,i)=>({id:`pick${i}`,event:`event${i}`,sport:i<6?"CFB":i<12?"NFL":"MLB",starts:"2026-09-27T17:00:00Z",matchup:`Away${i} @ Home${i}`,title:"Pick",market:i<6?"Spread":i<12?"Player prop":"Moneyline",odds:-110,book:"Hard Rock Bet (FL)",score:i<6?4:3,reasons:[],concerns:[],eligible:true}));
+ const noSpreads=buildIdeas(picks,2,now,"no-spreads");assert.equal(noSpreads.length,3);assert.ok(noSpreads.flat().every(p=>p.market!=="Spread"));
+ const moneylines=buildIdeas(picks,2,now,"moneylines");assert.equal(moneylines.length,3);assert.ok(moneylines.flat().every(p=>p.market==="Moneyline"));
+ const mixed=buildIdeas(picks,2,now).flat();assert.equal(new Set(mixed.map(p=>p.market)).size,3);assert.ok(mixed.filter(p=>p.market==="Spread").length<=2);
+});

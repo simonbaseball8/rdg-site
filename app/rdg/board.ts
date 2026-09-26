@@ -452,7 +452,8 @@ export function normalizeBoard(
   return picks.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
 }
 
-export type ParlayMix = "balanced" | "props" | "games";
+export type ParlayMix =
+  "balanced" | "props" | "games" | "no-spreads" | "moneylines";
 export function buildIdeas(
   picks: Pick[],
   size: number,
@@ -463,6 +464,8 @@ export function buildIdeas(
   const usedPicks = new Set<string>();
   const results: Pick[][] = [];
   const priorMatchups = new Set<string>();
+  const marketUses = new Map<Market, number>();
+  const sportUses = new Map<Sport, number>();
   const gameKey = (p: Pick) =>
     `${p.sport}-${p.matchup
       .split(/\s+@\s+|\s+vs\.?\s+/i)
@@ -474,10 +477,12 @@ export function buildIdeas(
     const events = new Set<string>();
     const pool = picks.filter(
       (p) =>
-        mix === "balanced" ||
-        (mix === "props"
-          ? p.market === "Player prop"
-          : p.market !== "Player prop"),
+        p.eligible &&
+        (mix === "balanced" ||
+          (mix === "props" && p.market === "Player prop") ||
+          (mix === "games" && p.market !== "Player prop") ||
+          (mix === "no-spreads" && p.market !== "Spread") ||
+          (mix === "moneylines" && p.market === "Moneyline")),
     );
     while (pool.length) {
       // Prefer a different game/sport and include a qualifying prop in a balanced card.
@@ -490,7 +495,16 @@ export function buildIdeas(
           ? 6
           : 0) +
         (chosen.some((c) => c.market === p.market) ? 0 : 3) +
-        p.score;
+        p.score -
+        (mix === "balanced"
+          ? (marketUses.get(p.market) ?? 0) * 3 +
+            (sportUses.get(p.sport) ?? 0) * 2
+          : 0) -
+        (mix === "balanced" &&
+        p.market === "Spread" &&
+        chosen.some((c) => c.market === "Spread")
+          ? 12
+          : 0);
       pool.sort(
         (a, b) =>
           priority(b) - priority(a) ||
@@ -525,6 +539,8 @@ export function buildIdeas(
     chosen.forEach((p) => {
       usedPicks.add(p.id);
       priorMatchups.add(gameKey(p));
+      marketUses.set(p.market, (marketUses.get(p.market) ?? 0) + 1);
+      sportUses.set(p.sport, (sportUses.get(p.sport) ?? 0) + 1);
     });
     results.push(chosen);
   }
