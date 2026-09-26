@@ -18,7 +18,7 @@ export async function GET() {
     return { events: events.length, books: coverage };
   }
   const sports = await Promise.all(Object.entries(SPORT_KEYS).map(async ([sport,key]) => {
-    const query = new URLSearchParams({apiKey,bookmakers:books,markets:"h2h,spreads,totals",oddsFormat:"american",dateFormat:"iso"});
+    const query = new URLSearchParams({apiKey,bookmakers:books,markets:sport === "UFC" ? "h2h" : "h2h,spreads,totals",oddsFormat:"american",dateFormat:"iso"});
     try {
       const response = await fetch(`https://api.the-odds-api.com/v4/sports/${key}/odds?${query}`,{ next:{revalidate:900},signal:AbortSignal.timeout(15000) });
       if(!response.ok)return {sport,status:response.status};

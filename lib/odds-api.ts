@@ -5,6 +5,8 @@ export const SPORT_KEYS = {
   CFB: "americanfootball_ncaaf",
   MLB: "baseball_mlb",
   NHL: "icehockey_nhl",
+  NBA: "basketball_nba",
+  UFC: "mma_mixed_martial_arts",
 } as const;
 export type OddsSport = keyof typeof SPORT_KEYS;
 export type MarketEvent = {
@@ -123,7 +125,7 @@ export async function loadOddsMarket(
   const query = new URLSearchParams({
     apiKey,
     bookmakers: "hardrockbet_fl,hardrockbet",
-    markets: "h2h,spreads,totals",
+    markets: sport === "UFC" ? "h2h" : "h2h,spreads,totals",
     oddsFormat: "american",
     dateFormat: "iso",
   });
