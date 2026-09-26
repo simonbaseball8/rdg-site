@@ -969,6 +969,7 @@ export async function GET() {
           return {
 
             sportsbook: event.sportsbook,
+            quote_times: event.quote_times,
             requires_florida_verification: event.requires_florida_verification,
             event_id:
               event.event_id,

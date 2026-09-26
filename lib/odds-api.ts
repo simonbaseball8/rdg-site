@@ -10,6 +10,7 @@ export const SPORT_KEYS = {
 } as const;
 export type OddsSport = keyof typeof SPORT_KEYS;
 export type MarketEvent = {
+  quote_times?: Record<string, string | null>;
   sportsbook: string;
   requires_florida_verification: boolean;
   event_id: string;
@@ -70,11 +71,29 @@ export function adaptOddsEvents(
         florida ??
         (sport === "NFL"
           ? undefined
-          : (e.bookmakers ?? []).find((b) => b.key === "hardrockbet"));
+          : ((e.bookmakers ?? []).find((b) => b.key === "hardrockbet") ??
+            (sport === "NBA"
+              ? (e.bookmakers ?? []).find((b) => b.key === "hardrockbet_oh")
+              : undefined)));
       return {
+        quote_times: Object.fromEntries(
+          [
+            ["h2h", "moneyline"],
+            ["spreads", "spread"],
+            ["totals", "total"],
+          ].map(([key, label]) => {
+            const m = book?.markets?.find((m) => m.key === key);
+            return [
+              label,
+              m ? (m.last_update ?? book?.last_update ?? null) : null,
+            ];
+          }),
+        ),
         sportsbook: florida
           ? "Hard Rock Bet (FL)"
-          : "Hard Rock Bet (IN reference)",
+          : book?.key === "hardrockbet_oh"
+            ? "Hard Rock Bet (OH reference)"
+            : "Hard Rock Bet (IN reference)",
         requires_florida_verification: !florida,
         event_id: e.id,
         sport,
@@ -124,7 +143,10 @@ export async function loadOddsMarket(
     );
   const query = new URLSearchParams({
     apiKey,
-    bookmakers: "hardrockbet_fl,hardrockbet",
+    bookmakers:
+      sport === "NBA"
+        ? "hardrockbet_fl,hardrockbet,hardrockbet_oh"
+        : "hardrockbet_fl,hardrockbet",
     markets: sport === "UFC" ? "h2h" : "h2h,spreads,totals",
     oddsFormat: "american",
     dateFormat: "iso",

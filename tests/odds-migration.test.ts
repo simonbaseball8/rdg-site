@@ -9,7 +9,7 @@ import {
 } from "../lib/odds-api.ts";
 import { buildIdeas, normalizeBoard, type Pick } from "../app/rdg/board.ts";
 
-test("all sports use only Florida prices and preserve spread sides and totals", async () => {
+test("all sports prefer Florida prices and preserve spread sides and totals", async () => {
   for (const sport of Object.keys(SPORT_KEYS) as Array<
     keyof typeof SPORT_KEYS
   >) {
@@ -46,9 +46,10 @@ test("all sports use only Florida prices and preserve spread sides and totals", 
       const u = new URL(String(input));
       assert.equal(
         u.searchParams.get("bookmakers"),
-        "hardrockbet_fl,hardrockbet",
+        sport === "NBA" ? "hardrockbet_fl,hardrockbet,hardrockbet_oh" : "hardrockbet_fl,hardrockbet",
       );
       assert.ok(u.pathname.includes(SPORT_KEYS[sport]));
+      assert.equal(u.searchParams.get("markets"), sport === "UFC" ? "h2h" : "h2h,spreads,totals");
       return new Response(JSON.stringify(data));
     });
     assert.equal(result.events[0].odds.length, 2);
@@ -197,4 +198,11 @@ test("no-spread and moneyline filters work while balanced cards diversify market
  const noSpreads=buildIdeas(picks,2,now,"no-spreads");assert.equal(noSpreads.length,3);assert.ok(noSpreads.flat().every(p=>p.market!=="Spread"));
  const moneylines=buildIdeas(picks,2,now,"moneylines");assert.equal(moneylines.length,3);assert.ok(moneylines.flat().every(p=>p.market==="Moneyline"));
  const mixed=buildIdeas(picks,2,now).flat();assert.equal(new Set(mixed.map(p=>p.market)).size,3);assert.ok(mixed.filter(p=>p.market==="Spread").length<=2);
+});
+
+test('NBA Ohio fallback is explicit research coverage and never replaces a Florida quote',()=>{
+ const event={id:'nba',commence_time:'2026-10-20T19:00Z',home_team:'Detroit Pistons',away_team:'Boston Celtics',bookmakers:[{key:'hardrockbet_oh',last_update:'2026-09-26T16:00Z',markets:[{key:'h2h',outcomes:[{name:'Boston Celtics',price:-150}]}]}]};
+ const row=adaptOddsEvents('NBA',[event])[0];assert.equal(row.sportsbook,'Hard Rock Bet (OH reference)');assert.equal(row.requires_florida_verification,true);assert.equal(row.quote_times?.moneyline,'2026-09-26T16:00Z');
+ const florida={...event.bookmakers[0],key:'hardrockbet_fl'};const preferred=adaptOddsEvents('NBA',[{...event,bookmakers:[...event.bookmakers,florida]}])[0];assert.equal(preferred.requires_florida_verification,false);
+ const pick:Pick={id:'nba',event:'nba',sport:'NBA',starts:'2026-10-20T19:00Z',matchup:'Boston Celtics @ Detroit Pistons',title:'Boston moneyline',market:'Moneyline',odds:-150,book:row.sportsbook,referencePrice:true,score:3,reasons:[],concerns:[],eligible:true};assert.equal(buildIdeas([pick,{...pick,id:'other',event:'other',matchup:'A @ B'}],2,Date.parse('2026-09-26T16:00Z')).length,0);
 });

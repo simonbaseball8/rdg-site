@@ -1,6 +1,7 @@
 import { loadOddsMarket } from "./odds-api.ts";
 export type NflMarketEvent = {
   sportsbook?: string;
+  quote_times?: Record<string,string|null>;
   requires_florida_verification?: boolean;
   event_id?: string;
   start_date?: string;

@@ -8,11 +8,15 @@ import type {
   NHLAnalysis,
 } from "./types";
 
-export const SPORTS = ["NFL", "CFB", "MLB", "NHL"] as const;
+export const SPORTS = ["NFL", "CFB", "MLB", "NHL", "NBA", "UFC"] as const;
 export type Sport = (typeof SPORTS)[number];
 export type SportFilter = Sport | "ALL";
 export type Market = "Spread" | "Moneyline" | "Player prop";
 export type Pick = {
+  quoteAt?: string | null;
+  feedAt?: string | null;
+  injuriesAt?: string | null;
+  lineupsAt?: string | null;
   referencePrice?: boolean;
   id: string;
   event: string;
@@ -39,6 +43,8 @@ export const LABELS: Record<SportFilter, string> = {
   CFB: "College football",
   MLB: "MLB",
   NHL: "NHL",
+  NBA: "NBA",
+  UFC: "UFC / MMA",
 };
 
 export function oddsNumber(value: unknown): number | null {
@@ -222,6 +228,7 @@ export function normalizeBoard(
       title: `${p.player_name} · ${p.pick === "YES" ? "Anytime TD" : `${p.pick === "OVER" ? "Over" : "Under"} ${p.sportsbook_line ?? "—"} ${p.market}`}`,
       market: "Player prop",
       odds,
+      quoteAt: quote?.updated_at ?? null,
       book: quote?.sportsbook ?? "No quote",
       score: grade,
       reasons: p.research?.pros?.length
@@ -292,6 +299,7 @@ export function normalizeBoard(
         ? "Hard Rock Bet (IN reference)"
         : (quote?.sportsbook ?? "No Hard Rock quote"),
       referencePrice,
+      quoteAt: quote?.updated_at ?? null,
       score: 2,
       reasons: p.reasons ?? [`RDG projection: ${p.rdg_projection}`],
       concerns: [
@@ -358,9 +366,11 @@ export function normalizeBoard(
     if (!r || !g.stats_connected) continue;
     const home = r.projected_winner === g.home_team;
     if (!home && r.projected_winner !== g.away_team) continue;
-    const odds = oddsNumber(home
-      ? g.hard_rock?.moneyline?.home_odds
-      : g.hard_rock?.moneyline?.away_odds);
+    const odds = oddsNumber(
+      home
+        ? g.hard_rock?.moneyline?.home_odds
+        : g.hard_rock?.moneyline?.away_odds,
+    );
     picks.push({
       id: `cfb-ml-${g.event_id}`,
       event: `CFB-${g.event_id}`,
@@ -382,10 +392,12 @@ export function normalizeBoard(
         ...context,
       ],
       eligible:
-        finite(r.projected_margin) && r.projected_margin >= 3 &&
+        finite(r.projected_margin) &&
+        r.projected_margin >= 3 &&
         odds !== null &&
         ["Established", "Developing"].includes(r.sample_status) &&
-        finite(r.minimum_core_plays) && r.minimum_core_plays >= 75 &&
+        finite(r.minimum_core_plays) &&
+        r.minimum_core_plays >= 75 &&
         fresh(feeds.CFB, now),
     });
   }
@@ -480,6 +492,51 @@ export function normalizeBoard(
         fresh(feeds.NHL, now),
     });
   }
+  for (const pick of picks) {
+    const feed =
+      feeds[
+        pick.market === "Player prop"
+          ? pick.sport === "NFL"
+            ? "props"
+            : "mlbProps"
+          : pick.sport
+      ];
+    pick.feedAt = feed ? new Date(feed.loadedAt).toISOString() : null;
+    pick.injuriesAt =
+      pick.sport === "NFL" && injuryReady
+        ? ((injuries as unknown as { generated_at?: string })?.generated_at ??
+          null)
+        : null;
+    pick.lineupsAt = null;
+    if (pick.market !== "Player prop") {
+      const data = feed?.data as
+        | {
+            games?: Array<{
+              event_id: string;
+              quote_times?: Record<string, string | null>;
+            }>;
+          }
+        | undefined;
+      const game = data?.games?.find(
+        (g) => `${pick.sport}-${g.event_id}` === pick.event,
+      );
+      pick.quoteAt = game?.quote_times?.[pick.market.toLowerCase()] ?? null;
+    }
+    const quoteTime = Date.parse(pick.quoteAt ?? "");
+    if (
+      pick.quoteAt &&
+      (!Number.isFinite(quoteTime) ||
+        quoteTime > now ||
+        now - quoteTime >= FRESH_FOR_MS)
+    ) {
+      pick.eligible = false;
+      pick.concerns.unshift(
+        "Sportsbook quote is stale; refresh before using this pick.",
+      );
+    }
+    if (pick.sport !== "NFL")
+      pick.concerns.push("Injury screening is not connected for this sport.");
+  }
   for (const pick of picks)
     if (pick.referencePrice) {
       pick.concerns.unshift(
@@ -491,14 +548,19 @@ export function normalizeBoard(
 }
 
 export type ParlayMix =
-  "balanced" | "props" | "games" | "no-spreads" | "moneylines";
+  | "balanced"
+  | "props"
+  | "games"
+  | "no-spreads"
+  | "moneylines"
+  | "spreads";
 export function buildIdeas(
   picks: Pick[],
   size: number,
   now: number,
   mix: ParlayMix = "balanced",
 ): Pick[][] {
-  if (!Number.isInteger(size) || size < 2 || size > 5) return [];
+  if (!Number.isInteger(size) || size < 2 || size > 8) return [];
   const usedPicks = new Set<string>();
   const results: Pick[][] = [];
   const priorMatchups = new Set<string>();
@@ -520,7 +582,8 @@ export function buildIdeas(
           (mix === "props" && p.market === "Player prop") ||
           (mix === "games" && p.market !== "Player prop") ||
           (mix === "no-spreads" && p.market !== "Spread") ||
-          (mix === "moneylines" && p.market === "Moneyline")),
+          (mix === "moneylines" && p.market === "Moneyline") ||
+          (mix === "spreads" && p.market === "Spread")),
     );
     while (pool.length) {
       // Prefer a different game/sport and include a qualifying prop in a balanced card.

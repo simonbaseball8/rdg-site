@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import { MatchupLogos } from "./rdg/team-logos";
+import ExpansionBoard from "./rdg/expansion-board";
 import SportSlates from "./rdg/sport-slates";
 import NflPredictions from "./rdg/nfl-predictions";
 import type { NFLAnalysis } from "./rdg/types";
@@ -20,6 +21,13 @@ import {
 } from "./rdg/board";
 import { useBoard } from "./rdg/use-board";
 import Results from "./rdg/results";
+import { PickFreshness, TrackButton } from "./rdg/pick-details";
+import {
+  actionable,
+  passesFilters,
+  replacements,
+  matchupTeams,
+} from "./rdg/pick-controls";
 import "./rdg/dashboard.css";
 
 type View = "today" | "explore" | "results";
@@ -72,7 +80,7 @@ function Research({ picks }: { picks: Pick[] }) {
   return (
     <details className="research">
       <summary>
-        Why these picks? <span aria-hidden="true">+</span>
+        Why this pick? <span aria-hidden="true">+</span>
       </summary>
       <div className="research-body">
         {picks.map((p) => (
@@ -83,7 +91,8 @@ function Research({ picks }: { picks: Pick[] }) {
                 <li key={i}>{r}</li>
               ))}
             </ul>
-            <p className="risk-heading">What to check</p>
+            <PickFreshness pick={p} />
+            <p className="risk-heading">What could change this pick?</p>
             <ul className="concerns">
               {p.concerns.map((r, i) => (
                 <li key={i}>{r}</li>
@@ -96,14 +105,29 @@ function Research({ picks }: { picks: Pick[] }) {
   );
 }
 function IdeaCard({
-  picks,
+  picks: originalPicks,
   index,
   stake,
+  pool,
+  now,
+  mix,
 }: {
   picks: Pick[];
   index: number;
   stake: number;
+  pool: Pick[];
+  now: number;
+  mix: Parameters<typeof buildIdeas>[3];
 }) {
+  const [changes, setChanges] = useState<Record<number, string>>({});
+  const [replacing, setReplacing] = useState<number | null>(null);
+  const picks = originalPicks.map(
+    (p, i) => pool.find((c) => c.id === changes[i] && actionable(c, now)) ?? p,
+  );
+  const alternatives =
+    replacing === null
+      ? []
+      : replacements(pool, picks, replacing, now, mix ?? "balanced");
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState(false);
   const total = estimatedReturn(picks, stake);
@@ -158,6 +182,47 @@ function IdeaCard({
                 </p>
               )}
               <time dateTime={p.starts}>{gameTime(p.starts)}</time>
+              <small
+                className={
+                  p.referencePrice ? "price-reference" : "price-florida"
+                }
+              >
+                {p.referencePrice ? "Reference price" : "Florida feed"}
+              </small>
+              <button
+                className="replace-leg"
+                onClick={() => setReplacing(replacing === i ? null : i)}
+              >
+                Replace this leg
+              </button>
+              {replacing === i && (
+                <div className="replacement-list">
+                  <label>
+                    Choose a replacement
+                    <select
+                      aria-label={`Replacement for leg ${i + 1}`}
+                      defaultValue=""
+                      onChange={(e) => {
+                        if (e.target.value) {
+                          setChanges((v) => ({ ...v, [i]: e.target.value }));
+                          setReplacing(null);
+                          setCopied(false);
+                        }
+                      }}
+                    >
+                      <option value="">Select a qualifying pick</option>
+                      {alternatives.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.title} ({formatOdds(a.odds)}) · {a.matchup}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {!alternatives.length && (
+                    <p>No replacement meets your filters from another game.</p>
+                  )}
+                </div>
+              )}
             </div>
             <strong className="leg-odds">{formatOdds(p.odds)}</strong>
           </li>
@@ -175,6 +240,10 @@ function IdeaCard({
         Rock.
       </p>
       <Research picks={picks} />
+      <TrackButton
+        key={picks.map((p) => p.id + String(p.odds)).join("|")}
+        picks={picks}
+      />
       <button className="copy-button" onClick={copy}>
         {copied ? (
           <>
@@ -197,18 +266,44 @@ function IdeaCard({
 export default function Home() {
   const [view, setView] = useState<View>("today");
   const [sport, setSport] = useState<SportFilter>("ALL");
-  const hero = sport === "MLB"
-    ? { src: "/rdg-baseball-hero.webp", alt: "Baseball stadium and diamond under evening floodlights" }
-    : sport === "NHL"
-      ? { src: "/rdg-hockey-hero.webp", alt: "Ice hockey rink inside a professional arena" }
-      : { src: "/rdg-stadium-hero.webp", alt: "Football on stadium turf under the evening lights" };
+  const expansionSport = sport === "NBA" || sport === "UFC";
+  const hero =
+    sport === "NBA"
+      ? {
+          src: "/rdg-basketball-hero.webp",
+          alt: "Professional basketball arena and hardwood court",
+        }
+      : sport === "UFC"
+        ? {
+            src: "/rdg-mma-hero.webp",
+            alt: "Mixed martial arts arena and fighting cage",
+          }
+        : sport === "MLB"
+          ? {
+              src: "/rdg-baseball-hero.webp",
+              alt: "Baseball stadium and diamond under evening floodlights",
+            }
+          : sport === "NHL"
+            ? {
+                src: "/rdg-hockey-hero.webp",
+                alt: "Ice hockey rink inside a professional arena",
+              }
+            : {
+                src: "/rdg-stadium-hero.webp",
+                alt: "Football on stadium turf under the evening lights",
+              };
   const [horizon, setHorizon] = useState<"today" | "week">("week");
   const [mix, setMix] = useState<
-    "balanced" | "props" | "games" | "no-spreads" | "moneylines"
+    "balanced" | "props" | "games" | "no-spreads" | "moneylines" | "spreads"
   >("balanced");
+  const [maxFavorite, setMaxFavorite] = useState("");
+  const [excludedTeams, setExcludedTeams] = useState<string[]>([]);
+  const [excludeChoice, setExcludeChoice] = useState("");
+  const [slipMarkets, setSlipMarkets] = useState<string[]>([]);
   const [allowReference, setAllowReference] = useState(false);
   const [size, setSize] = useState(2);
   const [stake, setStake] = useState("10");
+  const [showStraights, setShowStraights] = useState(false);
   const [query, setQuery] = useState("");
   const [market, setMarket] = useState("All bets");
   const { loading, reload, now, relevant } = useBoard(
@@ -228,12 +323,21 @@ export default function Home() {
           (sport === "ALL" || sport === p.sport),
       )
     : [];
-  const picks = allPicks.filter(
+  const controlledPicks = allPicks.filter((p) =>
+    passesFilters(p, {
+      maxFavorite: maxFavorite ? Number(maxFavorite) : null,
+      excludedTeams,
+      markets: slipMarkets,
+    }),
+  );
+  const straightPicks = controlledPicks.filter((p) => actionable(p, now));
+  const teams = [...new Set(allPicks.flatMap(matchupTeams))].sort();
+  const picks = controlledPicks.filter(
     (p) =>
       (market === "All bets" || p.market === market) &&
       `${p.title} ${p.matchup}`.toLowerCase().includes(query.toLowerCase()),
   );
-  const ideas = buildIdeas(allPicks, size, now, mix);
+  const ideas = buildIdeas(controlledPicks, size, now, mix);
   const errors = relevant.filter((r) => r.feed?.error);
   const stale = relevant.some(
     (r) => r.feed && !r.feed.error && !fresh(r.feed, now),
@@ -310,7 +414,7 @@ export default function Home() {
                 </p>
                 <div className="hero-foot">
                   <span className="book-pill">Hard Rock Bet</span>
-                  <span>Four sports. One clear view.</span>
+                  <span>Six sports. One clear view.</span>
                 </div>
               </div>
               <div className="hero-image">
@@ -398,7 +502,11 @@ export default function Home() {
             <div className="section-heading">
               <div>
                 <p className="eyebrow">
-                  {view === "today" ? "THE SHORTLIST" : "YOUR RESEARCH BOARD"}
+                  {expansionSport
+                    ? "YOUR RESEARCH BOARD"
+                    : view === "today"
+                      ? "THE SHORTLIST"
+                      : "YOUR RESEARCH BOARD"}
                 </p>
                 <h2>
                   {view === "today"
@@ -406,9 +514,11 @@ export default function Home() {
                     : "Look a little closer."}
                 </h2>
                 <p>
-                  {view === "today"
-                    ? "Parlay ideas from existing model signals. Check every leg before placing."
-                    : "Browse individual picks and the evidence behind them."}
+                  {expansionSport
+                    ? "Live matchups and available prices. Model recommendations are not connected for this sport."
+                    : view === "today"
+                      ? "Parlay ideas from existing model signals. Check every leg before placing."
+                      : "Browse individual picks and the evidence behind them."}
                 </p>
               </div>
               <div className="segmented" aria-label="Game date range">
@@ -426,9 +536,101 @@ export default function Home() {
                 </button>
               </div>
             </div>
-            {view === "today" ? (
+            {!expansionSport && (
+              <details className="pick-filters">
+                <summary>Customize your picks</summary>
+                <div className="filter-fields">
+                  <fieldset>
+                    <legend>Include bet types</legend>
+                    {["Moneyline", "Spread", "Player prop"].map((m) => (
+                      <label key={m}>
+                        <input
+                          type="checkbox"
+                          checked={slipMarkets.includes(m)}
+                          onChange={(e) =>
+                            setSlipMarkets((v) =>
+                              e.target.checked
+                                ? [...v, m]
+                                : v.filter((x) => x !== m),
+                            )
+                          }
+                        />
+                        {m}
+                      </label>
+                    ))}
+                    <small>No boxes selected = all bet types.</small>
+                  </fieldset>
+                  <label>
+                    Maximum favorite price
+                    <select
+                      aria-label="Maximum favorite price"
+                      value={maxFavorite}
+                      onChange={(e) => setMaxFavorite(e.target.value)}
+                    >
+                      <option value="">No limit</option>
+                      {[150, 200, 300, 500, 1000].map((n) => (
+                        <option key={n} value={n}>
+                          No heavier than -{n}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Exclude team
+                    <select
+                      aria-label="Exclude team"
+                      value={excludeChoice}
+                      onChange={(e) => {
+                        const t = e.target.value;
+                        setExcludeChoice("");
+                        if (t) setExcludedTeams((v) => [...new Set([...v, t])]);
+                      }}
+                    >
+                      <option value="">Choose a team</option>
+                      {teams
+                        .filter((t) => !excludedTeams.includes(t))
+                        .map((t) => (
+                          <option key={t}>{t}</option>
+                        ))}
+                    </select>
+                  </label>
+                </div>
+                <div className="excluded-teams">
+                  {excludedTeams.map((t) => (
+                    <button
+                      key={t}
+                      onClick={() =>
+                        setExcludedTeams((v) => v.filter((x) => x !== t))
+                      }
+                    >
+                      Restore {t} ×
+                    </button>
+                  ))}
+                </div>
+                <button
+                  className="text-button"
+                  onClick={() => {
+                    setSlipMarkets([]);
+                    setMaxFavorite("");
+                    setExcludedTeams([]);
+                  }}
+                >
+                  Reset filters
+                </button>
+              </details>
+            )}
+            {expansionSport ? (
+              <ExpansionBoard
+                feeds={visibleFeeds}
+                sport={sport}
+                now={now}
+                horizon={horizon}
+              />
+            ) : view === "today" ? (
               <>
-                <label className={`notice reference-toggle ${allowReference ? "is-enabled" : ""}`}>
+                <label
+                  className={`notice reference-toggle ${allowReference ? "is-enabled" : ""}`}
+                >
                   <input
                     type="checkbox"
                     checked={allowReference}
@@ -436,15 +638,20 @@ export default function Home() {
                   />{" "}
                   <span className="reference-toggle-copy">
                     <strong>Include standard Hard Rock reference prices</strong>
-                    <small>Show more qualifying parlays when Florida prices are unavailable. Verify these lines in the Florida app.</small>
+                    <small>
+                      Show more qualifying parlays when Florida prices are
+                      unavailable. Verify these lines in the Florida app.
+                    </small>
                   </span>
-                  <span className="reference-toggle-state" aria-hidden="true">{allowReference ? "ON" : "OFF"}</span>
+                  <span className="reference-toggle-state" aria-hidden="true">
+                    {allowReference ? "ON" : "OFF"}
+                  </span>
                 </label>
                 <div className="slip-controls">
                   <div className="control-group">
                     <span>Legs per parlay</span>
                     <div className="leg-options">
-                      {[2, 3, 4, 5].map((n) => (
+                      {[2, 3, 4, 5, 6, 7, 8].map((n) => (
                         <button
                           key={n}
                           aria-label={`${n} legs`}
@@ -469,6 +676,7 @@ export default function Home() {
                       <option value="games">Game picks</option>
                       <option value="no-spreads">No spreads</option>
                       <option value="moneylines">Moneylines only</option>
+                      <option value="spreads">Spreads only</option>
                     </select>
                   </label>
                   <label className="stake-input">
@@ -488,12 +696,20 @@ export default function Home() {
                     </span>
                   </label>
                 </div>
+                {size >= 6 && (
+                  <p className="notice">
+                    {size}-leg slips need {size} qualifying games. More legs
+                    increase the chance that one loss defeats the whole slip; no
+                    weaker legs are added to fill it.
+                  </p>
+                )}
                 {sport === "CFB" && (
                   <p className="notice">
-                    College picks include spreads and moneylines. Choose Moneylines only
-                    to focus on outright winners, or Balanced mix for both.
-                    Moneylines require a projected margin of at least 3 points and
-                    sufficient team data; these are research picks, not proven value bets.
+                    College picks include spreads and moneylines. Choose
+                    Moneylines only to focus on outright winners, or Balanced
+                    mix for both. Moneylines require a projected margin of at
+                    least 3 points and sufficient team data; these are research
+                    picks, not proven value bets.
                   </p>
                 )}
                 {!validStake && (
@@ -508,10 +724,25 @@ export default function Home() {
                   <div className="idea-grid">
                     {ideas.map((idea, i) => (
                       <IdeaCard
-                        key={idea.map((p) => p.id).join("-")}
+                        key={JSON.stringify([
+                          idea.map((p) => [p.id, p.odds]),
+                          mix,
+                          maxFavorite,
+                          excludedTeams,
+                          slipMarkets,
+                          allowReference,
+                          controlledPicks.map((p) => [
+                            p.id,
+                            p.odds,
+                            p.eligible,
+                          ]),
+                        ])}
                         picks={idea}
                         index={i}
                         stake={validStake ? stakeNumber : 0}
+                        pool={controlledPicks}
+                        now={now}
+                        mix={mix}
                       />
                     ))}
                   </div>
@@ -525,8 +756,7 @@ export default function Home() {
                       {horizon === "today" ? "for today" : "in this window"}.
                     </h3>
                     <p>
-                      {sport === "CFB" &&
-                      mix === "props"
+                      {sport === "CFB" && mix === "props"
                         ? "College player props are not connected. Choose Balanced mix or Moneylines only for college picks, or All sports for available player props."
                         : errors.length
                           ? "Some data is unavailable. Try refreshing or browse the available research."
@@ -658,6 +888,55 @@ export default function Home() {
                 )}
               </>
             )}
+            {!expansionSport && (
+              <section className="straight-section">
+                <div className="section-heading">
+                  <div>
+                    <p className="eyebrow">ONE PICK AT A TIME</p>
+                    <h2>Straight bets</h2>
+                    <p>
+                      Individual qualifying picks using your sport, date and
+                      custom filters.
+                    </p>
+                  </div>
+                  <span>{straightPicks.length} available</span>
+                </div>
+                {straightPicks.length ? (
+                  <div className="explore-grid">
+                    {straightPicks.slice(0, showStraights ? 12 : 3).map((p) => (
+                      <article className="pick-card" key={p.id}>
+                        <MatchupLogos sport={p.sport} matchup={p.matchup} />
+                        <p>
+                          {p.sport} · {p.market}
+                        </p>
+                        <h3>{p.title}</h3>
+                        <p>
+                          {p.matchup} · {gameTime(p.starts)}
+                        </p>
+                        <strong>{formatOdds(p.odds)}</strong>
+                        <p className="straight-reason">{p.reasons[0]}</p>
+                        <Research picks={[p]} />
+                        <TrackButton key={p.id + String(p.odds)} picks={[p]} />
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="notice">
+                    No qualifying straight bets match these filters.
+                  </p>
+                )}
+                {straightPicks.length > 3 && (
+                  <button
+                    className="secondary-button"
+                    onClick={() => setShowStraights((v) => !v)}
+                  >
+                    {showStraights
+                      ? "Show fewer straight bets"
+                      : "Show more straight bets"}
+                  </button>
+                )}
+              </section>
+            )}
             {(sport === "NFL" || sport === "ALL") && (
               <NflPredictions
                 data={nfl}
@@ -682,8 +961,8 @@ export default function Home() {
                 Rock quote and an available injury feed. Injury designations can
                 block props; team injury effects and weather adjustments are not
                 modeled here. Small-sample college football remains
-                research-only. Other sports’ quote timestamps and confirmed
-                lineups are not verified by this view.
+                research-only. Quote timestamps are displayed when supplied by
+                the provider; confirmed lineups remain unverified.
               </p>
               <p>
                 Feed-loaded time is when RDG received the response, not the

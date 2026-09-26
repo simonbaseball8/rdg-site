@@ -1,19 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  FRESH_FOR_MS,
-  SPORTS,
-  type Feed,
-  type Feeds,
-  type SportFilter,
-} from "./board";
+import { FRESH_FOR_MS, type Feed, type Feeds, type SportFilter } from "./board";
 
 const endpoints = {
   NFL: "/api/analyze",
   CFB: "/api/cfb-picks",
   MLB: "/api/mlb-picks",
   NHL: "/api/nhl-picks",
+  NBA: "/api/nba-board",
+  UFC: "/api/ufc-board",
   props: "/api/nfl-player-props",
   injuries: "/api/nfl-injuries",
   mlbProps: "/api/mlb-props",
@@ -91,7 +87,7 @@ export function useBoard(sport: SportFilter, enabled: boolean) {
     let cancelled = false;
     const keys: Key[] =
       sport === "ALL"
-        ? [...SPORTS, "props", "injuries", "mlbProps"]
+        ? ["NFL", "CFB", "MLB", "NHL", "props", "injuries", "mlbProps"]
         : sport === "NFL"
           ? ["NFL", "props", "injuries"]
           : sport === "MLB"
@@ -122,7 +118,7 @@ export function useBoard(sport: SportFilter, enabled: boolean) {
   const reload = useCallback(() => setRefresh((value) => value + 1), []);
   const keys: Key[] =
     sport === "ALL"
-      ? [...SPORTS, "props", "injuries", "mlbProps"]
+      ? ["NFL", "CFB", "MLB", "NHL", "props", "injuries", "mlbProps"]
       : sport === "NFL"
         ? ["NFL", "props", "injuries"]
         : sport === "MLB"
