@@ -1006,6 +1006,8 @@ export async function getRdgNflAnalysis() {
           .current_season_games > 0;
 
       return {
+        sportsbook: event?.sportsbook,
+        requires_florida_verification: event?.requires_florida_verification,
         event_id:
           event?.event_id ??
           schedule.game_id ??

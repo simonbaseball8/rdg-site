@@ -451,7 +451,7 @@ export async function GET() {
         const url =
           `${ODDS_API_BASE}/sports/${SPORT_KEY}/events/${event.id}/odds` +
           `?apiKey=${encodeURIComponent(apiKey)}` +
-          `&bookmakers=hardrockbet_fl,draftkings,fanduel,betmgm` +
+          `&bookmakers=hardrockbet_fl,hardrockbet,draftkings,fanduel,betmgm` +
           `&markets=${encodeURIComponent(MARKETS.join(","))}` +
           `&oddsFormat=american` +
           `&dateFormat=iso`;

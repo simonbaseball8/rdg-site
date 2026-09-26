@@ -5,7 +5,7 @@ import {
   loadOddsMarket,
   SPORT_KEYS,
 } from "../lib/odds-api.ts";
-import { buildIdeas, type Pick } from "../app/rdg/board.ts";
+import { buildIdeas, normalizeBoard, type Pick } from "../app/rdg/board.ts";
 
 test("all sports use only Florida prices and preserve spread sides and totals", async () => {
   for (const sport of Object.keys(SPORT_KEYS) as Array<
@@ -42,7 +42,10 @@ test("all sports use only Florida prices and preserve spread sides and totals", 
     ];
     const result = await loadOddsMarket(sport, "secret", async (input) => {
       const u = new URL(String(input));
-      assert.equal(u.searchParams.get("bookmakers"), "hardrockbet_fl");
+      assert.equal(
+        u.searchParams.get("bookmakers"),
+        "hardrockbet_fl,hardrockbet",
+      );
       assert.ok(u.pathname.includes(SPORT_KEYS[sport]));
       return new Response(JSON.stringify(data));
     });
@@ -104,4 +107,70 @@ test("balanced cards include props and mix sports, with dedicated filters", () =
       .every((p) => p.market !== "Player prop"),
   );
   assert.equal(new Set(balanced.flat().map((p) => p.id)).size, 6);
+});
+
+test("reference prices are labeled, Florida preferred, and reference ideas require opt-in", () => {
+  const now = Date.parse("2026-09-26T12:00:00Z");
+  const event = {
+    id: "x",
+    commence_time: "2026-09-27T17:00:00Z",
+    away_team: "Pittsburgh Pirates",
+    home_team: "Detroit Tigers",
+    bookmakers: [
+      {
+        key: "hardrockbet",
+        markets: [
+          {
+            key: "h2h",
+            outcomes: [{ name: "Pittsburgh Pirates", price: 110 }],
+          },
+        ],
+      },
+    ],
+  };
+  const adapted = adaptOddsEvents("MLB", [event])[0];
+  assert.equal(adapted.requires_florida_verification, true);
+  assert.equal(adapted.sportsbook, "Hard Rock Bet (IN reference)");
+  const both = adaptOddsEvents("MLB", [
+    {
+      ...event,
+      bookmakers: [
+        ...event.bookmakers,
+        {
+          key: "hardrockbet_fl",
+          markets: [
+            {
+              key: "h2h",
+              outcomes: [{ name: "Pittsburgh Pirates", price: 120 }],
+            },
+          ],
+        },
+      ],
+    },
+  ])[0];
+  assert.equal(both.requires_florida_verification, false);
+  assert.equal(both.odds[0].american_odds, 120);
+  const game = {
+    event_id: "x",
+    start_date: event.commence_time,
+    away_team: event.away_team,
+    home_team: event.home_team,
+    sportsbook: adapted.sportsbook,
+    requires_florida_verification: true,
+    starting_pitchers: {
+      away: { name: "Away starter" },
+      home: { name: "Home starter" },
+    },
+    hard_rock: { moneyline: { away_odds: 110 } },
+    rdg: {
+      projected_winner: event.away_team,
+      moneyline_lean: event.away_team,
+      model_away_probability: 60,
+      signal: "Strong Review",
+    },
+  };
+  const feeds = { MLB: { loadedAt: now, data: { games: [game] } } };
+  assert.equal(normalizeBoard(feeds, now)[0].eligible, false);
+  assert.equal(normalizeBoard(feeds, now, true)[0].eligible, true);
+  assert.equal(adaptOddsEvents("NFL", [event])[0].odds.length, 0);
 });

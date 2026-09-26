@@ -71,6 +71,8 @@ type Moneyline = {
 };
 
 type OddsGame = {
+  sportsbook?: string;
+  requires_florida_verification?: boolean;
   eventId: string;
   awayTeam: string;
   homeTeam: string;
@@ -732,6 +734,8 @@ function parseMarketMoneylines(
     }
 
     output.push({
+      sportsbook: event.sportsbook,
+      requires_florida_verification: event.requires_florida_verification,
       eventId:
         eventId ||
         `${awayTeam}-${homeTeam}-${startTime ?? ""}`,
@@ -914,6 +918,8 @@ export async function GET(): Promise<NextResponse> {
         );
 
       const base = {
+        sportsbook: oddsGame?.sportsbook,
+        requires_florida_verification: oddsGame?.requires_florida_verification,
         game_id:
           game.gameId,
 

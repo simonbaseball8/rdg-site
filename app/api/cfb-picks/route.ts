@@ -428,6 +428,8 @@ export async function GET() {
             );
 
           const baseGame = {
+            sportsbook: event.sportsbook,
+            requires_florida_verification: event.requires_florida_verification,
             event_id:
               event.event_id,
 

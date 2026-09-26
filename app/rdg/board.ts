@@ -13,6 +13,7 @@ export type Sport = (typeof SPORTS)[number];
 export type SportFilter = Sport | "ALL";
 export type Market = "Spread" | "Moneyline" | "Player prop";
 export type Pick = {
+  referencePrice?: boolean;
   id: string;
   event: string;
   sport: Sport;
@@ -113,7 +114,11 @@ function validProbability(n: unknown): n is number {
 }
 
 // Adapters preserve source model signals. Scores are ordering aids, never probabilities.
-export function normalizeBoard(feeds: Feeds, now: number): Pick[] {
+export function normalizeBoard(
+  feeds: Feeds,
+  now: number,
+  allowReference = false,
+): Pick[] {
   const picks: Pick[] = [];
   const nfl = feeds.NFL?.data as NFLAnalysis | undefined;
   const injuries = feeds.injuries?.data as NFLInjuriesResponse | undefined;
@@ -149,7 +154,8 @@ export function normalizeBoard(feeds: Feeds, now: number): Pick[] {
       title: `${team} ${line > 0 ? "+" : ""}${line}`,
       market: "Spread",
       odds,
-      book: "Hard Rock Bet",
+      book: g.sportsbook ?? "Hard Rock Bet (FL)",
+      referencePrice: g.requires_florida_verification === true,
       score: strength(m.market_signal) + Math.min(Math.abs(diff), 10) / 100,
       reasons: [
         `RDG projects ${g.rdg.projected_winner} by ${g.rdg.projected_margin.toFixed(1)} points.`,
@@ -264,12 +270,13 @@ export function normalizeBoard(feeds: Feeds, now: number): Pick[] {
       }
     | undefined;
   for (const p of mlbProps?.actionable ?? []) {
-    const quote = p.market_data.quotes.find(
-      (q) =>
-        q.sportsbook_key === "hardrockbet_fl" &&
-        q.side.toUpperCase() === p.signal &&
-        q.line === p.market_line,
+    const matching = p.market_data.quotes.filter(
+      (q) => q.side.toUpperCase() === p.signal && q.line === p.market_line,
     );
+    const quote =
+      matching.find((q) => q.sportsbook_key === "hardrockbet_fl") ??
+      matching.find((q) => q.sportsbook_key === "hardrockbet");
+    const referencePrice = quote?.sportsbook_key === "hardrockbet";
     const timestamp = Date.parse(quote?.updated_at ?? "");
     const recent = timestamp <= now && now - timestamp < FRESH_FOR_MS;
     picks.push({
@@ -281,7 +288,10 @@ export function normalizeBoard(feeds: Feeds, now: number): Pick[] {
       title: `${p.player} · ${p.signal === "OVER" ? "Over" : "Under"} ${p.market_line} ${p.market_name}`,
       market: "Player prop",
       odds: oddsNumber(quote?.odds),
-      book: quote?.sportsbook ?? "No Hard Rock quote",
+      book: referencePrice
+        ? "Hard Rock Bet (IN reference)"
+        : (quote?.sportsbook ?? "No Hard Rock quote"),
+      referencePrice,
       score: 2,
       reasons: p.reasons ?? [`RDG projection: ${p.rdg_projection}`],
       concerns: [
@@ -321,7 +331,8 @@ export function normalizeBoard(feeds: Feeds, now: number): Pick[] {
       title: `${r.spread_lean} ${line > 0 ? "+" : ""}${line}`,
       market: "Spread",
       odds,
-      book: "Hard Rock Bet",
+      book: g.sportsbook ?? "Hard Rock Bet (FL)",
+      referencePrice: g.requires_florida_verification === true,
       score: strength(r.signal),
       reasons: [
         `RDG projects ${r.projected_winner} by ${r.projected_margin.toFixed(1)}.`,
@@ -371,7 +382,8 @@ export function normalizeBoard(feeds: Feeds, now: number): Pick[] {
       title: `${team} moneyline`,
       market: "Moneyline",
       odds,
-      book: "Hard Rock Bet",
+      book: g.sportsbook ?? "Hard Rock Bet (FL)",
+      referencePrice: g.requires_florida_verification === true,
       score: strength(r.signal),
       reasons: [
         `RDG leans ${team}.`,
@@ -418,7 +430,8 @@ export function normalizeBoard(feeds: Feeds, now: number): Pick[] {
       title: `${team} moneyline`,
       market: "Moneyline",
       odds,
-      book: "Hard Rock Bet",
+      book: g.sportsbook ?? "Hard Rock Bet (FL)",
+      referencePrice: g.requires_florida_verification === true,
       score: strength(g.signal),
       reasons: [`RDG leans ${team}.`, `Source signal: ${g.signal}.`],
       concerns: ["Starting goalie confirmation is not connected.", ...context],
@@ -429,6 +442,13 @@ export function normalizeBoard(feeds: Feeds, now: number): Pick[] {
         fresh(feeds.NHL, now),
     });
   }
+  for (const pick of picks)
+    if (pick.referencePrice) {
+      pick.concerns.unshift(
+        "Indiana reference price. Confirm this exact line and price in Hard Rock Florida before betting.",
+      );
+      if (!allowReference) pick.eligible = false;
+    }
   return picks.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
 }
 
@@ -480,7 +500,8 @@ export function buildIdeas(
       const p = pool.shift()!;
       if (
         !p.eligible ||
-        !isHardRock(p.book) ||
+        (!isHardRock(p.book) &&
+          !(p.referencePrice && p.book === "Hard Rock Bet (IN reference)")) ||
         oddsNumber(p.odds) === null ||
         usedPicks.has(p.id) ||
         events.has(p.event) ||

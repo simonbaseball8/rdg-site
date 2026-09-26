@@ -29,6 +29,8 @@ export type Parlay = {
 };
 
 export type NFLGame = {
+  sportsbook?: string;
+  requires_florida_verification?: boolean;
   event_id: string;
   start_date: string;
   away_team: string;
@@ -148,6 +150,8 @@ export type NFLPlayerPropsAnalysis = {
 };
 
 export type CFBGame = {
+  sportsbook?: string;
+  requires_florida_verification?: boolean;
   event_id: string;
   start_date: string;
   away_team: string;
@@ -196,6 +200,8 @@ export type CFBAnalysis = {
   games: CFBGame[];
 };
 export type MLBGame = {
+  sportsbook?: string;
+  requires_florida_verification?: boolean;
   event_id: string;
   game_pk: number | null;
   start_date: string;
@@ -311,6 +317,8 @@ export type CFBBetCandidate = {
 };
 
 export type NHLGame = {
+  sportsbook?: string;
+  requires_florida_verification?: boolean;
   game_id: number;
   event_id: string;
   date: string;

@@ -107,10 +107,11 @@ function IdeaCard({
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState(false);
   const total = estimatedReturn(picks, stake);
+  const reference = picks.some((p) => p.referencePrice);
   async function copy() {
     try {
       await navigator.clipboard.writeText(
-        `RDG ${picks.length}-leg idea — verify in Hard Rock Bet\n${picks.map((p) => `${p.title} (${formatOdds(p.odds)}) — ${p.matchup} — ${gameTime(p.starts)}`).join("\n")}\nEstimated return incl. stake: ${total === null ? "Unavailable" : money(total)} on ${money(stake)}. Not a sportsbook quote.`,
+        `RDG ${picks.length}-leg idea — verify in Hard Rock Bet\n${picks.map((p) => `${p.title} (${formatOdds(p.odds)}) — ${p.matchup} — ${p.book}${p.referencePrice ? " — VERIFY FLORIDA LINE" : ""} — ${gameTime(p.starts)}`).join("\n")}\nEstimated return incl. stake: ${total === null ? "Unavailable" : money(total)} on ${money(stake)}. Not a sportsbook quote.`,
       );
       setCopied(true);
       setCopyError(false);
@@ -124,7 +125,9 @@ function IdeaCard({
         <span className="eyebrow">
           {index === 0 ? "FIRST LOOK" : `ANOTHER COMBINATION · 0${index + 1}`}
         </span>
-        <span className="draft-badge">Review in app</span>
+        <span className="draft-badge">
+          {reference ? "Reference · verify Florida" : "Review in app"}
+        </span>
       </div>
       <div className="card-title">
         <h3>{picks.length}-leg parlay idea</h3>
@@ -149,6 +152,11 @@ function IdeaCard({
               </div>
               <h4>{p.title}</h4>
               <p>{p.matchup}</p>
+              {p.referencePrice && (
+                <p className="reference-label">
+                  Indiana reference · verify Florida line
+                </p>
+              )}
               <time dateTime={p.starts}>{gameTime(p.starts)}</time>
             </div>
             <strong className="leg-odds">{formatOdds(p.odds)}</strong>
@@ -191,6 +199,7 @@ export default function Home() {
   const [sport, setSport] = useState<SportFilter>("ALL");
   const [horizon, setHorizon] = useState<"today" | "week">("week");
   const [mix, setMix] = useState<"balanced" | "props" | "games">("balanced");
+  const [allowReference, setAllowReference] = useState(false);
   const [size, setSize] = useState(2);
   const [stake, setStake] = useState("10");
   const [query, setQuery] = useState("");
@@ -206,7 +215,7 @@ export default function Home() {
   const nfl = visibleFeeds.NFL?.data as NFLAnalysis | undefined;
   const nflError = relevant.find((r) => r.key === "NFL")?.feed?.error;
   const allPicks = now
-    ? normalizeBoard(visibleFeeds, now).filter(
+    ? normalizeBoard(visibleFeeds, now, allowReference).filter(
         (p) =>
           upcoming(p.starts, now, horizon) &&
           (sport === "ALL" || sport === p.sport),
@@ -465,6 +474,15 @@ export default function Home() {
             </div>
             {view === "today" ? (
               <>
+                <label className="notice reference-toggle">
+                  <input
+                    type="checkbox"
+                    checked={allowReference}
+                    onChange={(e) => setAllowReference(e.target.checked)}
+                  />{" "}
+                  Include standard Hard Rock reference prices when Florida
+                  prices are unavailable. Verify these lines in the Florida app.
+                </label>
                 <div className="slip-controls">
                   <div className="control-group">
                     <span>Legs per parlay</span>
@@ -638,6 +656,11 @@ export default function Home() {
                         </div>
                         <h3>{p.title}</h3>
                         <p>{p.matchup}</p>
+                        {p.referencePrice && (
+                          <p className="reference-label">
+                            Indiana reference · verify Florida line
+                          </p>
+                        )}
                         <time dateTime={p.starts}>{gameTime(p.starts)}</time>
                         <div className="pick-price">
                           <span>{p.book}</span>

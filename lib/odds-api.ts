@@ -8,6 +8,8 @@ export const SPORT_KEYS = {
 } as const;
 export type OddsSport = keyof typeof SPORT_KEYS;
 export type MarketEvent = {
+  sportsbook: string;
+  requires_florida_verification: boolean;
   event_id: string;
   sport: string;
   start_date: string;
@@ -56,18 +58,31 @@ export function adaptOddsEvents(
         e.home_team &&
         Number.isFinite(Date.parse(e.commence_time)),
     )
-    .map((e) => ({
-      event_id: e.id,
-      sport,
-      start_date: e.commence_time,
-      commence_time: e.commence_time,
-      team1: teamName(sport, e.away_team),
-      team2: teamName(sport, e.home_team),
-      away_team: teamName(sport, e.away_team),
-      home_team: teamName(sport, e.home_team),
-      odds: (e.bookmakers ?? [])
-        .filter((b) => b.key === "hardrockbet_fl")
-        .flatMap((b) =>
+    .map((e) => {
+      const florida = (e.bookmakers ?? []).find(
+        (b) =>
+          b.key === "hardrockbet_fl" &&
+          b.markets?.some((m) => m.outcomes?.length),
+      );
+      const book =
+        florida ??
+        (sport === "NFL"
+          ? undefined
+          : (e.bookmakers ?? []).find((b) => b.key === "hardrockbet"));
+      return {
+        sportsbook: florida
+          ? "Hard Rock Bet (FL)"
+          : "Hard Rock Bet (IN reference)",
+        requires_florida_verification: !florida,
+        event_id: e.id,
+        sport,
+        start_date: e.commence_time,
+        commence_time: e.commence_time,
+        team1: teamName(sport, e.away_team),
+        team2: teamName(sport, e.home_team),
+        away_team: teamName(sport, e.away_team),
+        home_team: teamName(sport, e.home_team),
+        odds: (book ? [book] : []).flatMap((b) =>
           (b.markets ?? []).flatMap((m) => {
             const market = (
               {
@@ -93,7 +108,8 @@ export function adaptOddsEvents(
               }));
           }),
         ),
-    }));
+      };
+    });
 }
 export async function loadOddsMarket(
   sport: OddsSport,
@@ -106,7 +122,7 @@ export async function loadOddsMarket(
     );
   const query = new URLSearchParams({
     apiKey,
-    bookmakers: "hardrockbet_fl",
+    bookmakers: "hardrockbet_fl,hardrockbet",
     markets: "h2h,spreads,totals",
     oddsFormat: "american",
     dateFormat: "iso",
@@ -131,6 +147,6 @@ export async function loadOddsMarket(
   return {
     events: adaptOddsEvents(sport, data),
     provider: "The Odds API",
-    sportsbook: "Hard Rock Bet (FL)",
+    sportsbook: "Hard Rock Bet (Florida preferred; reference prices labeled)",
   };
 }

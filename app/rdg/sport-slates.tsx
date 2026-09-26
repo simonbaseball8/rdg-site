@@ -11,6 +11,8 @@ import {
 import type { CFBAnalysis, MLBAnalysis, NHLAnalysis } from "./types";
 import { MatchupLogos } from "./team-logos";
 type Game = {
+  book?: string;
+  reference?: boolean;
   id: string;
   starts: string;
   matchup: string;
@@ -44,6 +46,8 @@ export default function SportSlates({
             warning = d.stats_warning;
             games = d.games.map((g) => ({
               id: g.event_id,
+              book: g.sportsbook,
+              reference: g.requires_florida_verification,
               starts: g.start_date,
               matchup: `${g.away_team} @ ${g.home_team}`,
               message:
@@ -57,6 +61,8 @@ export default function SportSlates({
           if (s === "MLB")
             games = (data as MLBAnalysis).games.map((g) => ({
               id: g.event_id,
+              book: g.sportsbook,
+              reference: g.requires_florida_verification,
               starts: g.start_date,
               matchup: `${g.away_team} @ ${g.home_team}`,
               message: g.rdg?.projected_winner
@@ -68,6 +74,8 @@ export default function SportSlates({
           if (s === "NHL")
             games = (data as NHLAnalysis).games.map((g) => ({
               id: g.event_id,
+              book: g.sportsbook,
+              reference: g.requires_florida_verification,
               starts: g.start_time_utc,
               matchup: g.matchup,
               message:
@@ -94,6 +102,13 @@ export default function SportSlates({
                   <h2>{games.length} upcoming games</h2>
                 </div>
               </div>
+              {games.some((g) => g.reference) && (
+                <p className="notice warning">
+                  Standard Hard Rock prices are shown for reference. Florida
+                  lines can differ. Enable reference prices above to include
+                  qualifying picks in research parlays.
+                </p>
+              )}
               {warning && <p className="notice warning">{warning}</p>}
               {games.length > 0 &&
                 games.every(
@@ -127,8 +142,8 @@ export default function SportSlates({
                     <h3>{g.matchup}</h3>
                     <p>{g.message}</p>
                     <p>
-                      Hard Rock FL moneyline · Away {formatOdds(g.awayOdds)} /
-                      Home {formatOdds(g.homeOdds)}
+                      {g.book ?? "Hard Rock Bet (FL)"} moneyline · Away{" "}
+                      {formatOdds(g.awayOdds)} / Home {formatOdds(g.homeOdds)}
                     </p>
                   </article>
                 ))}
