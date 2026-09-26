@@ -19,6 +19,8 @@ const PRIOR_STATS_URL =
 
 const ODDS_API_BASE = "https://api.the-odds-api.com/v4";
 const ODDS_API_SPORT = "americanfootball_nfl";
+// Include the Florida Hard Rock feed explicitly; region us alone excludes it.
+const PROP_BOOKMAKERS = "hardrockbet_fl,draftkings,fanduel,betmgm,williamhill_us,betrivers,fanatics,bovada,betonlineag,betus";
 
 const CORE_MARKETS = [
   "player_pass_yds",
@@ -3000,7 +3002,7 @@ export async function GET() {
             try {
               const result =
                 await oddsFetch(
-                  `${ODDS_API_BASE}/sports/${ODDS_API_SPORT}/events/${encodeURIComponent(event.id)}/odds?regions=us&markets=${encodeURIComponent(markets)}&oddsFormat=american&dateFormat=iso`,
+                  `${ODDS_API_BASE}/sports/${ODDS_API_SPORT}/events/${encodeURIComponent(event.id)}/odds?bookmakers=${PROP_BOOKMAKERS}&markets=${encodeURIComponent(markets)}&oddsFormat=american&dateFormat=iso`,
                   apiKey,
                   CACHE_SECONDS,
                 );

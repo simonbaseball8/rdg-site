@@ -92,15 +92,16 @@ export function useBoard(sport: SportFilter, enabled: boolean) {
     consumedRefresh.current = refresh;
     async function load() {
       setLoading(true);
-      const results = await Promise.all(
-        keys.map(async (key) => [key, await request(key, force)] as const),
+      await Promise.all(
+        keys.map(async (key) => {
+          const feed = await request(key, force);
+          if (!cancelled) {
+            setFeeds((previous) => ({ ...previous, [key]: feed }));
+            setClock(Date.now());
+          }
+        }),
       );
       if (!cancelled) {
-        setFeeds((previous) => ({
-          ...previous,
-          ...Object.fromEntries(results),
-        }));
-        setClock(Date.now());
         setLoading(false);
       }
     }

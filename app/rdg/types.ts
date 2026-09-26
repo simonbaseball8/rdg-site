@@ -77,6 +77,8 @@ export type NFLGame = {
 };
 
 export type NFLAnalysis = {
+  market_data_available?: boolean;
+  market_data_warning?: string | null;
   sportsbook: string;
   sport: string;
   model: string;

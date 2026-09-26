@@ -1,6 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
+import { MatchupLogos } from "./rdg/team-logos";
+import NflPredictions from "./rdg/nfl-predictions";
+import type { NFLAnalysis } from "./rdg/types";
 import {
   buildIdeas,
   estimatedReturn,
@@ -136,6 +140,7 @@ function IdeaCard({
             <span className="leg-number">{String(i + 1).padStart(2, "0")}</span>
             <div className="leg-main">
               <div className="leg-meta">
+                <MatchupLogos sport={p.sport} matchup={p.matchup} />
                 <span className={`sport-label sport-${p.sport.toLowerCase()}`}>
                   {p.sport}
                 </span>
@@ -183,7 +188,7 @@ function IdeaCard({
 export default function Home() {
   const [view, setView] = useState<View>("today");
   const [sport, setSport] = useState<SportFilter>("NFL");
-  const [horizon, setHorizon] = useState<"today" | "week">("today");
+  const [horizon, setHorizon] = useState<"today" | "week">("week");
   const [size, setSize] = useState(2);
   const [stake, setStake] = useState("10");
   const [query, setQuery] = useState("");
@@ -196,6 +201,8 @@ export default function Home() {
   const visibleFeeds = Object.fromEntries(
     relevant.filter((r) => r.feed && !r.feed.error).map((r) => [r.key, r.feed]),
   );
+  const nfl = visibleFeeds.NFL?.data as NFLAnalysis | undefined;
+  const nflError = relevant.find((r) => r.key === "NFL")?.feed?.error;
   const allPicks = now
     ? normalizeBoard(visibleFeeds, now).filter(
         (p) =>
@@ -241,14 +248,14 @@ export default function Home() {
             onClick={() => setView("today")}
             aria-label="RDG home"
           >
-            <span className="brand-monogram">
-              RDG<span>↗</span>
-            </span>
-            <span className="brand-name">
-              RESPONSIBLE
-              <br />
-              DEGENERATE GAMBLING
-            </span>
+            <Image
+              className="brand-image"
+              src="/rdg-logo.png"
+              alt="Responsible Degenerate Gambling"
+              width={166}
+              height={85}
+              preload
+            />
           </button>
           <nav aria-label="Main navigation">
             {nav.map((item) => (
@@ -492,7 +499,7 @@ export default function Home() {
                     estimate a return.
                   </p>
                 )}
-                {loading || !loaded ? (
+                {(!loaded || loading) && ideas.length === 0 ? (
                   <Loading />
                 ) : ideas.length ? (
                   <div className="idea-grid">
@@ -517,7 +524,10 @@ export default function Home() {
                     <p>
                       {errors.length
                         ? "Some data is unavailable. Try refreshing or browse the available research."
-                        : "There aren’t enough eligible picks from separate games. No extra legs have been forced."}
+                        : nfl?.market_data_available === false &&
+                            sport === "NFL"
+                          ? "NFL predictions are available below, but Hard Rock prices are unavailable for this deployment. Parlays need actual prices."
+                          : "There aren’t enough eligible picks from separate games. No extra legs have been forced."}
                     </p>
                     <div className="empty-actions">
                       {horizon === "today" && (
@@ -589,12 +599,15 @@ export default function Home() {
                   </select>
                   <span>{picks.length} picks</span>
                 </div>
-                {loading || !loaded ? (
+                {(!loaded || loading) && picks.length === 0 ? (
                   <Loading />
                 ) : picks.length ? (
                   <div className="explore-grid">
                     {picks.map((p) => (
                       <article className="pick-card" key={p.id}>
+                        <div className="pick-team-logos">
+                          <MatchupLogos sport={p.sport} matchup={p.matchup} />
+                        </div>
                         <div className="pick-top">
                           <span
                             className={`sport-label sport-${p.sport.toLowerCase()}`}
@@ -624,6 +637,16 @@ export default function Home() {
                 )}
               </>
             )}
+            {(sport === "NFL" || sport === "ALL") && (
+              <NflPredictions
+                data={nfl}
+                now={now}
+                horizon={horizon}
+                error={nflError}
+                onRetry={reload}
+                loading={loading}
+              />
+            )}
             <details className="data-notes">
               <summary>What’s included in this research?</summary>
               <p>
@@ -631,9 +654,9 @@ export default function Home() {
                 profit model. NFL player props require a recent matching Hard
                 Rock quote and an available injury feed. Injury designations can
                 block props; team injury effects and weather adjustments are not
-                modeled here. College football remains research-only. Other
-                sports’ quote timestamps and confirmed lineups are not verified
-                by this view.
+                modeled here. Small-sample college football remains
+                research-only. Other sports’ quote timestamps and confirmed
+                lineups are not verified by this view.
               </p>
               <p>
                 Feed-loaded time is when RDG received the response, not the

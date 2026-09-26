@@ -1,3 +1,5 @@
+import { loadNflMarketFeed } from "./nfl-market-feed";
+
 type Row = Record<string, string>;
 
 const HOME_FIELD_ADVANTAGE = 1.5;
@@ -829,27 +831,13 @@ export async function getRdgNflAnalysis() {
   const apiKey =
     process.env.ODDIZE_API_KEY;
 
-  if (!apiKey) {
-    throw new Error(
-      "ODDIZE_API_KEY is missing"
-    );
-  }
-
   const [
-    oddsResponse,
+    marketFeed,
     stats25Response,
     stats26Response,
     scheduleResponse,
   ] = await Promise.all([
-    fetch(
-      "https://oddize.com/api/v1/odds/latest?sport=nfl&books=hrb",
-      {
-        headers: {
-          "X-API-Key": apiKey,
-        },
-        cache: "no-store",
-      }
-    ),
+    loadNflMarketFeed(apiKey),
 
     fetch(
       "https://github.com/nflverse/nflverse-data/releases/download/stats_team/stats_team_week_2025.csv",
@@ -873,11 +861,6 @@ export async function getRdgNflAnalysis() {
     ),
   ]);
 
-  if (!oddsResponse.ok) {
-    throw new Error(
-      `Oddize request failed: ${oddsResponse.status}`
-    );
-  }
 
   if (
     !stats25Response.ok ||
@@ -889,8 +872,7 @@ export async function getRdgNflAnalysis() {
     );
   }
 
-  const oddsData =
-    await oddsResponse.json();
+  const oddsData = marketFeed;
 
   const historical =
     regularSeason(
@@ -1124,6 +1106,9 @@ export async function getRdgNflAnalysis() {
     );
 
   return {
+    market_data_available: marketFeed.available,
+    market_data_warning: marketFeed.warning,
+
     sportsbook:
       "Hard Rock Bet",
 

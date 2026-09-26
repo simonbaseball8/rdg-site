@@ -1,3 +1,4 @@
+import { canonicalTeamKey } from "./team-aliases.ts";
 import type {
   CFBAnalysis,
   MLBAnalysis,
@@ -92,7 +93,9 @@ export function fresh(feed: Feed | undefined, now: number) {
   );
 }
 export function isHardRock(book: string) {
-  return /^hardrock(?:bet)?$/.test(book.toLowerCase().replace(/[^a-z]/g, ""));
+  return /^hardrock(?:bet)?(?:fl|florida)?$/.test(
+    book.toLowerCase().replace(/[^a-z]/g, ""),
+  );
 }
 function playerKey(name: string) {
   return name.toLowerCase().replace(/[^a-z]/g, "");
@@ -263,7 +266,13 @@ export function normalizeBoard(feeds: Feeds, now: number): Pick[] {
         `College football is in research mode (${r.sample_status}).`,
         ...context,
       ],
-      eligible: false,
+      eligible:
+        strength(r.signal) > 0 &&
+        odds !== null &&
+        ["Established", "Developing"].includes(r.sample_status) &&
+        finite(r.minimum_core_plays) &&
+        r.minimum_core_plays >= 75 &&
+        fresh(feeds.CFB, now),
     });
   }
   const mlb = feeds.MLB?.data as MLBAnalysis | undefined;
@@ -377,7 +386,11 @@ export function buildIdeas(picks: Pick[], size: number, now: number): Pick[][] {
       )
         continue;
       // Provider event IDs can differ; also reject the same matchup at the same start time.
-      const matchupKey = `${p.sport}-${p.matchup.toLowerCase().replace(/[^a-z0-9]/g, "")}-${Date.parse(p.starts)}`;
+      const matchupKey = `${p.sport}-${p.matchup
+        .split(/\s+@\s+|\s+vs\.?\s+/i)
+        .map((team) => canonicalTeamKey(p.sport, team))
+        .sort()
+        .join("-")}-${Date.parse(p.starts)}`;
       if (events.has(matchupKey)) continue;
       chosen.push(p);
       events.add(p.event);
