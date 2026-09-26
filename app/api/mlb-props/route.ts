@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+export const maxDuration = 60;
 
 const ODDS_API_BASE = "https://api.the-odds-api.com/v4";
 const MLB_API = "https://statsapi.mlb.com/api/v1";
@@ -9,7 +10,7 @@ const SPORT_KEY = "baseball_mlb";
 const SEASON = 2026;
 
 // Keep the live route fast and simple for Vercel.
-const MAX_EVENTS_TO_ANALYZE = 4;
+const MAX_EVENTS_TO_ANALYZE = 15;
 
 const MARKETS = [
   "batter_hits",
@@ -55,6 +56,7 @@ type EventOdds = OddsEvent & {
 };
 
 type BookQuote = {
+  updated_at?: string;
   sportsbook_key: string;
   sportsbook: string;
   side: Side;
@@ -349,6 +351,7 @@ function buildLineGroups(event: EventOdds): LineGroup[] {
         }
 
         groups.get(key)!.quotes.push({
+          updated_at: market.last_update ?? bookmaker.last_update,
           sportsbook_key: bookmaker.key,
           sportsbook: bookmaker.title,
           side,
@@ -436,6 +439,7 @@ export async function GET() {
         version: "2.0-rdg-mlb-simple-live-props",
         sport: "MLB",
         message: "No upcoming MLB events were found.",
+        actionable: [], pass: [],
         events_found: allEvents.length,
         usage: { events_request: eventsUsage },
       });
@@ -447,7 +451,7 @@ export async function GET() {
         const url =
           `${ODDS_API_BASE}/sports/${SPORT_KEY}/events/${event.id}/odds` +
           `?apiKey=${encodeURIComponent(apiKey)}` +
-          `&regions=us` +
+          `&bookmakers=hardrockbet_fl,hardrockbet,draftkings,fanduel,betmgm` +
           `&markets=${encodeURIComponent(MARKETS.join(","))}` +
           `&oddsFormat=american` +
           `&dateFormat=iso`;
@@ -643,7 +647,7 @@ export async function GET() {
       pass,
       next_step:
         "Use actionable OVER/UNDER suggestions on the website and ignore PASS rows.",
-    });
+    }, { headers: { "Cache-Control": "public, s-maxage=300, must-revalidate" } });
   } catch (error) {
     console.error("RDG MLB Simple Props Error:", error);
 

@@ -1,11 +1,10 @@
+import { loadOddsMarket } from "../../../lib/odds-api";
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
 const SEASON = 2026;
 
-const ODDIZE_URL =
-  "https://oddize.com/api/v1/odds/latest?sport=mlb&books=hrb";
 
 const MLB_API = "https://statsapi.mlb.com/api/v1";
 
@@ -143,16 +142,16 @@ const TEAM_ALIASES: Record<string, string[]> = {
 };
 
 function teamsMatch(
-  oddizeTeam: string,
+  providerTeam: string,
   mlbTeam: string
 ) {
-  const oddize = normalizeTeam(oddizeTeam);
+  const provider = normalizeTeam(providerTeam);
   const mlb = normalizeTeam(mlbTeam);
 
-  if (oddize === mlb) return true;
+  if (provider === mlb) return true;
 
   return (
-    TEAM_ALIASES[oddize]?.includes(mlb) ??
+    TEAM_ALIASES[provider]?.includes(mlb) ??
     false
   );
 }
@@ -464,15 +463,6 @@ function projectedGameTotal(
 
 export async function GET() {
   try {
-    const oddizeKey =
-      process.env.ODDIZE_API_KEY;
-
-    if (!oddizeKey) {
-      throw new Error(
-        "ODDIZE_API_KEY is missing"
-      );
-    }
-
     const date = todayET();
 
     const scheduleUrl =
@@ -492,9 +482,7 @@ export async function GET() {
       scheduleData,
       standingsData,
     ] = await Promise.all([
-      fetchJson(ODDIZE_URL, {
-        "X-API-Key": oddizeKey,
-      }),
+      loadOddsMarket("MLB"),
       fetchJson(scheduleUrl),
       fetchJson(standingsUrl),
     ]);
@@ -564,7 +552,7 @@ export async function GET() {
     const oddsEvents =
       oddsData.events ?? [];
 
-    // Oddize can return more than one event record for the same MLB matchup.
+    // Match each provider event to the scheduled game, including doubleheaders.
     // Keep one Hard Rock event per actual MLB game so the board does not duplicate games.
     const matchedOddsByGamePk =
       new Map<number, any>();
@@ -573,6 +561,7 @@ export async function GET() {
       const matchedGame =
         mlbGames.find(
           (game: any) =>
+            Math.abs(Date.parse(game.gameDate) - Date.parse(event.start_date)) < 90 * 60_000 &&
             teamsMatch(
               event.team1,
               game.teams?.away?.team?.name
@@ -653,6 +642,7 @@ export async function GET() {
           const mlbGame =
             mlbGames.find(
               (game: any) =>
+                Math.abs(Date.parse(game.gameDate) - Date.parse(event.start_date)) < 90 * 60_000 &&
                 teamsMatch(
                   awayTeam,
                   game.teams?.away?.team?.name
@@ -977,6 +967,10 @@ export async function GET() {
               : "Pass";
 
           return {
+
+            sportsbook: event.sportsbook,
+            quote_times: event.quote_times,
+            requires_florida_verification: event.requires_florida_verification,
             event_id:
               event.event_id,
 

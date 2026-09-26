@@ -1,3 +1,5 @@
+import { loadNflMarketFeed } from "./nfl-market-feed";
+
 type Row = Record<string, string>;
 
 const HOME_FIELD_ADVANTAGE = 1.5;
@@ -827,29 +829,15 @@ function analyzeMarket(
 
 export async function getRdgNflAnalysis() {
   const apiKey =
-    process.env.ODDIZE_API_KEY;
-
-  if (!apiKey) {
-    throw new Error(
-      "ODDIZE_API_KEY is missing"
-    );
-  }
+    process.env.ODDS_API_KEY;
 
   const [
-    oddsResponse,
+    marketFeed,
     stats25Response,
     stats26Response,
     scheduleResponse,
   ] = await Promise.all([
-    fetch(
-      "https://oddize.com/api/v1/odds/latest?sport=nfl&books=hrb",
-      {
-        headers: {
-          "X-API-Key": apiKey,
-        },
-        cache: "no-store",
-      }
-    ),
+    loadNflMarketFeed(apiKey),
 
     fetch(
       "https://github.com/nflverse/nflverse-data/releases/download/stats_team/stats_team_week_2025.csv",
@@ -873,11 +861,6 @@ export async function getRdgNflAnalysis() {
     ),
   ]);
 
-  if (!oddsResponse.ok) {
-    throw new Error(
-      `Oddize request failed: ${oddsResponse.status}`
-    );
-  }
 
   if (
     !stats25Response.ok ||
@@ -889,8 +872,7 @@ export async function getRdgNflAnalysis() {
     );
   }
 
-  const oddsData =
-    await oddsResponse.json();
+  const oddsData = marketFeed;
 
   const historical =
     regularSeason(
@@ -944,10 +926,10 @@ export async function getRdgNflAnalysis() {
 
   const nextWeek = weeksInWindow[0] ?? 1;
 
-  const oddizeEvents = oddsData.events ?? [];
+  const marketEvents = oddsData.events ?? [];
 
-  function findOddizeEvent(awayTeam: string, homeTeam: string) {
-    return oddizeEvents.find(
+  function findMarketEvent(awayTeam: string, homeTeam: string) {
+    return marketEvents.find(
       (event: any) =>
         normalizeTeam(event.team1) === normalizeTeam(awayTeam) &&
         normalizeTeam(event.team2) === normalizeTeam(homeTeam)
@@ -960,7 +942,7 @@ export async function getRdgNflAnalysis() {
     .map((schedule: Row) => {
       const awayTeam = normalizeTeam(schedule.away_team);
       const homeTeam = normalizeTeam(schedule.home_team);
-      const event = findOddizeEvent(awayTeam, homeTeam);
+      const event = findMarketEvent(awayTeam, homeTeam);
       const odds = event?.odds ?? [];
 
       const moneyline = odds
@@ -1024,6 +1006,9 @@ export async function getRdgNflAnalysis() {
           .current_season_games > 0;
 
       return {
+        sportsbook: event?.sportsbook,
+            quote_times: event?.quote_times,
+        requires_florida_verification: event?.requires_florida_verification,
         event_id:
           event?.event_id ??
           schedule.game_id ??
@@ -1124,6 +1109,9 @@ export async function getRdgNflAnalysis() {
     );
 
   return {
+    market_data_available: marketFeed.available,
+    market_data_warning: marketFeed.warning,
+
     sportsbook:
       "Hard Rock Bet",
 
