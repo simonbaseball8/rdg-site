@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { type Feeds, type SportFilter, upcoming, formatOdds } from "./board";
+import { FighterPhoto } from "./fighter-photo";
 import { MatchupLogos } from "./team-logos";
 import { checkedTime } from "./pick-details";
 type Game = {
@@ -34,7 +35,7 @@ type Game = {
     card?: string;
     weightClass?: string;
     rounds?: number;
-    fighters?: Array<{ name: string; record?: string }>;
+    fighters?: Array<{ name: string; record?: string; photo?: string | null }>;
   } | null;
 };
 type Board = {
@@ -118,6 +119,20 @@ export default function ExpansionBoard({
                 sport="NBA"
                 matchup={`${g.away_team} @ ${g.home_team}`}
               />
+            )}
+            {sport === "UFC" && (
+              <div className="fighter-matchup">
+                {(g.context?.fighters?.length === 2
+                  ? g.context.fighters
+                  : [{ name: g.away_team }, { name: g.home_team }]
+                ).map((f) => (
+                  <FighterPhoto
+                    key={f.name}
+                    name={f.name}
+                    photo={"photo" in f ? f.photo : null}
+                  />
+                ))}
+              </div>
             )}
             <h3>
               {g.away_team} {sport === "UFC" ? "vs." : "@"} {g.home_team}

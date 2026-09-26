@@ -34,3 +34,9 @@ Sources:
 Explore now exposes offered over/under totals for NFL, college football, MLB and NHL. NBA totals remain on its research board. Only the existing MLB totals model can nominate automatic total legs: its experimental signal, positive estimated value, matching half-run line, named probable starters and a recent sportsbook quote are required. Whole-run lines remain research-only because the current probability model does not estimate pushes. Other sports do not have a totals prediction model connected and their offered sides never become automatic picks.
 
 The totals-only parlay style, Total market filter and results journal support these legs. Player prop type filters cover the existing NFL passing/rushing/receiving yards, receptions, passing touchdowns, anytime touchdowns and MLB pitcher strikeouts, hits and total bases. These filters do not create unavailable markets or bypass injury/role/price checks. No additional paid API calls are introduced by these controls.
+
+## Weekly winning slips and fighter photos
+
+Results includes a Wins showcase for tracked winning parlays originally saved with five or more legs. It follows the current journal filters and keeps paper and placed records separate. Weeks run Sunday–Saturday in America/New_York and use the first recorded winning settlement in the current winning run. Payout corrections update the net amount without moving the win to another week; reversing a win removes it. Pushed/void legs are identified. Showcase net units include only its winning slips; the overall W–L, win rate and ROI include the whole filtered record. Settlements remain manual, not sportsbook-verified.
+
+UFC cards use portraits from ESPN's headshot CDN, keyed by competitor IDs from the matched ESPN UFC event. Unmatched fighters and failed image requests show initials and “Photo unavailable”; no guessed identity or generated face is used. Images load lazily without extra Odds API requests.

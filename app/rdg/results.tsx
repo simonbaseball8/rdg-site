@@ -18,6 +18,7 @@ import {
 } from "./journal-store";
 import { formatOdds } from "./board";
 import { checkedTime } from "./pick-details";
+import Wins from "./wins";
 import LegacyResults from "./legacy-results";
 const units = (n: number) => `${n > 0 ? "+" : ""}${n.toFixed(2)}u`;
 function ResultEditor({
@@ -264,9 +265,16 @@ export default function Results() {
               </select>
             </label>
           </div>
+          <Wins bets={filtered} mode={mode} ready={ready} />
           <div className="result-stats">
             {[
               ["Wins / losses", `${m.wins} / ${m.losses}`],
+              [
+                "Win rate",
+                m.wins + m.losses
+                  ? `${((100 * m.wins) / (m.wins + m.losses)).toFixed(1)}%`
+                  : "—",
+              ],
               ["Net units", units(m.profit)],
               ["ROI", m.roi === null ? "—" : `${m.roi.toFixed(1)}%`],
               ["Pending", String(m.pending)],
@@ -278,9 +286,10 @@ export default function Results() {
             ))}
           </div>
           <p className="quote-note">
-            {m.pushes} pushes · {m.voids} voids. ROI = net profit ÷ settled
-            stakes, excluding fully void bets and pending bets. A parlay counts
-            as one wager; mixed-sport slips have their own category.
+            {m.pushes} pushes · {m.voids} voids. Win rate excludes pending,
+            pushed and void bets. ROI = net profit ÷ settled stakes, excluding
+            fully void bets and pending bets. A parlay counts as one wager;
+            mixed-sport slips have their own category.
           </p>
           <div className="journal-toolbar">
             <button onClick={exportFile} disabled={!ready}>

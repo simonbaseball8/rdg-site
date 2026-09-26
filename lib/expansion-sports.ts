@@ -95,6 +95,9 @@ export async function expansionBoard(sport: "NBA" | "UFC") {
             rounds: match.format?.regulation?.periods ?? null,
             fighters: match.competitors.map((p: any) => ({
               name: p.athlete?.fullName,
+              photo: /^\d+$/.test(String(p.id ?? ""))
+                ? `https://a.espncdn.com/i/headshots/mma/players/full/${p.id}.png`
+                : null,
               record:
                 p.records?.find((r: any) => r.name === "overall")?.summary ??
                 null,
