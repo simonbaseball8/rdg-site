@@ -1,3 +1,4 @@
+import { loadOddsMarket } from "../../../lib/odds-api";
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
@@ -47,8 +48,6 @@ const ESTABLISHED_WEIGHT = 1.0;
 const DEVELOPING_WEIGHT = 0.75;
 const SMALL_SAMPLE_WEIGHT = 0.45;
 
-const ODDIZE_URL =
-  "https://oddize.com/api/v1/odds/latest?sport=ncaaf&books=hrb";
 
 const CFBD_CORE_URL =
   `https://api.collegefootballdata.com/ratings/core?year=${SEASON}`;
@@ -79,11 +78,11 @@ function normalizeTeam(
 }
 
 function findCoreRating(
-  oddizeTeam: string,
+  providerTeam: string,
   ratings: CoreRating[]
 ): CoreRating | null {
   const target =
-    normalizeTeam(oddizeTeam);
+    normalizeTeam(providerTeam);
 
   const exact =
     ratings.find(
@@ -98,7 +97,7 @@ function findCoreRating(
   }
 
   const partial =
-    ratings.find(
+    [...ratings].sort((a,b) => normalizeTeam(b.team).length - normalizeTeam(a.team).length).find(
       (rating) => {
         const candidate =
           normalizeTeam(
@@ -355,85 +354,15 @@ function calculateProjection(
 
 export async function GET() {
   try {
-    const oddizeKey =
-      process.env
-        .ODDIZE_API_KEY;
-
-    const cfbdKey =
-      process.env
-        .CFBD_API_KEY;
-
-    if (!oddizeKey) {
-      throw new Error(
-        "ODDIZE_API_KEY is missing"
-      );
-    }
-
-    if (!cfbdKey) {
-      throw new Error(
-        "CFBD_API_KEY is missing"
-      );
-    }
-
-    const [
-      oddsResponse,
-      coreResponse,
-    ] =
-      await Promise.all([
-        fetch(
-          ODDIZE_URL,
-          {
-            headers: {
-              "X-API-Key":
-                oddizeKey,
-            },
-            cache:
-              "no-store",
-          }
-        ),
-
-        fetch(
-          CFBD_CORE_URL,
-          {
-            headers: {
-              Authorization:
-                `Bearer ${cfbdKey}`,
-            },
-            cache:
-              "no-store",
-          }
-        ),
-      ]);
-
-    if (
-      !oddsResponse.ok
-    ) {
-      const text =
-        await oddsResponse.text();
-
-      throw new Error(
-        `Oddize failed ${oddsResponse.status}: ${text}`
-      );
-    }
-
-    if (
-      !coreResponse.ok
-    ) {
-      const text =
-        await coreResponse.text();
-
-      throw new Error(
-        `CFBD failed ${coreResponse.status}: ${text}`
-      );
-    }
-
-    const oddsData =
-      await oddsResponse.json();
-
-    const coreRatings:
-      CoreRating[] =
-      await coreResponse.json();
-
+    const cfbdKey = process.env.CFBD_API_KEY;
+    const [oddsData, coreResult] = await Promise.all([
+      loadOddsMarket("CFB"),
+      cfbdKey ? fetch(CFBD_CORE_URL, { headers: { Authorization: `Bearer ${cfbdKey}` }, next: { revalidate: 3600 }, signal: AbortSignal.timeout(20000) })
+        .then(async response => response.ok ? { ratings: await response.json() as CoreRating[], warning: null } : { ratings: [] as CoreRating[], warning: "College football statistics are temporarily unavailable." })
+        .catch(() => ({ ratings: [] as CoreRating[], warning: "College football statistics are temporarily unavailable." }))
+        : Promise.resolve({ ratings: [] as CoreRating[], warning: "College football odds are connected. Team statistics are not connected, so model predictions are unavailable." }),
+    ]);
+    const coreRatings = coreResult.ratings;
     const rawEvents =
       oddsData.events ?? [];
 
@@ -1112,7 +1041,8 @@ export async function GET() {
           "Historical CORE ratings used for calibration are retrospective season ratings rather than point-in-time pregame snapshots. The 78.22% historical straight-up evaluation result is not a wager win probability, ATS win rate, or evidence of profitability.",
       },
 
-      games:
+      stats_warning: coreResult.warning,
+        games:
         analyzedGames,
     });
   } catch (error) {

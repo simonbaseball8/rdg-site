@@ -28,7 +28,9 @@ export type Pick = {
   eligible: boolean;
 };
 export type Feed = { data: unknown; loadedAt: number; error?: string };
-export type Feeds = Partial<Record<Sport | "props" | "injuries", Feed>>;
+export type Feeds = Partial<
+  Record<Sport | "props" | "mlbProps" | "injuries", Feed>
+>;
 export const FRESH_FOR_MS = 15 * 60_000;
 export const LABELS: Record<SportFilter, string> = {
   ALL: "All sports",
@@ -234,6 +236,69 @@ export function normalizeBoard(feeds: Feeds, now: number): Pick[] {
         fresh(feeds.props, now),
     });
   }
+  const mlbProps = feeds.mlbProps?.data as
+    | {
+        actionable?: Array<{
+          event_id: string;
+          commence_time: string;
+          matchup: string;
+          player: string;
+          market: string;
+          market_name: string;
+          market_line: number;
+          signal: string;
+          rdg_projection: number;
+          reasons?: string[];
+          history?: { games: number };
+          market_data: {
+            quotes: Array<{
+              sportsbook_key: string;
+              sportsbook: string;
+              side: string;
+              line: number;
+              odds: number | null;
+              updated_at?: string;
+            }>;
+          };
+        }>;
+      }
+    | undefined;
+  for (const p of mlbProps?.actionable ?? []) {
+    const quote = p.market_data.quotes.find(
+      (q) =>
+        q.sportsbook_key === "hardrockbet_fl" &&
+        q.side.toUpperCase() === p.signal &&
+        q.line === p.market_line,
+    );
+    const timestamp = Date.parse(quote?.updated_at ?? "");
+    const recent = timestamp <= now && now - timestamp < FRESH_FOR_MS;
+    picks.push({
+      id: `mlb-prop-${p.event_id}-${p.player}-${p.market}`,
+      event: `MLB-${p.event_id}`,
+      sport: "MLB",
+      starts: p.commence_time,
+      matchup: p.matchup,
+      title: `${p.player} · ${p.signal === "OVER" ? "Over" : "Under"} ${p.market_line} ${p.market_name}`,
+      market: "Player prop",
+      odds: oddsNumber(quote?.odds),
+      book: quote?.sportsbook ?? "No Hard Rock quote",
+      score: 2,
+      reasons: p.reasons ?? [`RDG projection: ${p.rdg_projection}`],
+      concerns: [
+        "Confirm the starting lineup or probable pitcher before betting.",
+        ...(!recent
+          ? ["No recent matching Hard Rock quote; research only."]
+          : []),
+      ],
+      eligible:
+        !!quote &&
+        oddsNumber(quote.odds) !== null &&
+        recent &&
+        (p.history?.games ?? 0) >= 10 &&
+        /^(OVER|UNDER)$/.test(p.signal) &&
+        fresh(feeds.mlbProps, now),
+    });
+  }
   const cfb = feeds.CFB?.data as CFBAnalysis | undefined;
   for (const g of cfb?.games ?? []) {
     const r = g.rdg;
@@ -367,14 +432,52 @@ export function normalizeBoard(feeds: Feeds, now: number): Pick[] {
   return picks.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
 }
 
-export function buildIdeas(picks: Pick[], size: number, now: number): Pick[][] {
+export type ParlayMix = "balanced" | "props" | "games";
+export function buildIdeas(
+  picks: Pick[],
+  size: number,
+  now: number,
+  mix: ParlayMix = "balanced",
+): Pick[][] {
   if (!Number.isInteger(size) || size < 2 || size > 5) return [];
   const usedPicks = new Set<string>();
   const results: Pick[][] = [];
+  const priorMatchups = new Set<string>();
+  const gameKey = (p: Pick) =>
+    `${p.sport}-${p.matchup
+      .split(/\s+@\s+|\s+vs\.?\s+/i)
+      .map((t) => canonicalTeamKey(p.sport, t))
+      .sort()
+      .join("-")}-${Date.parse(p.starts)}`;
   for (let i = 0; i < 3; i++) {
     const chosen: Pick[] = [];
     const events = new Set<string>();
-    for (const p of picks) {
+    const pool = picks.filter(
+      (p) =>
+        mix === "balanced" ||
+        (mix === "props"
+          ? p.market === "Player prop"
+          : p.market !== "Player prop"),
+    );
+    while (pool.length) {
+      // Prefer a different game/sport and include a qualifying prop in a balanced card.
+      const priority = (p: Pick) =>
+        (priorMatchups.has(gameKey(p)) ? 0 : 20) +
+        (chosen.some((c) => c.sport === p.sport) ? 0 : 8) +
+        (mix === "balanced" &&
+        !chosen.some((c) => c.market === "Player prop") &&
+        p.market === "Player prop"
+          ? 6
+          : 0) +
+        (chosen.some((c) => c.market === p.market) ? 0 : 3) +
+        p.score;
+      pool.sort(
+        (a, b) =>
+          priority(b) - priority(a) ||
+          b.score - a.score ||
+          a.id.localeCompare(b.id),
+      );
+      const p = pool.shift()!;
       if (
         !p.eligible ||
         !isHardRock(p.book) ||
@@ -398,7 +501,10 @@ export function buildIdeas(picks: Pick[], size: number, now: number): Pick[][] {
       if (chosen.length === size) break;
     }
     if (chosen.length !== size) break;
-    chosen.forEach((p) => usedPicks.add(p.id));
+    chosen.forEach((p) => {
+      usedPicks.add(p.id);
+      priorMatchups.add(gameKey(p));
+    });
     results.push(chosen);
   }
   return results;

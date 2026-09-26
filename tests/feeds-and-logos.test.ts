@@ -25,15 +25,28 @@ test("missing keys and unavailable odds feeds do not throw or fabricate odds", a
 });
 test("valid market data is retained for priced picks", async () => {
   const event = {
-    team1: "LAC",
-    team2: "BUF",
-    odds: [
-      { market: "spread", team: "BUF", line: -7.5, american_odds: "-110" },
+    id: "x",
+    commence_time: "2026-09-27T17:00:00Z",
+    away_team: "Los Angeles Chargers",
+    home_team: "Buffalo Bills",
+    bookmakers: [
+      {
+        key: "hardrockbet_fl",
+        markets: [
+          {
+            key: "spreads",
+            outcomes: [{ name: "Buffalo Bills", point: -7.5, price: -110 }],
+          },
+        ],
+      },
     ],
   };
   const response: typeof fetch = async () =>
-    new Response(JSON.stringify({ events: [event] }));
-  assert.deepEqual((await loadNflMarketFeed("test", response)).events, [event]);
+    new Response(JSON.stringify([event]));
+  const feed = await loadNflMarketFeed("test", response);
+  assert.equal(feed.available, true);
+  assert.equal(feed.events[0].team1, "LAC");
+  assert.equal(feed.events[0].odds[0].american_odds, -110);
 });
 test("full names and provider aliases resolve to team logos; unknowns use fallback", () => {
   assert.equal(teamLogoUrl("NFL", "LAC"), teamLogoUrl("NFL", "SDG"));

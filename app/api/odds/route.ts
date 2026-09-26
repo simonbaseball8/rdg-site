@@ -1,34 +1,9 @@
+import { loadOddsMarket } from "../../../lib/odds-api";
 import { NextResponse } from "next/server";
 
 export async function GET() {
   try {
-    const apiKey = process.env.ODDIZE_API_KEY;
-
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: "ODDIZE_API_KEY is missing" },
-        { status: 500 }
-      );
-    }
-
-    const response = await fetch(
-      "https://oddize.com/api/v1/odds/latest?sport=nfl&books=hrb",
-      {
-        headers: {
-          "X-API-Key": apiKey,
-        },
-        cache: "no-store",
-      }
-    );
-
-    if (!response.ok) {
-      return NextResponse.json(
-        { error: "Oddize request failed", status: response.status },
-        { status: response.status }
-      );
-    }
-
-    const data = await response.json();
+    const data = await loadOddsMarket("NFL");
 
     const games = (data.events ?? [])
       .map((event: any) => {

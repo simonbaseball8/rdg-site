@@ -1485,7 +1485,7 @@ function oddsLines(
             true,
 
           updated_at:
-            market?.last_update ??
+            market?.last_update ?? book?.last_update ??
             null,
         });
       }
@@ -1573,7 +1573,7 @@ function anytimeTDLines(
             true,
 
           updated_at:
-            market?.last_update ??
+            market?.last_update ?? book?.last_update ??
             null,
         });
       }
@@ -3245,10 +3245,7 @@ export async function GET() {
             continue;
           }
 
-          const line =
-            consensusLine(
-              lines,
-            );
+          const line = lines.find(q => q.available && q.sportsbook === "Hard Rock Bet (FL)" && Number.isFinite(q.line))?.line ?? consensusLine(lines);
 
           if (
             line === null
@@ -3750,7 +3747,7 @@ function pickResearch(player:PlayerHistory,m:CoreMarket,line:number|null,pick:st
       {
         headers: {
           "Cache-Control":
-            "public, s-maxage=900, stale-while-revalidate=1800",
+            "public, s-maxage=300, must-revalidate",
         },
       },
     );

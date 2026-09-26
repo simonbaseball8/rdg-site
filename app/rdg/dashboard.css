@@ -1330,3 +1330,7 @@
     justify-content: center;
   }
 }
+
+.mix-control { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); }
+.mix-control select { background: #16241d; color: #edf5eb; border: 1px solid #34443b; border-radius: 6px; padding: 8px; }
+.slip-controls { flex-wrap: wrap; gap: 16px; }

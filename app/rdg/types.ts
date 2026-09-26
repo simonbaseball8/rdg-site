@@ -155,6 +155,7 @@ export type CFBGame = {
   stats_connected: boolean;
 
   hard_rock: {
+    moneyline?: { away_odds: string | number | null; home_odds: string | number | null };
     spread: {
       away_team: string;
       away_line: number | null;

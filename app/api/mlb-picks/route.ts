@@ -1,11 +1,10 @@
+import { loadOddsMarket } from "../../../lib/odds-api";
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
 const SEASON = 2026;
 
-const ODDIZE_URL =
-  "https://oddize.com/api/v1/odds/latest?sport=mlb&books=hrb";
 
 const MLB_API = "https://statsapi.mlb.com/api/v1";
 
@@ -143,16 +142,16 @@ const TEAM_ALIASES: Record<string, string[]> = {
 };
 
 function teamsMatch(
-  oddizeTeam: string,
+  providerTeam: string,
   mlbTeam: string
 ) {
-  const oddize = normalizeTeam(oddizeTeam);
+  const provider = normalizeTeam(providerTeam);
   const mlb = normalizeTeam(mlbTeam);
 
-  if (oddize === mlb) return true;
+  if (provider === mlb) return true;
 
   return (
-    TEAM_ALIASES[oddize]?.includes(mlb) ??
+    TEAM_ALIASES[provider]?.includes(mlb) ??
     false
   );
 }
@@ -464,15 +463,6 @@ function projectedGameTotal(
 
 export async function GET() {
   try {
-    const oddizeKey =
-      process.env.ODDIZE_API_KEY;
-
-    if (!oddizeKey) {
-      throw new Error(
-        "ODDIZE_API_KEY is missing"
-      );
-    }
-
     const date = todayET();
 
     const scheduleUrl =
@@ -492,9 +482,7 @@ export async function GET() {
       scheduleData,
       standingsData,
     ] = await Promise.all([
-      fetchJson(ODDIZE_URL, {
-        "X-API-Key": oddizeKey,
-      }),
+      loadOddsMarket("MLB"),
       fetchJson(scheduleUrl),
       fetchJson(standingsUrl),
     ]);

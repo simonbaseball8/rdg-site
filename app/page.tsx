@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import { MatchupLogos } from "./rdg/team-logos";
+import SportSlates from "./rdg/sport-slates";
 import NflPredictions from "./rdg/nfl-predictions";
 import type { NFLAnalysis } from "./rdg/types";
 import {
@@ -187,8 +188,9 @@ function IdeaCard({
 }
 export default function Home() {
   const [view, setView] = useState<View>("today");
-  const [sport, setSport] = useState<SportFilter>("NFL");
+  const [sport, setSport] = useState<SportFilter>("ALL");
   const [horizon, setHorizon] = useState<"today" | "week">("week");
+  const [mix, setMix] = useState<"balanced" | "props" | "games">("balanced");
   const [size, setSize] = useState(2);
   const [stake, setStake] = useState("10");
   const [query, setQuery] = useState("");
@@ -215,7 +217,7 @@ export default function Home() {
       (market === "All bets" || p.market === market) &&
       `${p.title} ${p.matchup}`.toLowerCase().includes(query.toLowerCase()),
   );
-  const ideas = buildIdeas(allPicks, size, now);
+  const ideas = buildIdeas(allPicks, size, now, mix);
   const errors = relevant.filter((r) => r.feed?.error);
   const stale = relevant.some(
     (r) => r.feed && !r.feed.error && !fresh(r.feed, now),
@@ -417,7 +419,11 @@ export default function Home() {
                         : r.key,
                   )
                   .join(", ")}{" "}
-                unavailable. Other feeds may still appear. Refresh to retry.
+                unavailable.{" "}
+                {errors
+                  .map((r) => r.feed?.error)
+                  .filter(Boolean)
+                  .join(" ")}
               </div>
             )}
             {stale && (
@@ -476,6 +482,18 @@ export default function Home() {
                     </div>
                     <small>More legs = harder to hit</small>
                   </div>
+                  <label className="mix-control">
+                    Parlay style
+                    <select
+                      aria-label="Parlay style"
+                      value={mix}
+                      onChange={(e) => setMix(e.target.value as typeof mix)}
+                    >
+                      <option value="balanced">Balanced mix</option>
+                      <option value="props">Player props</option>
+                      <option value="games">Game picks</option>
+                    </select>
+                  </label>
                   <label className="stake-input">
                     Example stake{" "}
                     <span>
@@ -647,6 +665,12 @@ export default function Home() {
                 loading={loading}
               />
             )}
+            <SportSlates
+              feeds={visibleFeeds}
+              sport={sport}
+              now={now}
+              horizon={horizon}
+            />
             <details className="data-notes">
               <summary>What’s included in this research?</summary>
               <p>

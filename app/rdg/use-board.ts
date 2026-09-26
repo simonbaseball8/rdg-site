@@ -16,6 +16,7 @@ const endpoints = {
   NHL: "/api/nhl-picks",
   props: "/api/nfl-player-props",
   injuries: "/api/nfl-injuries",
+  mlbProps: "/api/mlb-props",
 } as const;
 type Key = keyof typeof endpoints;
 const cache = new Map<Key, Feed>();
@@ -33,17 +34,23 @@ async function request(key: Key, force: boolean): Promise<Feed> {
         cache: "no-store",
         signal: AbortSignal.timeout(90_000),
       });
-      if (!response.ok)
-        throw new Error(`Feed unavailable (${response.status}).`);
       const data = await response.json();
+      if (!response.ok)
+        throw new Error(
+          data.details ??
+            data.error ??
+            `Feed unavailable (${response.status}).`,
+        );
       if (!data || data.success === false)
         throw new Error("Feed unavailable. Try again shortly.");
       const rows =
-        key === "props"
-          ? data.parlay_pool
-          : key === "injuries"
-            ? (data.current_injuries ?? data.injuries)
-            : data.games;
+        key === "mlbProps"
+          ? data.actionable
+          : key === "props"
+            ? data.parlay_pool
+            : key === "injuries"
+              ? (data.current_injuries ?? data.injuries)
+              : data.games;
       if (!Array.isArray(rows))
         throw new Error("The feed returned an unexpected response.");
       const feed = { data, loadedAt: Date.now() };
@@ -84,10 +91,12 @@ export function useBoard(sport: SportFilter, enabled: boolean) {
     let cancelled = false;
     const keys: Key[] =
       sport === "ALL"
-        ? [...SPORTS, "props", "injuries"]
+        ? [...SPORTS, "props", "injuries", "mlbProps"]
         : sport === "NFL"
           ? ["NFL", "props", "injuries"]
-          : [sport];
+          : sport === "MLB"
+            ? ["MLB", "mlbProps"]
+            : [sport];
     const force = refresh > consumedRefresh.current;
     consumedRefresh.current = refresh;
     async function load() {
@@ -113,10 +122,12 @@ export function useBoard(sport: SportFilter, enabled: boolean) {
   const reload = useCallback(() => setRefresh((value) => value + 1), []);
   const keys: Key[] =
     sport === "ALL"
-      ? [...SPORTS, "props", "injuries"]
+      ? [...SPORTS, "props", "injuries", "mlbProps"]
       : sport === "NFL"
         ? ["NFL", "props", "injuries"]
-        : [sport];
+        : sport === "MLB"
+          ? ["MLB", "mlbProps"]
+          : [sport];
   const relevant = keys.map((key) => ({ key, feed: feeds[key] }));
   return { feeds, loading, reload, now: clock, relevant };
 }

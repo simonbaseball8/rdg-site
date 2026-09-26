@@ -829,7 +829,7 @@ function analyzeMarket(
 
 export async function getRdgNflAnalysis() {
   const apiKey =
-    process.env.ODDIZE_API_KEY;
+    process.env.ODDS_API_KEY;
 
   const [
     marketFeed,
@@ -926,10 +926,10 @@ export async function getRdgNflAnalysis() {
 
   const nextWeek = weeksInWindow[0] ?? 1;
 
-  const oddizeEvents = oddsData.events ?? [];
+  const marketEvents = oddsData.events ?? [];
 
-  function findOddizeEvent(awayTeam: string, homeTeam: string) {
-    return oddizeEvents.find(
+  function findMarketEvent(awayTeam: string, homeTeam: string) {
+    return marketEvents.find(
       (event: any) =>
         normalizeTeam(event.team1) === normalizeTeam(awayTeam) &&
         normalizeTeam(event.team2) === normalizeTeam(homeTeam)
@@ -942,7 +942,7 @@ export async function getRdgNflAnalysis() {
     .map((schedule: Row) => {
       const awayTeam = normalizeTeam(schedule.away_team);
       const homeTeam = normalizeTeam(schedule.home_team);
-      const event = findOddizeEvent(awayTeam, homeTeam);
+      const event = findMarketEvent(awayTeam, homeTeam);
       const odds = event?.odds ?? [];
 
       const moneyline = odds

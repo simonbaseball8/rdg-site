@@ -1,10 +1,9 @@
+import { loadOddsMarket } from "../../../lib/odds-api";
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
 const NHL_API = "https://api-web.nhle.com/v1";
-const ODDIZE_URL =
-  "https://oddize.com/api/v1/odds/latest?sport=nhl&books=hrb";
 
 /*
   ============================================================
@@ -547,7 +546,7 @@ function extractOddsEvents(
   return [];
 }
 
-function parseOddizeMoneylines(
+function parseMarketMoneylines(
   payload: any
 ): OddsGame[] {
   const events =
@@ -592,7 +591,7 @@ function parseOddizeMoneylines(
       Moneyline[] = [];
 
     /*
-      Oddize payloads can expose markets
+      Provider payloads can expose markets
       through slightly different nesting.
 
       Walk the event recursively and look
@@ -757,56 +756,8 @@ function parseOddizeMoneylines(
 }
 
 async function fetchHardRockOdds(): Promise<OddsGame[]> {
-  const apiKey =
-    process.env.ODDIZE_API_KEY;
-
-  if (!apiKey) {
-    throw new Error(
-      "ODDIZE_API_KEY is missing."
-    );
-  }
-
-  const response =
-    await fetch(
-      ODDIZE_URL,
-      {
-        cache: "no-store",
-
-        headers: {
-          Authorization:
-            `Bearer ${apiKey}`,
-
-          "X-API-Key":
-            apiKey,
-
-          Accept:
-            "application/json",
-        },
-      }
-    );
-
-  if (!response.ok) {
-    const body =
-      await response
-        .text()
-        .catch(
-          () => ""
-        );
-
-    throw new Error(
-      `Oddize NHL request failed: ${response.status} ${body.slice(
-        0,
-        250
-      )}`
-    );
-  }
-
-  const payload: any =
-    await response.json();
-
-  return parseOddizeMoneylines(
-    payload
-  );
+  const payload = await loadOddsMarket("NHL");
+  return parseMarketMoneylines(payload);
 }
 
 function findOddsGame(
