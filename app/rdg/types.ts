@@ -339,7 +339,10 @@ export type NHLGame = {
   note: string;
   model_market_edge?: number | null;
   moneyline_lean?: string | null;
+  selection?: string;
   hard_rock?: {
+    away_moneyline?: string | number | null;
+    home_moneyline?: string | number | null;
     moneyline?: {
       away_odds?: string | null;
       home_odds?: string | null;

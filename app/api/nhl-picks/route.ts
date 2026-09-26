@@ -1205,8 +1205,7 @@ export async function GET(): Promise<NextResponse> {
         odds_available:
           true,
 
-        sportsbook:
-          "Hard Rock Bet",
+        sportsbook: oddsGame.sportsbook,
 
         home_stats: {
           games_played:

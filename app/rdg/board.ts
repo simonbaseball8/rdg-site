@@ -407,13 +407,13 @@ export function normalizeBoard(
   const nhl = feeds.NHL?.data as NHLAnalysis | undefined;
   for (const g of nhl?.games ?? []) {
     if (g.game_type !== 2 || !g.model_available) continue;
-    const team = g.moneyline_lean || g.rdg_projected_winner;
+    const team = g.moneyline_lean || g.selection || g.rdg_projected_winner;
     const home = team === g.home_team;
     if (!home && team !== g.away_team) continue;
     const odds = oddsNumber(
       home
-        ? g.hard_rock?.moneyline?.home_odds
-        : g.hard_rock?.moneyline?.away_odds,
+        ? (g.hard_rock?.home_moneyline ?? g.hard_rock?.moneyline?.home_odds)
+        : (g.hard_rock?.away_moneyline ?? g.hard_rock?.moneyline?.away_odds),
     );
     const probability = home ? g.rdg_home_probability : g.rdg_away_probability;
     const decimal = decimalOdds(odds);

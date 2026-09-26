@@ -182,3 +182,11 @@ test("seven-day schedule includes future NHL games and honors Eastern midnight",
  const w=gameWindow(Date.parse("2026-09-26T12:00:00Z"));assert.ok("2026-09-29">=w.start&&"2026-09-29"<=w.end);
  assert.equal(canonicalTeamKey("NHL","Montréal Canadiens"),canonicalTeamKey("NHL","MTL"));
 });
+
+test("NHL live API moneyline fields populate reference ideas without including preseason",()=>{
+ const now=Date.parse("2026-09-26T12:00:00Z");
+ const game={event_id:"nhl",start_time_utc:"2026-09-29T21:00:00Z",game_type:2,matchup:"FLA @ CAR",away_team:"FLA",home_team:"CAR",model_available:true,odds_available:true,sportsbook:"Hard Rock Bet (IN reference)",requires_florida_verification:true,rdg_projected_winner:"CAR",selection:"CAR",rdg_home_probability:64.49,rdg_away_probability:35.51,signal:"Priority Review",hard_rock:{home_moneyline:-125,away_moneyline:105}};
+ const feeds={NHL:{loadedAt:now,data:{games:[game]}}};const picks=normalizeBoard(feeds,now,true);
+ assert.equal(picks[0].odds,-125);assert.equal(picks[0].eligible,true);assert.equal(normalizeBoard(feeds,now)[0].eligible,false);
+ assert.equal(normalizeBoard({NHL:{loadedAt:now,data:{games:[{...game,game_type:1}]}}},now,true).length,0);
+});

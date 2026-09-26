@@ -84,8 +84,8 @@ export default function SportSlates({
                   : g.model_available
                     ? `RDG projected winner: ${g.rdg_projected_winner} · ${g.signal}`
                     : "Awaiting model data",
-              awayOdds: g.hard_rock?.moneyline?.away_odds,
-              homeOdds: g.hard_rock?.moneyline?.home_odds,
+              awayOdds: (g.hard_rock?.away_moneyline ?? g.hard_rock?.moneyline?.away_odds),
+              homeOdds: (g.hard_rock?.home_moneyline ?? g.hard_rock?.moneyline?.home_odds),
             }));
           games = games
             .filter((g) => upcoming(g.starts, now, horizon))
