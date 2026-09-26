@@ -1,3 +1,4 @@
+import { canonicalTeamKey } from "../../rdg/team-aliases";
 import { loadOddsMarket } from "../../../lib/odds-api";
 import { NextResponse } from "next/server";
 
@@ -151,6 +152,7 @@ function teamMatches(
   abbreviation: string,
   fullName?: string
 ): boolean {
+  if (canonicalTeamKey("NHL", oddsName) === canonicalTeamKey("NHL", abbreviation)) return true;
   const odds =
     normalizeTeamName(oddsName);
 

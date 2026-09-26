@@ -31,7 +31,7 @@ export async function GET() {
         const r=await fetch(`https://api.the-odds-api.com/v4/sports/${key}/events/${encodeURIComponent(sample.id)}/odds?${query}`,{next:{revalidate:900},signal:AbortSignal.timeout(15000)});
         eventProbe=r.ok ? summarize([await r.json()]) : {status:r.status};
       }
-      return {sport,status:response.status,bulk,eventProbe};
+      return {sport,status:response.status,bulk,eventProbe,next_priced_events:events.filter(e=>e.bookmakers?.some(b=>b.markets?.some(m=>m.outcomes?.length))).slice(0,5).map(e=>({away:e.away_team,home:e.home_team,starts:e.commence_time}))};
     }catch{return {sport,error:"Provider request failed or timed out"};}
   }));
   return Response.json({provider:"The Odds API",requested_books:books.split(","),college_stats_key_configured:Boolean(process.env.CFBD_API_KEY),checked_at:new Date().toISOString(),sports},{headers:{"Cache-Control":"public, s-maxage=900, must-revalidate"}});
