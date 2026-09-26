@@ -294,11 +294,18 @@ export default function Home() {
               };
   const [horizon, setHorizon] = useState<"today" | "week">("week");
   const [mix, setMix] = useState<
-    "balanced" | "props" | "games" | "no-spreads" | "moneylines" | "spreads"
+    | "balanced"
+    | "props"
+    | "games"
+    | "no-spreads"
+    | "moneylines"
+    | "spreads"
+    | "totals"
   >("balanced");
   const [maxFavorite, setMaxFavorite] = useState("");
   const [excludedTeams, setExcludedTeams] = useState<string[]>([]);
   const [excludeChoice, setExcludeChoice] = useState("");
+  const [propTypes, setPropTypes] = useState<string[]>([]);
   const [slipMarkets, setSlipMarkets] = useState<string[]>([]);
   const [allowReference, setAllowReference] = useState(false);
   const [size, setSize] = useState(2);
@@ -328,6 +335,7 @@ export default function Home() {
       maxFavorite: maxFavorite ? Number(maxFavorite) : null,
       excludedTeams,
       markets: slipMarkets,
+      propTypes,
     }),
   );
   const straightPicks = controlledPicks.filter((p) => actionable(p, now));
@@ -542,23 +550,59 @@ export default function Home() {
                 <div className="filter-fields">
                   <fieldset>
                     <legend>Include bet types</legend>
-                    {["Moneyline", "Spread", "Player prop"].map((m) => (
-                      <label key={m}>
+                    {["Moneyline", "Spread", "Total", "Player prop"].map(
+                      (m) => (
+                        <label key={m}>
+                          <input
+                            type="checkbox"
+                            checked={slipMarkets.includes(m)}
+                            onChange={(e) =>
+                              setSlipMarkets((v) =>
+                                e.target.checked
+                                  ? [...v, m]
+                                  : v.filter((x) => x !== m),
+                              )
+                            }
+                          />
+                          {m}
+                        </label>
+                      ),
+                    )}
+                    <small>No boxes selected = all bet types.</small>
+                  </fieldset>
+                  <fieldset>
+                    <legend>Player prop types</legend>
+                    {[
+                      ["player_rush_yds", "Rushing yards"],
+                      ["player_pass_yds", "Passing yards"],
+                      ["player_pass_tds", "Passing touchdowns"],
+                      ["player_reception_yds", "Receiving yards"],
+                      ["player_receptions", "Receptions"],
+                      ["player_anytime_td", "Anytime touchdown"],
+                      ["pitcher_strikeouts", "Pitcher strikeouts"],
+                      ["batter_hits", "Batter hits"],
+                      ["batter_total_bases", "Batter total bases"],
+                    ].map(([key, label]) => (
+                      <label key={key}>
                         <input
                           type="checkbox"
-                          checked={slipMarkets.includes(m)}
+                          checked={propTypes.includes(key)}
                           onChange={(e) =>
-                            setSlipMarkets((v) =>
+                            setPropTypes((v) =>
                               e.target.checked
-                                ? [...v, m]
-                                : v.filter((x) => x !== m),
+                                ? [...v, key]
+                                : v.filter((x) => x !== key),
                             )
                           }
                         />
-                        {m}
+                        {label}
                       </label>
                     ))}
-                    <small>No boxes selected = all bet types.</small>
+                    <small>
+                      No boxes selected = all props. Choose “Player props” under
+                      Parlay style for prop-only slips. Only qualifying
+                      available lines enter a parlay.
+                    </small>
                   </fieldset>
                   <label>
                     Maximum favorite price
@@ -677,8 +721,16 @@ export default function Home() {
                       <option value="no-spreads">No spreads</option>
                       <option value="moneylines">Moneylines only</option>
                       <option value="spreads">Spreads only</option>
+                      <option value="totals">Totals (over / under)</option>
                     </select>
                   </label>
+                  {mix === "totals" && (
+                    <p className="quote-note">
+                      Automatic totals currently use the experimental MLB model.
+                      Find available football and hockey totals in Explore; NBA
+                      totals are on the NBA research board.
+                    </p>
+                  )}
                   <label className="stake-input">
                     Example stake{" "}
                     <span>
@@ -837,11 +889,15 @@ export default function Home() {
                     value={market}
                     onChange={(e) => setMarket(e.target.value)}
                   >
-                    {["All bets", "Spread", "Moneyline", "Player prop"].map(
-                      (m) => (
-                        <option key={m}>{m}</option>
-                      ),
-                    )}
+                    {[
+                      "All bets",
+                      "Spread",
+                      "Moneyline",
+                      "Total",
+                      "Player prop",
+                    ].map((m) => (
+                      <option key={m}>{m}</option>
+                    ))}
                   </select>
                   <span>{picks.length} picks</span>
                 </div>

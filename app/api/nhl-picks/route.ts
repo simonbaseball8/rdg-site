@@ -81,6 +81,7 @@ type OddsGame = {
   homeTeam: string;
   startTime: string | null;
   moneylines: Moneyline[];
+  total: { side: string; line: number; odds: number }[];
 };
 
 function logistic(value: number): number {
@@ -735,6 +736,7 @@ function parseMarketMoneylines(
     }
 
     output.push({
+      total: (event.odds ?? []).filter((o: any) => o.market === "total").map((o: any) => ({ side: o.team, line: o.line, odds: o.american_odds })),
       sportsbook: event.sportsbook,
       quote_times: event.quote_times,
       requires_florida_verification: event.requires_florida_verification,
@@ -920,6 +922,7 @@ export async function GET(): Promise<NextResponse> {
         );
 
       const base = {
+        total: oddsGame?.total ?? [],
         sportsbook: oddsGame?.sportsbook,
         quote_times: oddsGame?.quote_times,
         requires_florida_verification: oddsGame?.requires_florida_verification,

@@ -4,6 +4,7 @@ export type PickFilters = {
   maxFavorite: number | null;
   excludedTeams: string[];
   markets: string[];
+  propTypes?: string[];
 };
 export function matchupTeams(p: Pick) {
   return p.matchup.split(/\s+@\s+|\s+vs\.?\s+/i).filter(Boolean);
@@ -18,6 +19,9 @@ export function sameGame(a: Pick, b: Pick) {
 }
 export function passesFilters(p: Pick, f: PickFilters) {
   return (
+    (p.market !== "Player prop" ||
+      !f.propTypes?.length ||
+      f.propTypes.includes(p.propType ?? "")) &&
     (!f.markets.length || f.markets.includes(p.market)) &&
     (f.maxFavorite === null || p.odds === null || p.odds >= -f.maxFavorite) &&
     !f.excludedTeams.some((t) =>
@@ -44,7 +48,8 @@ export function matchesMix(p: Pick, mix: ParlayMix) {
     (mix === "games" && p.market !== "Player prop") ||
     (mix === "no-spreads" && p.market !== "Spread") ||
     (mix === "moneylines" && p.market === "Moneyline") ||
-    (mix === "spreads" && p.market === "Spread")
+    (mix === "spreads" && p.market === "Spread") ||
+    (mix === "totals" && p.market === "Total")
   );
 }
 export function replacements(

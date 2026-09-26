@@ -28,3 +28,9 @@ Sources:
 - https://the-odds-api.com/sports-odds-data/betting-markets.html
 - https://site.api.espn.com/apis/v2/sports/basketball/nba/standings
 - https://site.api.espn.com/apis/site/v2/sports/mma/ufc/scoreboard
+
+## Totals and prop controls
+
+Explore now exposes offered over/under totals for NFL, college football, MLB and NHL. NBA totals remain on its research board. Only the existing MLB totals model can nominate automatic total legs: its experimental signal, positive estimated value, matching half-run line, named probable starters and a recent sportsbook quote are required. Whole-run lines remain research-only because the current probability model does not estimate pushes. Other sports do not have a totals prediction model connected and their offered sides never become automatic picks.
+
+The totals-only parlay style, Total market filter and results journal support these legs. Player prop type filters cover the existing NFL passing/rushing/receiving yards, receptions, passing touchdowns, anytime touchdowns and MLB pitcher strikeouts, hits and total bases. These filters do not create unavailable markets or bypass injury/role/price checks. No additional paid API calls are introduced by these controls.

@@ -43,7 +43,7 @@ export function validBet(value: unknown): value is TrackedBet {
         typeof p.matchup === "string" &&
         p.matchup.length <= 300 &&
         typeof p.book === "string" &&
-        ["Spread", "Moneyline", "Player prop"].includes(p.market) &&
+        ["Spread", "Moneyline", "Total", "Player prop"].includes(p.market) &&
         Number.isFinite(Date.parse(p.starts)) &&
         oddsNumber(p.odds) !== null &&
         Array.isArray(p.reasons) &&

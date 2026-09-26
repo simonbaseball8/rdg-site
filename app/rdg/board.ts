@@ -1,3 +1,4 @@
+import { totalPicks } from "./totals.ts";
 import { canonicalTeamKey } from "./team-aliases.ts";
 import type {
   CFBAnalysis,
@@ -11,8 +12,9 @@ import type {
 export const SPORTS = ["NFL", "CFB", "MLB", "NHL", "NBA", "UFC"] as const;
 export type Sport = (typeof SPORTS)[number];
 export type SportFilter = Sport | "ALL";
-export type Market = "Spread" | "Moneyline" | "Player prop";
+export type Market = "Spread" | "Moneyline" | "Total" | "Player prop";
 export type Pick = {
+  propType?: string;
   quoteAt?: string | null;
   feedAt?: string | null;
   injuriesAt?: string | null;
@@ -227,6 +229,7 @@ export function normalizeBoard(
       matchup: `${p.matchup.away ?? "?"} @ ${p.matchup.home ?? "?"}`,
       title: `${p.player_name} · ${p.pick === "YES" ? "Anytime TD" : `${p.pick === "OVER" ? "Over" : "Under"} ${p.sportsbook_line ?? "—"} ${p.market}`}`,
       market: "Player prop",
+      propType: p.provider_market,
       odds,
       quoteAt: quote?.updated_at ?? null,
       book: quote?.sportsbook ?? "No quote",
@@ -294,6 +297,7 @@ export function normalizeBoard(
       matchup: p.matchup,
       title: `${p.player} · ${p.signal === "OVER" ? "Over" : "Under"} ${p.market_line} ${p.market_name}`,
       market: "Player prop",
+      propType: p.market,
       odds: oddsNumber(quote?.odds),
       book: referencePrice
         ? "Hard Rock Bet (IN reference)"
@@ -492,6 +496,7 @@ export function normalizeBoard(
         fresh(feeds.NHL, now),
     });
   }
+  picks.push(...totalPicks(feeds, now));
   for (const pick of picks) {
     const feed =
       feeds[
@@ -553,7 +558,8 @@ export type ParlayMix =
   | "games"
   | "no-spreads"
   | "moneylines"
-  | "spreads";
+  | "spreads"
+  | "totals";
 export function buildIdeas(
   picks: Pick[],
   size: number,
@@ -583,7 +589,8 @@ export function buildIdeas(
           (mix === "games" && p.market !== "Player prop") ||
           (mix === "no-spreads" && p.market !== "Spread") ||
           (mix === "moneylines" && p.market === "Moneyline") ||
-          (mix === "spreads" && p.market === "Spread")),
+          (mix === "spreads" && p.market === "Spread") ||
+          (mix === "totals" && p.market === "Total")),
     );
     while (pool.length) {
       // Prefer a different game/sport and include a qualifying prop in a balanced card.
@@ -596,6 +603,7 @@ export function buildIdeas(
           ? 6
           : 0) +
         (chosen.some((c) => c.market === p.market) ? 0 : 3) +
+        (p.propType && !chosen.some((c) => c.propType === p.propType) ? 2 : 0) +
         p.score -
         (mix === "balanced"
           ? (marketUses.get(p.market) ?? 0) * 3 +

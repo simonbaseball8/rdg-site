@@ -247,6 +247,7 @@ export default function Results() {
                   "All bet types",
                   "Spread",
                   "Moneyline",
+                  "Total",
                   "Player prop",
                   "Mixed markets",
                 ].map((s) => (
