@@ -49,7 +49,7 @@ export default function SportSlates({
               message:
                 g.stats_connected && g.rdg
                   ? `RDG projected winner: ${g.rdg.projected_winner}`
-                  : "Odds available · awaiting team statistics",
+                  : "Awaiting team statistics",
               awayOdds: g.hard_rock?.moneyline?.away_odds,
               homeOdds: g.hard_rock?.moneyline?.home_odds,
             }));
@@ -95,6 +95,16 @@ export default function SportSlates({
                 </div>
               </div>
               {warning && <p className="notice warning">{warning}</p>}
+              {games.length > 0 &&
+                games.every(
+                  (g) => g.awayOdds == null && g.homeOdds == null,
+                ) && (
+                  <p className="notice warning">
+                    The Odds API returned these games without usable Hard Rock
+                    Florida moneylines. Priced parlays stay unavailable until
+                    qualifying Hard Rock markets are returned.
+                  </p>
+                )}
               {!games.length && (
                 <p className="notice">
                   No upcoming games returned for this date range.

@@ -360,7 +360,7 @@ export async function GET() {
       cfbdKey ? fetch(CFBD_CORE_URL, { headers: { Authorization: `Bearer ${cfbdKey}` }, next: { revalidate: 3600 }, signal: AbortSignal.timeout(20000) })
         .then(async response => response.ok ? { ratings: await response.json() as CoreRating[], warning: null } : { ratings: [] as CoreRating[], warning: "College football statistics are temporarily unavailable." })
         .catch(() => ({ ratings: [] as CoreRating[], warning: "College football statistics are temporarily unavailable." }))
-        : Promise.resolve({ ratings: [] as CoreRating[], warning: "College football odds are connected. Team statistics are not connected, so model predictions are unavailable." }),
+        : Promise.resolve({ ratings: [] as CoreRating[], warning: "College football events are connected. Team statistics are not connected, so model predictions are unavailable." }),
     ]);
     const coreRatings = coreResult.ratings;
     const rawEvents =

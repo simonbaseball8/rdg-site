@@ -779,6 +779,7 @@ function findOddsGame(
     const oddsGame
     of oddsGames
   ) {
+    if (!oddsGame.startTime || !game.startTimeUTC || Math.abs(Date.parse(oddsGame.startTime) - Date.parse(game.startTimeUTC)) > 90 * 60_000) continue;
     const homeMatch =
       teamMatches(
         oddsGame.homeTeam,
@@ -804,13 +805,14 @@ function findOddsGame(
   /*
     Fallback:
     match selections themselves in case
-    Oddize event-level team names differ.
+    Provider event-level team names differ.
   */
 
   for (
     const oddsGame
     of oddsGames
   ) {
+    if (!oddsGame.startTime || !game.startTimeUTC || Math.abs(Date.parse(oddsGame.startTime) - Date.parse(game.startTimeUTC)) > 90 * 60_000) continue;
     const hasHome =
       oddsGame.moneylines.some(
         (line) =>

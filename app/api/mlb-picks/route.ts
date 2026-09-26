@@ -552,7 +552,7 @@ export async function GET() {
     const oddsEvents =
       oddsData.events ?? [];
 
-    // Oddize can return more than one event record for the same MLB matchup.
+    // Match each provider event to the scheduled game, including doubleheaders.
     // Keep one Hard Rock event per actual MLB game so the board does not duplicate games.
     const matchedOddsByGamePk =
       new Map<number, any>();
@@ -561,6 +561,7 @@ export async function GET() {
       const matchedGame =
         mlbGames.find(
           (game: any) =>
+            Math.abs(Date.parse(game.gameDate) - Date.parse(event.start_date)) < 90 * 60_000 &&
             teamsMatch(
               event.team1,
               game.teams?.away?.team?.name
@@ -641,6 +642,7 @@ export async function GET() {
           const mlbGame =
             mlbGames.find(
               (game: any) =>
+                Math.abs(Date.parse(game.gameDate) - Date.parse(event.start_date)) < 90 * 60_000 &&
                 teamsMatch(
                   awayTeam,
                   game.teams?.away?.team?.name
