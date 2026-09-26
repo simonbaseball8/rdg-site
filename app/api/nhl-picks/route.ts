@@ -1,3 +1,4 @@
+import { gameWindow } from "../../../lib/game-window";
 import { canonicalTeamKey } from "../../rdg/team-aliases";
 import { loadOddsMarket } from "../../../lib/odds-api";
 import { NextResponse } from "next/server";
@@ -254,10 +255,7 @@ function gameTypeLabel(
 }
 
 async function fetchNHLGames(): Promise<NHLGame[]> {
-  const today =
-    new Date()
-      .toISOString()
-      .slice(0, 10);
+  const { start: today, end: windowEnd } = gameWindow();
 
   const response =
     await fetch(
@@ -285,7 +283,7 @@ async function fetchNHLGames(): Promise<NHLGame[]> {
 
   for (const day of weeks) {
     if (
-      day?.date !== today
+      typeof day?.date !== "string" || day.date < today || day.date > windowEnd
     ) {
       continue;
     }

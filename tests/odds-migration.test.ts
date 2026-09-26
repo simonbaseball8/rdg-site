@@ -1,3 +1,5 @@
+import { gameWindow } from "../lib/game-window.ts";
+import { canonicalTeamKey } from "../app/rdg/team-aliases.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -173,4 +175,10 @@ test("reference prices are labeled, Florida preferred, and reference ideas requi
   assert.equal(normalizeBoard(feeds, now)[0].eligible, false);
   assert.equal(normalizeBoard(feeds, now, true)[0].eligible, true);
   assert.equal(adaptOddsEvents("NFL", [event])[0].odds.length, 0);
+});
+
+test("seven-day schedule includes future NHL games and honors Eastern midnight",()=>{
+ assert.deepEqual(gameWindow(Date.parse("2026-09-27T02:00:00Z")),{start:"2026-09-26",end:"2026-10-02"});
+ const w=gameWindow(Date.parse("2026-09-26T12:00:00Z"));assert.ok("2026-09-29">=w.start&&"2026-09-29"<=w.end);
+ assert.equal(canonicalTeamKey("NHL","Montréal Canadiens"),canonicalTeamKey("NHL","MTL"));
 });

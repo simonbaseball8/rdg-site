@@ -735,6 +735,7 @@ const fullNames: Record<string, Record<string, string>> = {
 };
 export function canonicalTeamKey(sport: string, team: string): string {
   const key = team
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .trim()
     .toUpperCase()
     .replace(/\./g, "")
@@ -750,6 +751,7 @@ export function canonicalTeamKey(sport: string, team: string): string {
 }
 export function teamLogoUrl(sport: string, team: string): string | null {
   const key = team
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .trim()
     .toUpperCase()
     .replace(/\./g, "")
