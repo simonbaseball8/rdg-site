@@ -76,6 +76,7 @@ export function useBoard(sport: SportFilter, enabled: boolean) {
   const [refresh, setRefresh] = useState(0);
   const consumedRefresh = useRef(0);
   const [clock, setClock] = useState(0);
+  const [snapshotNow, setSnapshotNow] = useState(0);
   useEffect(() => {
     const tick = () => setClock(Date.now());
     const start = window.setTimeout(tick, 0);
@@ -100,16 +101,15 @@ export function useBoard(sport: SportFilter, enabled: boolean) {
     consumedRefresh.current = refresh;
     async function load() {
       setLoading(true);
-      await Promise.all(
-        keys.map(async (key) => {
-          const feed = await request(key, force);
-          if (!cancelled) {
-            setFeeds((previous) => ({ ...previous, [key]: feed }));
-            setClock(Date.now());
-          }
-        }),
+      const entries = await Promise.all(
+        keys.map(async key => [key, await request(key, force)] as const),
       );
       if (!cancelled) {
+        const completedAt = Date.now();
+        // Publish the whole slate atomically; partial feed arrivals must not reshuffle cards.
+        setFeeds(previous => ({...previous, ...Object.fromEntries(entries)}));
+        setSnapshotNow(completedAt);
+        setClock(completedAt);
         setLoading(false);
       }
     }
@@ -128,5 +128,5 @@ export function useBoard(sport: SportFilter, enabled: boolean) {
           ? ["MLB", "mlbProps", "weatherMLB"]
           : sport === "CFB" ? ["CFB", "weatherCFB"] : [sport];
   const relevant = keys.map((key) => ({ key, feed: feeds[key] }));
-  return { feeds, loading, reload, now: clock, relevant };
+  return { feeds, loading, reload, now: clock, snapshotNow, relevant };
 }

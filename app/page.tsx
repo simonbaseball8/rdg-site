@@ -126,8 +126,11 @@ function IdeaCard({
   const [changes, setChanges] = useState<Record<number, string>>({});
   const [replacing, setReplacing] = useState<number | null>(null);
   const picks = originalPicks.map(
-    (p, i) => pool.find((c) => c.id === changes[i] && actionable(c, now)) ?? p,
+    (p, i) => pool.find((c) => c.id === changes[i]) ?? p,
   );
+  const expired = picks.some(p => !actionable(p, now) ||
+    (p.quoteAt && (!Number.isFinite(Date.parse(p.quoteAt)) || now-Date.parse(p.quoteAt)>=15*60000)) ||
+    (p.feedAt && now-Date.parse(p.feedAt)>=15*60000));
   const alternatives =
     replacing === null
       ? []
@@ -245,11 +248,12 @@ function IdeaCard({
         Rock.
       </p>
       <Research picks={picks} />
+      {expired && <p className="notice warning" role="status">This slip needs a refresh: a game started or its data expired. Your displayed picks have been kept in place.</p>}
       <TrackButton
         key={picks.map((p) => p.id + String(p.odds)).join("|")}
-        picks={picks}
+        picks={expired ? picks.map(p=>({...p,eligible:false})) : picks}
       />
-      <button className="copy-button" onClick={copy}>
+      <button className="copy-button" onClick={copy} disabled={expired}>
         {copied ? (
           <>
             <Icon name="check" /> Copied
@@ -270,14 +274,14 @@ function IdeaCard({
 }
 function WeeklySpotlight() {
   const [weeklySize, setWeeklySize] = useState(4);
-  const {feeds, loading, now, reload} = useBoard("ALL", true);
-  const candidates = now ? normalizeBoard(feeds,now,false).filter(p =>
-    upcoming(p.starts,now,"week") && actionable(p,now) &&
+  const {feeds, loading, now, snapshotNow, reload} = useBoard("ALL", true);
+  const candidates = now ? normalizeBoard(feeds,snapshotNow,false).filter(p =>
+    upcoming(p.starts,snapshotNow,"week") && actionable(p,snapshotNow) &&
     p.quoteAt && Number.isFinite(Date.parse(p.quoteAt)) &&
-    now-Date.parse(p.quoteAt)>=0 && now-Date.parse(p.quoteAt)<15*60000 &&
+    snapshotNow-Date.parse(p.quoteAt)>=0 && snapshotNow-Date.parse(p.quoteAt)<15*60000 &&
     (!['NFL','CFB','MLB'].includes(p.sport) || (p.weather && p.weather.status !== 'unavailable'))
   ) : [];
-  const best = !loading ? buildIdeas(candidates,weeklySize,now)[0] : undefined;
+  const best = !loading ? buildIdeas(candidates,weeklySize,snapshotNow)[0] : undefined;
   return <section className="weekly-spotlight" aria-label="RDG Parlay of the Week">
     <div><p className="eyebrow">THE RDG SPOTLIGHT</p><h2>RDG Parlay of the Week</h2>
     <p>Our top odds-based {weeklySize}-leg selection from qualifying picks across supported sports.</p>
@@ -288,7 +292,7 @@ function WeeklySpotlight() {
     </label>
     <p className="quote-note">Florida prices and usable outdoor weather required. More legs make the slip harder to hit.</p>
     <details><summary>How this is ranked</summary><p className="quote-note">Qualifying picks are ranked by shorter offered odds first, then model grade. Combined odds estimate relative likelihood, assuming independent outcomes. Bookmaker margin is included; this is not a validated model win probability.</p>
-    <p className="quote-note">Live selection for the next 7 days; updates as prices, conditions and available games change. It can include one or multiple sports and is separate from your filters below. NBA and UFC await prediction models.</p>
+    <p className="quote-note">Selection for the next 7 days. Picks stay in place until you refresh or change the leg count. It can include one or multiple sports and is separate from your filters below. NBA and UFC await prediction models.</p>
     </details>
     <button className="secondary-button" disabled={loading} onClick={reload}>{loading ? 'Checking all sports…' : 'Refresh weekly selection'}</button></div>
     {best ? <IdeaCard key={JSON.stringify(best)} picks={best} index={0} stake={10} pool={best} now={now} mix="balanced" spotlight /> : <p className="notice" role="status">{loading ? 'Checking prices, model signals and weather…' : 'No complete weekly selection qualifies right now. No weaker or unverified legs have been added.'}</p>}
@@ -345,7 +349,7 @@ export default function Home() {
   const [showStraights, setShowStraights] = useState(false);
   const [query, setQuery] = useState("");
   const [market, setMarket] = useState("All bets");
-  const { loading, reload, now, relevant } = useBoard(
+  const { loading, reload, now, snapshotNow, relevant } = useBoard(
     sport,
     view !== "results",
   );
@@ -362,9 +366,9 @@ export default function Home() {
   const nfl = visibleFeeds.NFL?.data as NFLAnalysis | undefined;
   const nflError = relevant.find((r) => r.key === "NFL")?.feed?.error;
   const allPicks = now
-    ? normalizeBoard(visibleFeeds, now, allowReference).filter(
+    ? normalizeBoard(visibleFeeds, snapshotNow, allowReference).filter(
         (p) =>
-          upcoming(p.starts, now, horizon) &&
+          upcoming(p.starts, snapshotNow, horizon) &&
           (sport === "ALL" || sport === p.sport),
       )
     : [];
@@ -383,7 +387,7 @@ export default function Home() {
       (market === "All bets" || p.market === market) &&
       `${p.title} ${p.matchup}`.toLowerCase().includes(query.toLowerCase()),
   );
-  const ideas = buildIdeas(controlledPicks, size, now, mix);
+  const ideas = buildIdeas(controlledPicks, size, snapshotNow, mix);
   const moneylineGames = new Set(controlledPicks.filter(p => p.market === "Moneyline" && actionable(p, now)).map(p => p.event)).size;
   const referenceMoneylines = controlledPicks.filter(p => p.market === "Moneyline" && p.referencePrice).length;
   const errors = relevant.filter((r) => r.feed?.error);
@@ -527,7 +531,7 @@ export default function Home() {
                     : "Waiting for data"}
               </span>
               <span>
-                Pregame research ·{" "}
+                Picks stay fixed until refresh or filter changes ·{" "}
                 {horizon === "today" ? "Today, Eastern time" : "Next 7 days"}
               </span>
             </div>
