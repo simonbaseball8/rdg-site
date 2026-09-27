@@ -25,9 +25,14 @@ export default function Wins({
         </span>
       </div>
       <p className="quote-note">
-        {mode === "placed" ? "Placed bets" : "Paper bets"} · Current filters
-        apply. Weeks run Sunday–Saturday (Eastern), based on when you first
-        record the win. Results are self-reported.
+        {mode === "model"
+          ? "Daily model slips"
+          : mode === "placed"
+            ? "Placed bets"
+            : "Paper bets"}{" "}
+        · Current filters apply. Weeks run Sunday–Saturday (Eastern), based on
+        when you first record the win. Game-score grades and manual results are
+        identified in the journal; sportsbook payouts are not verified.
       </p>
       {!ready ? (
         <p>Loading wins…</p>

@@ -23,6 +23,14 @@
     {
       "path": "/api/grade-nhl-picks",
       "schedule": "0 11 * * *"
+    },
+    {
+      "path": "/api/daily-slips/save",
+      "schedule": "30 9 * * *"
+    },
+    {
+      "path": "/api/daily-slips/grade",
+      "schedule": "30 13 * * *"
     }
   ]
 }

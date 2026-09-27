@@ -1848,3 +1848,79 @@
     gap: 10px;
   }
 }
+
+/* Perspective follows the pointer without moving the card's layout box. */
+.depth-toggle {
+  border: 1px solid #69854a;
+  border-radius: 30px;
+  color: #d0ef9b;
+  background: #203026;
+  padding: 10px 16px;
+  white-space: nowrap;
+  cursor: pointer;
+  font-size: 12px;
+}
+.daily-notice {
+  color: #a9c0ae;
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 12px 0;
+}
+.rdg-app[data-depth="on"] .idea-card,
+.rdg-app[data-depth="on"] .pick-card {
+  box-shadow:
+    0 18px 36px -22px #000c,
+    inset 0 1px 0 #ffffff16;
+}
+.rdg-app button:focus-visible,
+.rdg-app summary:focus-visible {
+  outline: 3px solid #cff578;
+  outline-offset: 4px;
+}
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  .rdg-app[data-depth="on"] .idea-card,
+  .rdg-app[data-depth="on"] .pick-card,
+  .rdg-app[data-depth="on"] .hero-image {
+    transform: perspective(1100px) rotateX(var(--tilt-x, 0deg))
+      rotateY(var(--tilt-y, 0deg));
+    transition:
+      transform 160ms ease-out,
+      box-shadow 200ms;
+  }
+  .rdg-app[data-depth="on"] .idea-card:hover,
+  .rdg-app[data-depth="on"] .pick-card:hover {
+    box-shadow:
+      0 24px 50px -20px #000d,
+      0 0 0 1px #b7e67555,
+      inset 0 1px 0 #ffffff22;
+  }
+  .rdg-app .primary-button,
+  .rdg-app .secondary-button {
+    transition:
+      transform 140ms,
+      box-shadow 140ms;
+  }
+  .rdg-app .primary-button:hover,
+  .rdg-app .secondary-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px #0006;
+  }
+  .rdg-app button:active {
+    transform: translateY(1px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rdg-app *,
+  .rdg-app *::before,
+  .rdg-app *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+@media (max-width: 700px) {
+  .depth-toggle {
+    padding: 8px 10px;
+    font-size: 11px;
+  }
+}

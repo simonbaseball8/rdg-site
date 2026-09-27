@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   type TrackedBet,
   type Outcome,
@@ -11,6 +11,7 @@ import {
   validBet,
 } from "./journal";
 import {
+  checkFinalScores,
   readJournal,
   writeJournal,
   journalRequest,
@@ -18,6 +19,7 @@ import {
 } from "./journal-store";
 import { formatOdds } from "./board";
 import { checkedTime } from "./pick-details";
+import PublishedResults from "./published-results";
 import Wins from "./wins";
 import LegacyResults from "./legacy-results";
 const units = (n: number) => `${n > 0 ? "+" : ""}${n.toFixed(2)}u`;
@@ -55,8 +57,9 @@ function ResultEditor({
     <details className="result-editor">
       <summary>Enter or correct result</summary>
       <p>
-        Use your sportsbook’s settled ticket. Results here are self-reported,
-        not automatically verified.
+        Use your sportsbook’s settled ticket. Manual corrections take priority
+        over automatic game-score grading. Sportsbook payouts are not
+        automatically verified.
       </p>
       {bet.picks.map((p, i) => (
         <label key={p.id}>
@@ -111,6 +114,8 @@ function ResultEditor({
   );
 }
 export default function Results() {
+  const checked = useRef(false);
+  const [published, setPublished] = useState(false);
   const [rows, setRows] = useState<TrackedBet[]>([]),
     [message, setMessage] = useState(""),
     [ready, setReady] = useState(false),
@@ -137,6 +142,22 @@ export default function Results() {
       window.removeEventListener("storage", load);
     };
   }, []);
+  async function checkScores() {
+    setBusy(true);
+    try {
+      setMessage(await checkFinalScores());
+    } catch {
+      setMessage("Final scores could not be checked. Saved results were kept.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  useEffect(() => {
+    if (ready && !checked.current) {
+      checked.current = true;
+      void checkScores();
+    }
+  }, [ready]);
   async function sync() {
     setBusy(true);
     try {
@@ -206,21 +227,46 @@ export default function Results() {
         </div>
       </div>
       <div className="journal-toolbar">
-        <button aria-pressed={!legacy} onClick={() => setLegacy(false)}>
+        <button
+          aria-pressed={!legacy && !published}
+          onClick={() => {
+            setLegacy(false);
+            setPublished(false);
+          }}
+        >
           My bet journal
         </button>
-        <button aria-pressed={legacy} onClick={() => setLegacy(true)}>
+        <button
+          aria-pressed={legacy}
+          onClick={() => {
+            setLegacy(true);
+            setPublished(false);
+          }}
+        >
           Legacy model record
         </button>
+        <button
+          aria-pressed={published}
+          onClick={() => {
+            setPublished(true);
+            setLegacy(false);
+          }}
+        >
+          Published daily slips
+        </button>
       </div>
-      {legacy ? (
+      {published ? (
+        <PublishedResults />
+      ) : legacy ? (
         <LegacyResults />
       ) : (
         <>
           <p className="notice">
             Device journal with optional cloud backup. Export before clearing
             browser data or switching devices. Paper and placed bets are
-            separate; settlements are entered from your ticket.
+            separate. Game markets are checked against final scores when Results
+            opens. Player props and sportsbook-specific rules require your
+            settled ticket.
           </p>
           <div className="journal-toolbar">
             <label>
@@ -228,6 +274,7 @@ export default function Results() {
               <select value={mode} onChange={(e) => setMode(e.target.value)}>
                 <option value="paper">Paper bets</option>
                 <option value="placed">Placed bets</option>
+                <option value="model">Daily model (this device)</option>
               </select>
             </label>
             <label>
@@ -292,6 +339,9 @@ export default function Results() {
             mixed-sport slips have their own category.
           </p>
           <div className="journal-toolbar">
+            <button onClick={checkScores} disabled={busy}>
+              {busy ? "Checking…" : "Check final scores"}
+            </button>
             <button onClick={exportFile} disabled={!ready}>
               Export backup
             </button>
@@ -394,7 +444,18 @@ export default function Results() {
                       : units(settlement(b).profit!)}{" "}
                     · {betMarket(b)}
                   </p>
-                  <ResultEditor bet={b} onSaved={setMessage} />
+                  <p className="quote-note">
+                    Result source:{" "}
+                    {b.settlements.at(-1)?.source ?? "Awaiting result"}.{" "}
+                    {b.mode === "model"
+                      ? "Daily model snapshot · 1u research stake, not a placed bet."
+                      : ""}
+                  </p>
+                  <ResultEditor
+                    key={`${b.id}-${b.settlements.length}`}
+                    bet={b}
+                    onSaved={setMessage}
+                  />
                 </article>
               ))}
             </>

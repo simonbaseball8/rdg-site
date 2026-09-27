@@ -1,5 +1,7 @@
 "use client";
 
+import { useDailySlips } from "./rdg/use-daily-slips";
+import { useDepth } from "./rdg/use-depth";
 import { useState } from "react";
 import Image from "next/image";
 import { MatchupLogos } from "./rdg/team-logos";
@@ -321,6 +323,13 @@ export default function Home() {
   const visibleFeeds = Object.fromEntries(
     relevant.filter((r) => r.feed && !r.feed.error).map((r) => [r.key, r.feed]),
   );
+  const depth = useDepth();
+  const dailyNotice = useDailySlips(
+    visibleFeeds,
+    now,
+    loaded && !loading && relevant.every((r) => r.feed && !r.feed.error),
+    sport,
+  );
   const nfl = visibleFeeds.NFL?.data as NFLAnalysis | undefined;
   const nflError = relevant.find((r) => r.key === "NFL")?.feed?.error;
   const allPicks = now
@@ -367,7 +376,11 @@ export default function Home() {
     { id: "results", label: "Results", icon: "chart" },
   ];
   return (
-    <div className="rdg-app">
+    <div
+      className="rdg-app"
+      ref={depth.ref}
+      data-depth={depth.enabled ? "on" : "off"}
+    >
       <a href="#main-content" className="skip-link">
         Skip to picks
       </a>
@@ -399,10 +412,19 @@ export default function Home() {
               </button>
             ))}
           </nav>
-          <span className="header-tag">SPORTS. STATS. PERSPECTIVE.</span>
+          <button
+            className="depth-toggle"
+            onClick={depth.toggle}
+            aria-pressed={depth.enabled}
+          >
+            3D motion {depth.enabled ? "On" : "Off"}
+          </button>
         </div>
       </header>
       <main id="main-content" className="dashboard">
+        {dailyNotice && view !== "results" && (
+          <p className="daily-notice">{dailyNotice}</p>
+        )}
         {view !== "results" && (
           <>
             <section className="hero">

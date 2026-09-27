@@ -66,3 +66,61 @@ export async function saveSettlement(bet: TrackedBet, s: Settlement) {
     return "Result saved on this device only. Export a backup.";
   }
 }
+
+export async function checkFinalScores() {
+  const { automaticSettlement } = await import("./auto-grade");
+  const now = Date.now();
+  const rows = readJournal().filter(
+    (b) =>
+      !b.settlements.some((s) => s.source === "manual") &&
+      b.picks.some(
+        (p) =>
+          p.grading &&
+          Date.parse(p.starts) < now &&
+          Date.parse(p.starts) > now - 31 * 86400000,
+      ),
+  );
+  let changed = 0,
+    failed = 0;
+  const batch = rows.slice(-30);
+  for (let i = 0; i < batch.length; i += 4)
+    await Promise.all(
+      batch.slice(i, i + 4).map(async (b) => {
+        try {
+          const response = await fetch("/api/journal/grade", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ bet: b }),
+            signal: AbortSignal.timeout(20000),
+          });
+          if (!response.ok) {
+            failed++;
+            return;
+          }
+          const data = await response.json();
+          const current = readJournal().find((r) => r.id === b.id);
+          if (
+            !current ||
+            !Array.isArray(data.outcomes) ||
+            !data.outcomes.every((o: unknown) =>
+              ["pending", "won", "lost", "push"].includes(String(o)),
+            )
+          )
+            return;
+          const result = automaticSettlement(
+            current,
+            data.outcomes,
+            new Date().toISOString(),
+          );
+          if (result) {
+            await saveSettlement(current, result);
+            changed++;
+          }
+          if (data.warnings?.length) failed++;
+        } catch {
+          failed++;
+        }
+      }),
+    );
+  return `${changed} slip(s) updated from final scores.${failed ? " Some scores were unavailable; saved results were kept." : ""} Props and unsupported/older snapshots need manual review. Checks cover up to 30 recent slips per run.`;
+}

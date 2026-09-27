@@ -105,6 +105,7 @@ export function totalPicks(feeds: Feeds, now: number): Pick[] {
           matchup: `${g.away_team} @ ${g.home_team}`,
           title: `${side} ${q.line} total ${unit}`,
           market: "Total",
+          grading: { side, line: q.line },
           odds,
           book: g.sportsbook ?? "No verified sportsbook",
           referencePrice: g.requires_florida_verification === true,

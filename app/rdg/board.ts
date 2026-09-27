@@ -14,6 +14,7 @@ export type Sport = (typeof SPORTS)[number];
 export type SportFilter = Sport | "ALL";
 export type Market = "Spread" | "Moneyline" | "Total" | "Player prop";
 export type Pick = {
+  grading?: { team?: string; line?: number; side?: "Over" | "Under" };
   propType?: string;
   quoteAt?: string | null;
   feedAt?: string | null;
@@ -161,6 +162,7 @@ export function normalizeBoard(
       matchup: `${g.away_team} @ ${g.home_team}`,
       title: `${team} ${line > 0 ? "+" : ""}${line}`,
       market: "Spread",
+      grading: { team, line },
       odds,
       book: g.sportsbook ?? "Hard Rock Bet (FL)",
       referencePrice: g.requires_florida_verification === true,
@@ -342,6 +344,7 @@ export function normalizeBoard(
       matchup: `${g.away_team} @ ${g.home_team}`,
       title: `${r.spread_lean} ${line > 0 ? "+" : ""}${line}`,
       market: "Spread",
+      grading: { team: r.spread_lean, line },
       odds,
       book: g.sportsbook ?? "Hard Rock Bet (FL)",
       referencePrice: g.requires_florida_verification === true,
@@ -383,6 +386,7 @@ export function normalizeBoard(
       matchup: `${g.away_team} @ ${g.home_team}`,
       title: `${r.projected_winner} moneyline`,
       market: "Moneyline",
+      grading: { team: r.projected_winner },
       odds,
       book: g.sportsbook ?? "Hard Rock Bet (FL)",
       referencePrice: g.requires_florida_verification === true,
@@ -435,6 +439,7 @@ export function normalizeBoard(
       matchup: `${g.away_team} @ ${g.home_team}`,
       title: `${team} moneyline`,
       market: "Moneyline",
+      grading: { team },
       odds,
       book: g.sportsbook ?? "Hard Rock Bet (FL)",
       referencePrice: g.requires_florida_verification === true,
@@ -483,6 +488,7 @@ export function normalizeBoard(
       matchup: g.matchup,
       title: `${team} moneyline`,
       market: "Moneyline",
+      grading: { team },
       odds,
       book: g.sportsbook ?? "Hard Rock Bet (FL)",
       referencePrice: g.requires_florida_verification === true,

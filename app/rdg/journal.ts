@@ -5,14 +5,14 @@ export type Settlement = {
   at: string;
   outcomes: Outcome[];
   returnUnits?: number;
-  source: "manual";
+  source: "manual" | "automatic";
   note: string;
 };
 export type TrackedBet = {
   id: string;
   savedAt: string;
   kind: "straight" | "parlay";
-  mode: "paper" | "placed";
+  mode: "paper" | "placed" | "model";
   stakeUnits: number;
   picks: Pick[];
   settlements: Settlement[];
@@ -25,7 +25,7 @@ export function validBet(value: unknown): value is TrackedBet {
     typeof b.id === "string" &&
     /^[a-zA-Z0-9-]{8,80}$/.test(b.id) &&
     Number.isFinite(Date.parse(b.savedAt)) &&
-    (b.mode === "paper" || b.mode === "placed") &&
+    ["paper", "placed", "model"].includes(b.mode) &&
     Number.isFinite(b.stakeUnits) &&
     b.stakeUnits > 0 &&
     b.stakeUnits <= 10000 &&
@@ -62,7 +62,7 @@ export function validSettlement(s: Settlement, size: number) {
     typeof s.id === "string" &&
     /^[a-zA-Z0-9-]{8,80}$/.test(s.id) &&
     Number.isFinite(Date.parse(s.at)) &&
-    s.source === "manual" &&
+    (s.source === "manual" || s.source === "automatic") &&
     typeof s.note === "string" &&
     s.note.length <= 1000 &&
     Array.isArray(s.outcomes) &&
