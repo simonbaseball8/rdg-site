@@ -628,7 +628,7 @@ export function buildIdeas(
           (mix === "totals" && p.market === "Total")),
     );
     while (pool.length) {
-      // Quality first; variety only breaks equal-score ties. Scores are not probabilities.
+      // Among eligible picks, shorter odds first; source score and variety break ties.
       const priority = (p: Pick) =>
         (priorMatchups.has(gameKey(p)) ? 0 : 20) +
         (chosen.some((c) => c.sport === p.sport) ? 0 : 8) +
@@ -651,6 +651,7 @@ export function buildIdeas(
           : 0);
       pool.sort(
         (a, b) =>
+          (decimalOdds(a.odds) ?? Infinity) - (decimalOdds(b.odds) ?? Infinity) ||
           b.score - a.score ||
           priority(b) - priority(a) ||
           a.id.localeCompare(b.id),
@@ -688,8 +689,10 @@ export function buildIdeas(
     });
     results.push(chosen);
   }
-  // Compare complete slips by their weakest leg, then average source score.
+  // Lower combined decimal odds imply greater likelihood, before bookmaker margin.
+  const price = (card: Pick[]) => card.reduce((n,p)=>n*(decimalOdds(p.odds) ?? Infinity),1);
   return results.sort((a,b) =>
+    price(a)-price(b) ||
     Math.min(...b.map(p=>p.score))-Math.min(...a.map(p=>p.score)) ||
     b.reduce((n,p)=>n+p.score,0)/b.length-a.reduce((n,p)=>n+p.score,0)/a.length ||
     a.map(p=>p.id).join('|').localeCompare(b.map(p=>p.id).join('|')));

@@ -151,7 +151,7 @@ function IdeaCard({
     <article className={`idea-card ${index === 0 ? "featured" : ""}`}>
       <div className="card-top">
         <span className="eyebrow">
-          {Object.keys(changes).length ? "CUSTOM SLIP · UNRANKED" : spotlight ? "RDG WEEKLY SPOTLIGHT" : `PARLAY ${["A", "B", "C"][index]} · ${["TOP MODEL RANK", "SECOND MODEL RANK", "THIRD MODEL RANK"][index]}`}
+          {Object.keys(changes).length ? "CUSTOM SLIP · UNRANKED" : spotlight ? "RDG WEEKLY SPOTLIGHT" : `PARLAY ${["A", "B", "C"][index]} · ${["LOWER RISK", "MIDDLE RISK", "HIGHER RISK"][index]}`}
         </span>
         <span className="draft-badge">
           {reference ? "Reference · verify Florida" : "Review in app"}
@@ -159,6 +159,7 @@ function IdeaCard({
       </div>
       <div className="card-title">
         <h3>{picks.length}-leg parlay{Object.keys(changes).length ? " · customized" : ""}</h3>
+        <p className="quote-note">Odds-based risk estimate · not a guarantee</p>
         <p>
           {new Set(picks.map((p) => p.sport)).size > 1
             ? "Across sports"
@@ -279,14 +280,14 @@ function WeeklySpotlight() {
   const best = !loading ? buildIdeas(candidates,weeklySize,now)[0] : undefined;
   return <section className="weekly-spotlight" aria-label="RDG Parlay of the Week">
     <div><p className="eyebrow">THE RDG SPOTLIGHT</p><h2>RDG Parlay of the Week</h2>
-    <p>Our highest-ranked available {weeklySize}-leg combination across supported sports.</p>
+    <p>Our top odds-based {weeklySize}-leg selection from qualifying picks across supported sports.</p>
     <label className="weekly-size">Weekly parlay legs
       <select value={weeklySize} onChange={e=>setWeeklySize(Number(e.target.value))} aria-label="Weekly parlay legs">
         {[4,5,6,7,8].map(n=><option key={n} value={n}>{n} legs</option>)}
       </select>
     </label>
     <p className="quote-note">Florida prices and usable outdoor weather required. More legs make the slip harder to hit.</p>
-    <details><summary>How this is ranked</summary><p className="quote-note">Weakest-leg grade first, then average source grade. These are research rankings, not win probabilities.</p>
+    <details><summary>How this is ranked</summary><p className="quote-note">Qualifying picks are ranked by shorter offered odds first, then model grade. Combined odds estimate relative likelihood, assuming independent outcomes. Bookmaker margin is included; this is not a validated model win probability.</p>
     <p className="quote-note">Live selection for the next 7 days; updates as prices, conditions and available games change. It can include one or multiple sports and is separate from your filters below. NBA and UFC await prediction models.</p>
     </details>
     <button className="secondary-button" disabled={loading} onClick={reload}>{loading ? 'Checking all sports…' : 'Refresh weekly selection'}</button></div>
@@ -573,7 +574,7 @@ export default function Home() {
                   {expansionSport
                     ? "Live matchups and available prices. Model recommendations are not connected for this sport."
                     : view === "today"
-                      ? "A is the top model-ranked slip, followed by B and C. Rankings compare the weakest leg, then average source grade; they are not measured win probabilities. Only complete qualifying slips appear."
+                      ? "A has the highest odds-implied likelihood among these slips; B is next, and C is the riskier alternative. Risk is relative: equal odds can tie. Estimates include bookmaker margin and assume independent outcomes—not proven win probabilities. All picks must still qualify."
                       : "Browse individual picks and the evidence behind them."}
                 </p>
               </div>

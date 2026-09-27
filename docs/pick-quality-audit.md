@@ -29,3 +29,9 @@ Missing weather lowers ranking and displays “not weather-cleared”; it does n
 Regression tests cover matching and freshness, wind/storm holds, indoor handling, unknown roofs, missing data, complete forecast coverage, and quality-before-variety selection. Existing pricing, grading, reference-price, injury and duplicate-game gates remain in place.
 
 No historical out-of-sample profitability test has been performed for these weather thresholds or new ranking. No paid historical Odds API queries were run. Results tracking is the basis for evaluating performance; this change does not demonstrate a higher win rate or guaranteed profit.
+
+## A/B/C risk ordering update — 2026-09-27
+
+At the user's request, automatic slips now prioritize shorter offered odds among eligible picks, with source grades and diversity as tie-breakers. Complete slips sort by combined decimal odds ascending: A has the highest odds-implied likelihood among the displayed combinations; C is relatively riskier. Equal prices can tie. This supersedes the source-score-first ordering described above. All existing eligibility, weather, freshness, reference-price and duplicate-game gates still apply.
+
+This ranking includes bookmaker margin, assumes independent outcomes and is not a calibrated joint model probability or positive-EV assessment. It does not establish that favorites are profitable. The weekly feature uses the same policy at its selected leg count. Customized slips lose their A/B/C designation.
