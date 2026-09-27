@@ -19,6 +19,8 @@ const PRIOR_STATS_URL =
 
 const ODDS_API_BASE = "https://api.the-odds-api.com/v4";
 const ODDS_API_SPORT = "americanfootball_nfl";
+// Include the Florida Hard Rock feed explicitly; region us alone excludes it.
+const PROP_BOOKMAKERS = "hardrockbet_fl,draftkings,fanduel,betmgm,williamhill_us,betrivers,fanatics,bovada,betonlineag,betus";
 
 const CORE_MARKETS = [
   "player_pass_yds",
@@ -1483,7 +1485,7 @@ function oddsLines(
             true,
 
           updated_at:
-            market?.last_update ??
+            market?.last_update ?? book?.last_update ??
             null,
         });
       }
@@ -1571,7 +1573,7 @@ function anytimeTDLines(
             true,
 
           updated_at:
-            market?.last_update ??
+            market?.last_update ?? book?.last_update ??
             null,
         });
       }
@@ -3000,7 +3002,7 @@ export async function GET() {
             try {
               const result =
                 await oddsFetch(
-                  `${ODDS_API_BASE}/sports/${ODDS_API_SPORT}/events/${encodeURIComponent(event.id)}/odds?regions=us&markets=${encodeURIComponent(markets)}&oddsFormat=american&dateFormat=iso`,
+                  `${ODDS_API_BASE}/sports/${ODDS_API_SPORT}/events/${encodeURIComponent(event.id)}/odds?bookmakers=${PROP_BOOKMAKERS}&markets=${encodeURIComponent(markets)}&oddsFormat=american&dateFormat=iso`,
                   apiKey,
                   CACHE_SECONDS,
                 );
@@ -3243,10 +3245,7 @@ export async function GET() {
             continue;
           }
 
-          const line =
-            consensusLine(
-              lines,
-            );
+          const line = lines.find(q => q.available && q.sportsbook === "Hard Rock Bet (FL)" && Number.isFinite(q.line))?.line ?? consensusLine(lines);
 
           if (
             line === null
@@ -3748,7 +3747,7 @@ function pickResearch(player:PlayerHistory,m:CoreMarket,line:number|null,pick:st
       {
         headers: {
           "Cache-Control":
-            "public, s-maxage=900, stale-while-revalidate=1800",
+            "public, s-maxage=300, must-revalidate",
         },
       },
     );

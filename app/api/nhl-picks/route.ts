@@ -1,10 +1,11 @@
+import { gameWindow } from "../../../lib/game-window";
+import { canonicalTeamKey } from "../../rdg/team-aliases";
+import { loadOddsMarket } from "../../../lib/odds-api";
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
 const NHL_API = "https://api-web.nhle.com/v1";
-const ODDIZE_URL =
-  "https://oddize.com/api/v1/odds/latest?sport=nhl&books=hrb";
 
 /*
   ============================================================
@@ -72,11 +73,15 @@ type Moneyline = {
 };
 
 type OddsGame = {
+  sportsbook?: string;
+  quote_times?: Record<string,string|null>;
+  requires_florida_verification?: boolean;
   eventId: string;
   awayTeam: string;
   homeTeam: string;
   startTime: string | null;
   moneylines: Moneyline[];
+  total: { side: string; line: number; odds: number }[];
 };
 
 function logistic(value: number): number {
@@ -150,6 +155,7 @@ function teamMatches(
   abbreviation: string,
   fullName?: string
 ): boolean {
+  if (canonicalTeamKey("NHL", oddsName) === canonicalTeamKey("NHL", abbreviation)) return true;
   const odds =
     normalizeTeamName(oddsName);
 
@@ -251,10 +257,7 @@ function gameTypeLabel(
 }
 
 async function fetchNHLGames(): Promise<NHLGame[]> {
-  const today =
-    new Date()
-      .toISOString()
-      .slice(0, 10);
+  const { start: today, end: windowEnd } = gameWindow();
 
   const response =
     await fetch(
@@ -282,7 +285,7 @@ async function fetchNHLGames(): Promise<NHLGame[]> {
 
   for (const day of weeks) {
     if (
-      day?.date !== today
+      typeof day?.date !== "string" || day.date < today || day.date > windowEnd
     ) {
       continue;
     }
@@ -547,7 +550,7 @@ function extractOddsEvents(
   return [];
 }
 
-function parseOddizeMoneylines(
+function parseMarketMoneylines(
   payload: any
 ): OddsGame[] {
   const events =
@@ -592,7 +595,7 @@ function parseOddizeMoneylines(
       Moneyline[] = [];
 
     /*
-      Oddize payloads can expose markets
+      Provider payloads can expose markets
       through slightly different nesting.
 
       Walk the event recursively and look
@@ -733,6 +736,10 @@ function parseOddizeMoneylines(
     }
 
     output.push({
+      total: (event.odds ?? []).filter((o: any) => o.market === "total").map((o: any) => ({ side: o.team, line: o.line, odds: o.american_odds })),
+      sportsbook: event.sportsbook,
+      quote_times: event.quote_times,
+      requires_florida_verification: event.requires_florida_verification,
       eventId:
         eventId ||
         `${awayTeam}-${homeTeam}-${startTime ?? ""}`,
@@ -757,56 +764,8 @@ function parseOddizeMoneylines(
 }
 
 async function fetchHardRockOdds(): Promise<OddsGame[]> {
-  const apiKey =
-    process.env.ODDIZE_API_KEY;
-
-  if (!apiKey) {
-    throw new Error(
-      "ODDIZE_API_KEY is missing."
-    );
-  }
-
-  const response =
-    await fetch(
-      ODDIZE_URL,
-      {
-        cache: "no-store",
-
-        headers: {
-          Authorization:
-            `Bearer ${apiKey}`,
-
-          "X-API-Key":
-            apiKey,
-
-          Accept:
-            "application/json",
-        },
-      }
-    );
-
-  if (!response.ok) {
-    const body =
-      await response
-        .text()
-        .catch(
-          () => ""
-        );
-
-    throw new Error(
-      `Oddize NHL request failed: ${response.status} ${body.slice(
-        0,
-        250
-      )}`
-    );
-  }
-
-  const payload: any =
-    await response.json();
-
-  return parseOddizeMoneylines(
-    payload
-  );
+  const payload = await loadOddsMarket("NHL");
+  return parseMarketMoneylines(payload);
 }
 
 function findOddsGame(
@@ -828,6 +787,7 @@ function findOddsGame(
     const oddsGame
     of oddsGames
   ) {
+    if (!oddsGame.startTime || !game.startTimeUTC || Math.abs(Date.parse(oddsGame.startTime) - Date.parse(game.startTimeUTC)) > 90 * 60_000) continue;
     const homeMatch =
       teamMatches(
         oddsGame.homeTeam,
@@ -853,13 +813,14 @@ function findOddsGame(
   /*
     Fallback:
     match selections themselves in case
-    Oddize event-level team names differ.
+    Provider event-level team names differ.
   */
 
   for (
     const oddsGame
     of oddsGames
   ) {
+    if (!oddsGame.startTime || !game.startTimeUTC || Math.abs(Date.parse(oddsGame.startTime) - Date.parse(game.startTimeUTC)) > 90 * 60_000) continue;
     const hasHome =
       oddsGame.moneylines.some(
         (line) =>
@@ -961,6 +922,10 @@ export async function GET(): Promise<NextResponse> {
         );
 
       const base = {
+        total: oddsGame?.total ?? [],
+        sportsbook: oddsGame?.sportsbook,
+        quote_times: oddsGame?.quote_times,
+        requires_florida_verification: oddsGame?.requires_florida_verification,
         game_id:
           game.gameId,
 
@@ -1246,8 +1211,7 @@ export async function GET(): Promise<NextResponse> {
         odds_available:
           true,
 
-        sportsbook:
-          "Hard Rock Bet",
+        sportsbook: oddsGame.sportsbook,
 
         home_stats: {
           games_played:
