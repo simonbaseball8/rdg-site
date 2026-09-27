@@ -353,6 +353,8 @@ export default function Home() {
       `${p.title} ${p.matchup}`.toLowerCase().includes(query.toLowerCase()),
   );
   const ideas = buildIdeas(controlledPicks, size, now, mix);
+  const moneylineGames = new Set(controlledPicks.filter(p => p.market === "Moneyline" && actionable(p, now)).map(p => p.event)).size;
+  const referenceMoneylines = controlledPicks.filter(p => p.market === "Moneyline" && p.referencePrice).length;
   const errors = relevant.filter((r) => r.feed?.error);
   const stale = relevant.some(
     (r) => r.feed && !r.feed.error && !fresh(r.feed, now),
@@ -781,6 +783,13 @@ export default function Home() {
                   <p className="copy-error" role="status">
                     Enter a stake greater than $0 and no more than $10,000 to
                     estimate a return.
+                  </p>
+                )}
+                {mix === "moneylines" && loaded && !loading && (
+                  <p role="status" className="tracking-message">
+                    {moneylineGames} qualifying moneyline games · {size} needed for this slip.
+                    {moneylineGames < size && " Try fewer legs, Next 7 days, or review your sport and custom filters."}
+                    {!allowReference && referenceMoneylines > 0 && " Reference moneylines are available. Enable reference prices only if you will verify each price in Hard Rock Florida."}
                   </p>
                 )}
                 {(!loaded || loading) && ideas.length === 0 ? (

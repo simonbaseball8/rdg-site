@@ -29,6 +29,7 @@ export type Parlay = {
 };
 
 export type NFLGame = {
+  quote_times?: Record<string, string | null>;
   sportsbook?: string;
   requires_florida_verification?: boolean;
   event_id: string;

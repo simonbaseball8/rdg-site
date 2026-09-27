@@ -181,6 +181,33 @@ export function normalizeBoard(
       eligible: reviewed && odds !== null && fresh(feeds.NFL, now),
     });
   }
+  // Straight-up winners are independent of spread/ATS review signals.
+  for (const g of nfl?.games ?? []) {
+    const r = g.rdg;
+    if (!g.stats_connected || !r || !finite(r.projected_margin) || r.projected_margin <= 0) continue;
+    const team = r.projected_winner;
+    if (team !== g.home_team && team !== g.away_team) continue;
+    const price = r.market_analysis?.hard_rock_moneyline;
+    const odds = oddsNumber(team === g.home_team ? price?.home_odds : price?.away_odds);
+    const quoteAt = g.quote_times?.moneyline ?? null;
+    const quoted = Date.parse(quoteAt ?? "");
+    const recent = Number.isFinite(quoted) && quoted <= now && now - quoted < FRESH_FOR_MS;
+    picks.push({
+      id: `nfl-ml-${g.event_id}`, event: `NFL-${g.event_id}`, sport: "NFL",
+      starts: g.start_date, matchup: `${g.away_team} @ ${g.home_team}`,
+      title: `${team} moneyline`, market: "Moneyline", grading: { team },
+      odds, quoteAt, book: g.sportsbook ?? "Hard Rock Bet (FL)",
+      referencePrice: g.requires_florida_verification === true,
+      score: 2,
+      reasons: [`RDG projects ${team} to win by ${r.projected_margin.toFixed(1)} points.`,
+        "Straight-up winner selection; independent of the spread rating."],
+      concerns: [...context,
+        "Projected winner research, not a calibrated win probability or proven edge at this price.",
+        "Team injury impacts have not been quantified in this projection.",
+        ...(!recent ? ["Moneyline quote time is missing or stale; refresh before using this pick."] : [])],
+      eligible: odds !== null && recent && fresh(feeds.NFL, now),
+    });
+  }
   const props = feeds.props?.data as NFLPlayerPropsAnalysis | undefined;
   for (const p of props?.parlay_pool ?? []) {
     if (p.pick === "PASS" || p.grade === "PASS" || !p.start_time) continue;
