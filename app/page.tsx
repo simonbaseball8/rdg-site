@@ -427,7 +427,7 @@ export default function Home() {
           >
             <Image
               className="brand-image"
-              src="/rdg-logo.png"
+              src="/rdg-logo-clean.webp"
               alt="Responsible Degenerate Gambling"
               width={166}
               height={85}
