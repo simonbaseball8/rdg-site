@@ -51,3 +51,7 @@ UFC cards use portraits from ESPN's headshot CDN, keyed by competitor IDs from t
 - Scheduled saving reads existing analysis routes and can consume normal Odds API credits if their cache is cold. It does not request historical paid odds. Grading uses ESPN scoreboards and consumes no Odds API credits.
 - Shared archive shows up to 270 published slips with all losses included. Grading revisits the last seven days; older/unresolved and prop results remain pending. The shared record is read-only in the UI.
 - The optional 3D card tilt uses pointer position, small rotations and CSS perspective. It is disabled for touch/coarse pointers and reduced-motion users; the header switch persists on the device. No WebGL download is required.
+
+## Visual refresh
+
+The 3D pointer tilt and motion switch have been removed. The page now uses the selected sport’s existing stadium/arena image as a fixed, shaded background, with solid content cards and section bands for contrast. The logo and all tracking features remain in place.

@@ -1,7 +1,6 @@
 "use client";
 
 import { useDailySlips } from "./rdg/use-daily-slips";
-import { useDepth } from "./rdg/use-depth";
 import { useState } from "react";
 import Image from "next/image";
 import { MatchupLogos } from "./rdg/team-logos";
@@ -323,7 +322,6 @@ export default function Home() {
   const visibleFeeds = Object.fromEntries(
     relevant.filter((r) => r.feed && !r.feed.error).map((r) => [r.key, r.feed]),
   );
-  const depth = useDepth();
   const dailyNotice = useDailySlips(
     visibleFeeds,
     now,
@@ -376,11 +374,10 @@ export default function Home() {
     { id: "results", label: "Results", icon: "chart" },
   ];
   return (
-    <div
-      className="rdg-app"
-      ref={depth.ref}
-      data-depth={depth.enabled ? "on" : "off"}
-    >
+    <div className="rdg-app">
+      <div className="site-backdrop" aria-hidden="true">
+        <Image src={hero.src} alt="" fill sizes="100vw" quality={75} />
+      </div>
       <a href="#main-content" className="skip-link">
         Skip to picks
       </a>
@@ -412,13 +409,7 @@ export default function Home() {
               </button>
             ))}
           </nav>
-          <button
-            className="depth-toggle"
-            onClick={depth.toggle}
-            aria-pressed={depth.enabled}
-          >
-            3D motion {depth.enabled ? "On" : "Off"}
-          </button>
+          <span className="header-tag">SPORTS. STATS. PERSPECTIVE.</span>
         </div>
       </header>
       <main id="main-content" className="dashboard">
