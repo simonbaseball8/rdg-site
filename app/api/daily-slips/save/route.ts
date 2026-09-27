@@ -21,6 +21,9 @@ export async function GET(request: Request) {
       props: "nfl-player-props",
       injuries: "nfl-injuries",
       mlbProps: "mlb-props",
+      weatherNFL: "weather?sport=NFL",
+      weatherCFB: "weather?sport=CFB",
+      weatherMLB: "weather?sport=MLB",
     };
     const feeds: Feeds = {};
     const warnings: string[] = [];

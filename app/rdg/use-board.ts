@@ -4,6 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { FRESH_FOR_MS, type Feed, type Feeds, type SportFilter } from "./board";
 
 const endpoints = {
+  weatherNFL: "/api/weather?sport=NFL",
+  weatherCFB: "/api/weather?sport=CFB",
+  weatherMLB: "/api/weather?sport=MLB",
   NFL: "/api/analyze",
   CFB: "/api/cfb-picks",
   MLB: "/api/mlb-picks",
@@ -87,12 +90,12 @@ export function useBoard(sport: SportFilter, enabled: boolean) {
     let cancelled = false;
     const keys: Key[] =
       sport === "ALL"
-        ? ["NFL", "CFB", "MLB", "NHL", "props", "injuries", "mlbProps"]
+        ? ["NFL", "CFB", "MLB", "NHL", "props", "injuries", "mlbProps", "weatherNFL", "weatherCFB", "weatherMLB"]
         : sport === "NFL"
-          ? ["NFL", "props", "injuries"]
+          ? ["NFL", "props", "injuries", "weatherNFL"]
           : sport === "MLB"
-            ? ["MLB", "mlbProps"]
-            : [sport];
+            ? ["MLB", "mlbProps", "weatherMLB"]
+            : sport === "CFB" ? ["CFB", "weatherCFB"] : [sport];
     const force = refresh > consumedRefresh.current;
     consumedRefresh.current = refresh;
     async function load() {
@@ -118,12 +121,12 @@ export function useBoard(sport: SportFilter, enabled: boolean) {
   const reload = useCallback(() => setRefresh((value) => value + 1), []);
   const keys: Key[] =
     sport === "ALL"
-      ? ["NFL", "CFB", "MLB", "NHL", "props", "injuries", "mlbProps"]
+      ? ["NFL", "CFB", "MLB", "NHL", "props", "injuries", "mlbProps", "weatherNFL", "weatherCFB", "weatherMLB"]
       : sport === "NFL"
-        ? ["NFL", "props", "injuries"]
+        ? ["NFL", "props", "injuries", "weatherNFL"]
         : sport === "MLB"
-          ? ["MLB", "mlbProps"]
-          : [sport];
+          ? ["MLB", "mlbProps", "weatherMLB"]
+          : sport === "CFB" ? ["CFB", "weatherCFB"] : [sport];
   const relevant = keys.map((key) => ({ key, feed: feeds[key] }));
   return { feeds, loading, reload, now: clock, relevant };
 }

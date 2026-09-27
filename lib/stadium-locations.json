@@ -1,0 +1,471 @@
+[
+  {
+    "id": "ATL00",
+    "name": "Georgia Dome",
+    "lat": 33.7576273,
+    "lon": -84.4011555,
+    "roof": "Dome"
+  },
+  {
+    "id": "ATL97",
+    "name": "Mercedes-Benz Stadium",
+    "lat": 33.7555052,
+    "lon": -84.4008484,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "BAL00",
+    "name": "M&T Bank Stadium",
+    "lat": 39.277958,
+    "lon": -76.6227221,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "BOS00",
+    "name": "Gillette Stadium",
+    "lat": 42.0909217,
+    "lon": -71.2643321,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "BOS99",
+    "name": "Foxboro Stadium",
+    "lat": 42.0925795,
+    "lon": -71.2674657,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "BRG00",
+    "name": "Tiger Stadium (LSU)",
+    "lat": 30.4120328,
+    "lon": -91.1838139,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "BUF00",
+    "name": "Highmark Stadium",
+    "lat": 42.7737531,
+    "lon": -78.786954,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "BUF01",
+    "name": "Rogers Centre",
+    "lat": 43.6416586,
+    "lon": -79.3890887,
+    "roof": "Dome"
+  },
+  {
+    "id": "CAR00",
+    "name": "Bank of America Stadium",
+    "lat": 35.2258152,
+    "lon": -80.8528376,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "CHI98",
+    "name": "Soldier Field",
+    "lat": 41.8624598,
+    "lon": -87.6167762,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "CHI99",
+    "name": "Memorial Stadium (Champaign)",
+    "lat": 40.0992975,
+    "lon": -88.2359533,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "CIN00",
+    "name": "Paycor Stadium",
+    "lat": 39.0954306,
+    "lon": -84.5160435,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "CIN99",
+    "name": "Cinergy Field",
+    "lat": 39.0965535,
+    "lon": -84.5084173,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "CLE00",
+    "name": "Huntington Bank Field",
+    "lat": 41.5060371,
+    "lon": -81.699586,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "DAL00",
+    "name": "AT&T Stadium",
+    "lat": 32.7479723,
+    "lon": -97.0928461,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "DAL99",
+    "name": "Texas Stadium",
+    "lat": 32.8398075,
+    "lon": -96.9108917,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "DEN00",
+    "name": "Empower Field at Mile High",
+    "lat": 39.7439402,
+    "lon": -105.0201065,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "DEN99",
+    "name": "Mile High Stadium",
+    "lat": 39.7460024,
+    "lon": -105.0216427,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "DET00",
+    "name": "Ford Field",
+    "lat": 42.3401334,
+    "lon": -83.0456783,
+    "roof": "Dome"
+  },
+  {
+    "id": "DET99",
+    "name": "Pontiac Silverdome",
+    "lat": 42.6457766,
+    "lon": -83.2549503,
+    "roof": "Dome"
+  },
+  {
+    "id": "FRA00",
+    "name": "Deutsche Bank Park",
+    "lat": 50.0686586,
+    "lon": 8.6454228,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "GER00",
+    "name": "Allianz Arena",
+    "lat": 48.2188932,
+    "lon": 11.6247241,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "GNB00",
+    "name": "Lambeau Field",
+    "lat": 44.5014769,
+    "lon": -88.0621617,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "HOU00",
+    "name": "Reliant Stadium",
+    "lat": 29.6849239,
+    "lon": -95.41082,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "IND00",
+    "name": "Lucas Oil Stadium",
+    "lat": 39.7602037,
+    "lon": -86.1638068,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "IND99",
+    "name": "RCA Dome",
+    "lat": 39.7636251,
+    "lon": -86.163448,
+    "roof": "Dome"
+  },
+  {
+    "id": "JAX00",
+    "name": "EverBank Stadium",
+    "lat": 30.3239164,
+    "lon": -81.6373486,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "KAN00",
+    "name": "GEHA Field at Arrowhead Stadium",
+    "lat": 39.0489275,
+    "lon": -94.4839962,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "LAX01",
+    "name": "SoFi Stadium",
+    "lat": 33.953485,
+    "lon": -118.3390307,
+    "roof": "Dome"
+  },
+  {
+    "id": "LAX97",
+    "name": "StubHub Center",
+    "lat": 33.8643225,
+    "lon": -118.2611153,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "LAX99",
+    "name": "Los Angeles Memorial Coliseum",
+    "lat": 34.0140427,
+    "lon": -118.2878605,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "LON00",
+    "name": "Wembley Stadium",
+    "lat": 51.5559836,
+    "lon": -0.2795903,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "LON01",
+    "name": "Twickenham Stadium",
+    "lat": 51.4560402,
+    "lon": -0.3415439,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "LON02",
+    "name": "Tottenham Hotspur Stadium",
+    "lat": 51.6042151,
+    "lon": -0.0662246,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "MEX00",
+    "name": "Estadio Banorte",
+    "lat": 19.3029718,
+    "lon": -99.150481,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "MIA00",
+    "name": "Hard Rock Stadium",
+    "lat": 25.9579623,
+    "lon": -80.2388423,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "MIN00",
+    "name": "Mall of America Field",
+    "lat": 44.9738295,
+    "lon": -93.2580358,
+    "roof": "Dome"
+  },
+  {
+    "id": "MIN01",
+    "name": "U.S. Bank Stadium",
+    "lat": 44.9736273,
+    "lon": -93.2574111,
+    "roof": "Dome"
+  },
+  {
+    "id": "MIN98",
+    "name": "TCF Bank Stadium",
+    "lat": 44.9765379,
+    "lon": -93.2245731,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "NAS00",
+    "name": "Nissan Stadium",
+    "lat": 36.1664774,
+    "lon": -86.7712938,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "NOR00",
+    "name": "Caesars Superdome",
+    "lat": 29.9511425,
+    "lon": -90.0810779,
+    "roof": "Dome"
+  },
+  {
+    "id": "NYC00",
+    "name": "Giants Stadium",
+    "lat": 40.813507465,
+    "lon": -74.074342406,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "NYC01",
+    "name": "MetLife Stadium",
+    "lat": 40.813507465,
+    "lon": -74.074342406,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "OAK00",
+    "name": "Ring Central Coliseum",
+    "lat": 37.7516083,
+    "lon": -122.2006038,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "PHI00",
+    "name": "Lincoln Financial Field",
+    "lat": 39.9007914,
+    "lon": -75.1674645,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "PHI99",
+    "name": "Veterans Stadium",
+    "lat": 39.9067652,
+    "lon": -75.1706267,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "PHO00",
+    "name": "State Farm Stadium",
+    "lat": 33.5277555,
+    "lon": -112.2625948,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "PHO99",
+    "name": "Sun Devil Stadium",
+    "lat": 33.4264274,
+    "lon": -111.9325752,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "PIT00",
+    "name": "Acrisure Stadium",
+    "lat": 40.4467883,
+    "lon": -80.0157692,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "PIT99",
+    "name": "Three Rivers Stadium",
+    "lat": 40.4465533,
+    "lon": -80.0126137,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "SAN00",
+    "name": "Alamo Dome",
+    "lat": 29.4169713,
+    "lon": -98.4788947,
+    "roof": "Dome"
+  },
+  {
+    "id": "SAO00",
+    "name": "Arena Corinthians",
+    "lat": -23.5453166,
+    "lon": -46.4742288,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "SDG00",
+    "name": "Qualcomm Stadium",
+    "lat": 32.7832189,
+    "lon": 117.1195919,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "SEA00",
+    "name": "Lumen Field",
+    "lat": 47.5951513,
+    "lon": -122.3316259,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "SEA98",
+    "name": "Seattle Kingdome",
+    "lat": 47.5956264,
+    "lon": -122.3314355,
+    "roof": "Dome"
+  },
+  {
+    "id": "SEA99",
+    "name": "Husky Stadium",
+    "lat": 47.6502858,
+    "lon": -122.3016341,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "SFO00",
+    "name": "Candlestick Park",
+    "lat": 37.7134337,
+    "lon": -122.3862306,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "SFO01",
+    "name": "Levi's Stadium",
+    "lat": 37.4031837,
+    "lon": -121.9698094,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "STL00",
+    "name": "Edward Jones Dome",
+    "lat": 38.6329321,
+    "lon": -90.1885301,
+    "roof": "Dome"
+  },
+  {
+    "id": "TAM00",
+    "name": "Raymond James Stadium",
+    "lat": 27.9759691,
+    "lon": -82.503356,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "VEG00",
+    "name": "Allegiant Stadium",
+    "lat": 36.0908515,
+    "lon": -115.1833441,
+    "roof": "Dome"
+  },
+  {
+    "id": "WAS00",
+    "name": "Northwest Stadium",
+    "lat": 38.907703,
+    "lon": -76.8645083,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "MEL00",
+    "name": "Melbourne Cricket Ground",
+    "lat": -37.819943,
+    "lon": 144.983447,
+    "roof": "Dome"
+  },
+  {
+    "id": "RIO00",
+    "name": "Maracana Stadium",
+    "lat": -22.912222222222223,
+    "lon": -43.23027777777778,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "PAR00",
+    "name": "Stade de France",
+    "lat": 48.92444444444445,
+    "lon": 2.36,
+    "roof": "Dome"
+  },
+  {
+    "id": "MAD01",
+    "name": "Bernabeu",
+    "lat": 40.45306,
+    "lon": -3.68835,
+    "roof": "Outdoors"
+  },
+  {
+    "id": "MUN01",
+    "name": "FC Bayern Munich Stadium",
+    "lat": 48.2188932,
+    "lon": 11.6247241,
+    "roof": "Dome"
+  }
+]

@@ -24,6 +24,12 @@ export function PickFreshness({ pick: p }: { pick: Pick }) {
             : `${p.book} · not a Florida quote`}
       </span>
       <dl>
+        {['NFL', 'CFB', 'MLB'].includes(p.sport) && <>
+          <dt>Game-time weather</dt>
+          <dd>{p.weather?.status === 'indoor' ? 'Indoor venue' : p.weather?.status === 'forecast' ? `${p.weather.temperatureF}°F · wind up to ${p.weather.windMph} mph · precipitation ${p.weather.rainChance}%` : 'Unavailable · not weather-cleared'}</dd>
+          {p.weather && <><dt>Venue</dt><dd>{p.weather.venue}{p.weather.roof === 'unknown' ? ' · roof unconfirmed' : ''}</dd><dt>Weather checked</dt><dd>{checkedTime(p.weather.checkedAt)}</dd></>}
+          {p.weather?.status === 'forecast' && <><dt>Forecast issued</dt><dd>{checkedTime(p.weather.issuedAt)}</dd></>}
+        </>}
         <dt>Odds updated</dt>
         <dd>{checkedTime(p.quoteAt)}</dd>
         <dt>Feed received</dt>

@@ -1,3 +1,4 @@
+import { applyWeather, weatherFor, type GameWeather } from "./weather.ts";
 import { totalPicks } from "./totals.ts";
 import { canonicalTeamKey } from "./team-aliases.ts";
 import type {
@@ -14,6 +15,7 @@ export type Sport = (typeof SPORTS)[number];
 export type SportFilter = Sport | "ALL";
 export type Market = "Spread" | "Moneyline" | "Total" | "Player prop";
 export type Pick = {
+  weather?: GameWeather;
   grading?: { team?: string; line?: number; side?: "Over" | "Under" };
   propType?: string;
   quoteAt?: string | null;
@@ -37,7 +39,7 @@ export type Pick = {
 };
 export type Feed = { data: unknown; loadedAt: number; error?: string };
 export type Feeds = Partial<
-  Record<Sport | "props" | "mlbProps" | "injuries", Feed>
+  Record<Sport | "props" | "mlbProps" | "injuries" | "weatherNFL" | "weatherCFB" | "weatherMLB", Feed>
 >;
 export const FRESH_FOR_MS = 15 * 60_000;
 export const LABELS: Record<SportFilter, string> = {
@@ -136,7 +138,6 @@ export function normalizeBoard(
     ? (injuries.current_injuries ?? injuries.injuries ?? [])
     : [];
   const context = [
-    "Weather adjustments are not connected to this board.",
     "Recheck the offered line and late lineup news before betting.",
   ];
   for (const g of nfl?.games ?? []) {
@@ -390,7 +391,7 @@ export function normalizeBoard(
       odds,
       book: g.sportsbook ?? "Hard Rock Bet (FL)",
       referencePrice: g.requires_florida_verification === true,
-      score: 3,
+      score: 2,
       reasons: [
         `RDG projects ${r.projected_winner} to win${finite(r.projected_margin) ? ` by ${r.projected_margin.toFixed(1)}` : ""}.`,
         "Straight-up winner selection; the spread does not need to be covered.",
@@ -555,6 +556,7 @@ export function normalizeBoard(
       );
       if (!allowReference) pick.eligible = false;
     }
+  for (const pick of picks) applyWeather(pick, weatherFor(pick, feeds, now));
   return picks.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
 }
 
@@ -599,7 +601,7 @@ export function buildIdeas(
           (mix === "totals" && p.market === "Total")),
     );
     while (pool.length) {
-      // Prefer a different game/sport and include a qualifying prop in a balanced card.
+      // Quality first; variety only breaks equal-score ties. Scores are not probabilities.
       const priority = (p: Pick) =>
         (priorMatchups.has(gameKey(p)) ? 0 : 20) +
         (chosen.some((c) => c.sport === p.sport) ? 0 : 8) +
@@ -622,8 +624,8 @@ export function buildIdeas(
           : 0);
       pool.sort(
         (a, b) =>
-          priority(b) - priority(a) ||
           b.score - a.score ||
+          priority(b) - priority(a) ||
           a.id.localeCompare(b.id),
       );
       const p = pool.shift()!;
