@@ -688,5 +688,10 @@ export function buildIdeas(
     });
     results.push(chosen);
   }
-  return results;
+  // Compare complete slips by their weakest leg, then average source score.
+  return results.sort((a,b) =>
+    Math.min(...b.map(p=>p.score))-Math.min(...a.map(p=>p.score)) ||
+    b.reduce((n,p)=>n+p.score,0)/b.length-a.reduce((n,p)=>n+p.score,0)/a.length ||
+    a.map(p=>p.id).join('|').localeCompare(b.map(p=>p.id).join('|')));
+
 }

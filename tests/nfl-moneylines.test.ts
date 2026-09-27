@@ -18,3 +18,11 @@ test('NFL moneylines preserve quote freshness, reference opt-in and stats gates'
  assert.equal(board([reference])[0].eligible,false);assert.equal(board([reference],true)[0].eligible,true);
  const missing=game(0);missing.rdg.market_analysis.hard_rock_moneyline.home_odds='';assert.equal(board([missing])[0].eligible,false);
 });
+
+test('A/B/C slips are ordered by weakest-leg then average source score',()=>{
+ const picks=board(Array.from({length:6},(_,i)=>game(i)));
+ picks.forEach((p,i)=>{p.score=[2,4,3,2,4,3][i];});
+ const cards=buildIdeas(picks,2,now,'moneylines');
+ assert.deepEqual(cards.map(c=>Math.min(...c.map(p=>p.score))),[4,3,2]);
+ assert.equal(new Set(cards.flat().map(p=>p.id)).size,6);
+});

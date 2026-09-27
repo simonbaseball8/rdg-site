@@ -1915,3 +1915,11 @@
     scroll-behavior: auto !important;
   }
 }
+
+.weekly-spotlight { margin: 28px 0; padding: clamp(18px,3vw,32px); border: 2px solid #d6b65e; border-radius: 22px; background: linear-gradient(125deg,#182b29,#14202c); color:#f8fafc; display:grid; grid-template-columns: 1fr 1.15fr; gap:26px; align-items:start; box-shadow:0 8px 32px #0003; }
+.weekly-spotlight h2 {font-size:clamp(26px,3vw,40px);line-height:1.1;margin:12px 0;}
+.weekly-spotlight .eyebrow {color:#f5d985;}
+.weekly-spotlight > div > p {margin-bottom:16px;}
+.weekly-spotlight > div > .quote-note {color:#c6d4d9;}
+.weekly-spotlight > .idea-card {margin:0;}
+@media(max-width:760px){.weekly-spotlight{grid-template-columns:1fr;}}
