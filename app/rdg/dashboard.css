@@ -1935,12 +1935,12 @@
 .weekly-sidebar .weekly-spotlight details p { margin-top:10px; }
 .weekly-size { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:16px 0; font-size:13px; }
 .weekly-size select { background:#17281f; color:#f1f7e9; border:1px solid #68844c; border-radius:6px; padding:8px; }
-@media(min-width:1450px) {
+@media(min-width:1200px) {
   .with-weekly-sidebar { display:grid; grid-template-columns:320px minmax(0,1fr); gap:24px; max-width:1680px; margin:0 auto; padding:28px 24px 0; align-items:start; }
   .with-weekly-sidebar > .dashboard { width:100%; max-width:none; margin:0; padding:0; min-width:0; }
   .weekly-sidebar { position:sticky; top:96px; max-height:calc(100dvh - 112px); overflow-y:auto; scrollbar-width:thin; }
 }
-@media(max-width:1449px) {
+@media(max-width:1199px) {
   .with-weekly-sidebar { display:flex; flex-direction:column; }
   .with-weekly-sidebar > .dashboard { order:0; }
   .weekly-sidebar { order:1; width:calc(100% - 32px); max-width:720px; margin:0 auto 28px; }
