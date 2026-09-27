@@ -1945,3 +1945,11 @@
   .with-weekly-sidebar > .dashboard { order:0; }
   .weekly-sidebar { order:1; width:calc(100% - 32px); max-width:720px; margin:0 auto 28px; }
 }
+
+.responsible-footer {align-items:flex-start; padding:28px 0;}
+.responsible-copy {flex:1; max-width:1000px; font-size:13px; line-height:1.65; color:#becbc2;}
+.responsible-copy h2 {font-size:17px; color:#eef5ee; margin-bottom:12px;}
+.responsible-copy p + p {margin-top:12px;}
+.responsible-copy a {color:#d2eea3; text-decoration:underline; text-underline-offset:3px;}
+.gambling-help {padding-top:12px; border-top:1px solid var(--line);}
+@media(max-width:650px){.responsible-footer {flex-direction:column; align-items:stretch;}}

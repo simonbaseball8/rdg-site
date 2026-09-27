@@ -1091,12 +1091,17 @@ export default function Home() {
           </>
         )}
         {view === "results" && <Results />}
-        <footer className="site-footer">
+        <footer className="site-footer responsible-footer">
           <span className="footer-brand">
             RDG<span>↗</span>
           </span>
-          <p>Research, not guarantees. No model promises a profit.</p>
-          <span>21+ · Bet within your limits.</span>
+          <div className="responsible-copy">
+            <h2>Sports research. Informed decisions. Responsible play.</h2>
+            <p>RDG provides informational sports analysis and suggestions for upcoming events using available statistics, historical data and calculations. Picks, rankings and projected returns are estimates—not guarantees of accuracy, winning outcomes or profit. Data, odds, injuries and conditions can change; verify all information and final prices with your sportsbook.</p>
+            <p>Gambling involves financial risk, including loss of your entire stake. You are responsible for your betting decisions. Only wager what you can afford to lose, never chase losses, and take breaks. For adults 21+ only; betting must be lawful in your location. RDG does not accept or place wagers.</p>
+            <p>RDG is an independent research service and is not affiliated with, sponsored by or endorsed by Hard Rock Bet, any sportsbook, sports league or team. Third-party names and marks belong to their respective owners.</p>
+            <p className="gambling-help"><strong>Concerned about gambling?</strong> In Florida, call <a href="tel:18882364848">888-ADMIT-IT (888-236-4848)</a> or visit <a href="https://gamblinghelp.org/" target="_blank" rel="noopener noreferrer">gamblinghelp.org</a> for confidential support.</p>
+          </div>
         </footer>
       </main>
       </div>
