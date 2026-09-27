@@ -1923,3 +1923,25 @@
 .weekly-spotlight > div > .quote-note {color:#c6d4d9;}
 .weekly-spotlight > .idea-card {margin:0;}
 @media(max-width:760px){.weekly-spotlight{grid-template-columns:1fr;}}
+
+/* Weekly feature occupies the left-hand gutter on desktop. */
+.weekly-sidebar { min-width:0; }
+.weekly-sidebar .weekly-spotlight { display:block; margin:0; padding:16px; border-radius:16px; }
+.weekly-sidebar .weekly-spotlight h2 { font-size:27px; }
+.weekly-sidebar .weekly-spotlight > .idea-card { margin-top:18px; }
+.weekly-sidebar .card-top { flex-wrap:wrap; padding:12px; }
+.weekly-sidebar .card-title, .weekly-sidebar .leg-list { padding-left:12px; padding-right:12px; }
+.weekly-sidebar .weekly-spotlight details { margin:12px 0; }
+.weekly-sidebar .weekly-spotlight details p { margin-top:10px; }
+.weekly-size { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:16px 0; font-size:13px; }
+.weekly-size select { background:#17281f; color:#f1f7e9; border:1px solid #68844c; border-radius:6px; padding:8px; }
+@media(min-width:1450px) {
+  .with-weekly-sidebar { display:grid; grid-template-columns:320px minmax(0,1fr); gap:24px; max-width:1680px; margin:0 auto; padding:28px 24px 0; align-items:start; }
+  .with-weekly-sidebar > .dashboard { width:100%; max-width:none; margin:0; padding:0; min-width:0; }
+  .weekly-sidebar { position:sticky; top:96px; max-height:calc(100dvh - 112px); overflow-y:auto; scrollbar-width:thin; }
+}
+@media(max-width:1449px) {
+  .with-weekly-sidebar { display:flex; flex-direction:column; }
+  .with-weekly-sidebar > .dashboard { order:0; }
+  .weekly-sidebar { order:1; width:calc(100% - 32px); max-width:720px; margin:0 auto 28px; }
+}

@@ -268,6 +268,7 @@ function IdeaCard({
   );
 }
 function WeeklySpotlight() {
+  const [weeklySize, setWeeklySize] = useState(4);
   const {feeds, loading, now, reload} = useBoard("ALL", true);
   const candidates = now ? normalizeBoard(feeds,now,false).filter(p =>
     upcoming(p.starts,now,"week") && actionable(p,now) &&
@@ -275,12 +276,19 @@ function WeeklySpotlight() {
     now-Date.parse(p.quoteAt)>=0 && now-Date.parse(p.quoteAt)<15*60000 &&
     (!['NFL','CFB','MLB'].includes(p.sport) || (p.weather && p.weather.status !== 'unavailable'))
   ) : [];
-  const best = !loading ? buildIdeas(candidates,2,now)[0] : undefined;
+  const best = !loading ? buildIdeas(candidates,weeklySize,now)[0] : undefined;
   return <section className="weekly-spotlight" aria-label="RDG Parlay of the Week">
     <div><p className="eyebrow">THE RDG SPOTLIGHT</p><h2>RDG Parlay of the Week</h2>
-    <p>Our highest-ranked available 2-leg combination across supported sports.</p>
-    <p className="quote-note">Ranked by weakest-leg grade, then average source grade. Florida prices only, with usable weather for outdoor games. Grades are research rankings, not win probabilities.</p>
+    <p>Our highest-ranked available {weeklySize}-leg combination across supported sports.</p>
+    <label className="weekly-size">Weekly parlay legs
+      <select value={weeklySize} onChange={e=>setWeeklySize(Number(e.target.value))} aria-label="Weekly parlay legs">
+        {[4,5,6,7,8].map(n=><option key={n} value={n}>{n} legs</option>)}
+      </select>
+    </label>
+    <p className="quote-note">Florida prices and usable outdoor weather required. More legs make the slip harder to hit.</p>
+    <details><summary>How this is ranked</summary><p className="quote-note">Weakest-leg grade first, then average source grade. These are research rankings, not win probabilities.</p>
     <p className="quote-note">Live selection for the next 7 days; updates as prices, conditions and available games change. It can include one or multiple sports and is separate from your filters below. NBA and UFC await prediction models.</p>
+    </details>
     <button className="secondary-button" disabled={loading} onClick={reload}>{loading ? 'Checking all sports…' : 'Refresh weekly selection'}</button></div>
     {best ? <IdeaCard key={JSON.stringify(best)} picks={best} index={0} stake={10} pool={best} now={now} mix="balanced" spotlight /> : <p className="notice" role="status">{loading ? 'Checking prices, model signals and weather…' : 'No complete weekly selection qualifies right now. No weaker or unverified legs have been added.'}</p>}
   </section>;
@@ -436,6 +444,8 @@ export default function Home() {
           <span className="header-tag">SPORTS. STATS. PERSPECTIVE.</span>
         </div>
       </header>
+      <div className={view === "today" ? "dashboard-layout with-weekly-sidebar" : "dashboard-layout"}>
+        {view === "today" && <aside className="weekly-sidebar" aria-label="Weekly parlay sidebar"><WeeklySpotlight /></aside>}
       <main id="main-content" className="dashboard">
         {dailyNotice && view !== "results" && (
           <p className="daily-notice">{dailyNotice}</p>
@@ -545,7 +555,6 @@ export default function Home() {
                 slip.
               </div>
             )}
-            {view === "today" && <WeeklySpotlight />}
             <div className="section-heading">
               <div>
                 <p className="eyebrow">
@@ -1085,6 +1094,7 @@ export default function Home() {
           <span>21+ · Bet within your limits.</span>
         </footer>
       </main>
+      </div>
     </div>
   );
 }
