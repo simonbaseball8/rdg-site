@@ -55,3 +55,20 @@ UFC cards use portraits from ESPN's headshot CDN, keyed by competitor IDs from t
 ## Visual refresh
 
 The 3D pointer tilt and motion switch have been removed. The page now uses the selected sport’s existing stadium/arena image as a fixed, shaded background, with solid content cards and section bands for contrast. The logo and all tracking features remain in place.
+
+## Prelaunch tracking/data audit — 2026-09-27
+
+- The board's Data quality panel counts missing/stale/future quote timestamps, reference prices, weather gaps/holds and props without automatic settlement using already-loaded feeds. It makes no extra paid API requests. This is a coverage audit, not independent roster verification or a performance backtest.
+- Scheduled saving returns the actual inserted count separately from existing immutable snapshots. Provider warning responses are reported, even when HTTP status is 200.
+- Scheduled grading groups overlapping slips by game date, sharing scoreboard requests rather than requesting the same scoreboards separately for every slip. Errors and concurrency conflicts are reported. Unavailable grades retain previous outcomes. The current seven-day/63-slip review limit remains; unresolved older bets require review.
+- Shared Results validates archived records and shows the latest saved timestamp. That is not a scheduler heartbeat: zero qualifying picks can legitimately mean no new snapshot.
+
+### Activation checklist
+1. Apply both existing SQL migrations in the RDG Supabase project: `20260926_bet_journal.sql`, then `20260927_daily_slips.sql`. Neither deletes existing tables or records.
+2. Verify production server configuration: `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET`, `VERCEL_PROJECT_PRODUCTION_URL`. Keep secrets in the hosting environment, never in chat, screenshots or browser bundles.
+3. Verify `/api/daily-slips` returns HTTP 200. An empty `bets` array is a valid ready state; HTTP 503 means database/configuration still needs attention.
+4. After reviewing the preview, deploy the branch to production. Preview deployment alone does not enable Vercel cron runs. Confirm schedules and execution logs in Vercel.
+5. Invoke the protected save job from the authorized server/hosting environment, then inspect its inserted/already_saved counts and warnings. Retrying must not rewrite original snapshots. A successful run can have zero candidates.
+6. After games finish, verify grading updates outcomes, preserves original prices and records both wins and losses. Props remain pending until a reliable settlement source is connected. Do not publish a complete performance claim while unresolved bets remain.
+
+At this stage, production activation has not been performed. Supabase project access/configuration is required to finish the end-to-end check. No historical sportsbook credits were spent for this audit.

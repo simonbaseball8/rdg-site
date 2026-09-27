@@ -37,6 +37,7 @@ export async function GET(request: Request) {
           if (!r.ok) throw Error("Feed unavailable");
           const data = await r.json();
           if (data.success === false) throw Error("Feed unavailable");
+          if (data.warning || data.market_data_warning) warnings.push(key);
           feeds[key as keyof Feeds] = { data, loadedAt: Date.now() };
         } catch {
           warnings.push(key);
@@ -44,19 +45,23 @@ export async function GET(request: Request) {
       }),
     );
     const bets = dailySlips(feeds, Date.now(), "published");
+    let inserted = 0;
     if (bets.length) {
-      const { error } = await db.from("rdg_daily_slips").upsert(
+      const { data: saved, error } = await db.from("rdg_daily_slips").upsert(
         bets.map((b) => ({
           id: b.id,
           snapshot: { ...b, settlements: [] },
           settlements: [],
         })),
         { onConflict: "id", ignoreDuplicates: true },
-      );
+      ).select("id");
       if (error) throw Error("Save failed");
+      inserted = saved?.length ?? 0;
     }
     return Response.json({
       candidates: bets.length,
+      inserted,
+      already_saved: bets.length - inserted,
       unavailable_feeds: warnings,
       note: "First snapshot wins. No qualifying full slips means no fabricated record.",
     });

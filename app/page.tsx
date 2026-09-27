@@ -1,5 +1,6 @@
 "use client";
 
+import DataQuality from "./rdg/data-quality";
 import { useDailySlips } from "./rdg/use-daily-slips";
 import { useState } from "react";
 import Image from "next/image";
@@ -498,6 +499,7 @@ export default function Home() {
                 {horizon === "today" ? "Today, Eastern time" : "Next 7 days"}
               </span>
             </div>
+            {loaded && !loading && <DataQuality picks={allPicks} now={now} />}
             {errors.length > 0 && (
               <div className="notice warning" role="status">
                 {errors

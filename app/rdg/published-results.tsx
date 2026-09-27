@@ -1,9 +1,11 @@
 "use client";
 import { useEffect, useState } from "react";
 import { metrics, validBet, type TrackedBet, settlement } from "./journal";
+import { checkedTime } from "./pick-details";
 import Wins from "./wins";
 import { formatOdds } from "./board";
 export default function PublishedResults() {
+  const [latestSaved, setLatestSaved] = useState<string|null>(null);
   const [ready, setReady] = useState(false);
   const [bets, setBets] = useState<TrackedBet[]>([]),
     [message, setMessage] = useState("Loading published daily slips…");
@@ -16,6 +18,7 @@ export default function PublishedResults() {
         if (!Array.isArray(d.bets) || !d.bets.every(validBet))
           throw Error("Daily archive unavailable");
         setBets(d.bets);
+        setLatestSaved(d.latest_saved_at ?? null);
         setMessage(d.notice);
         setReady(true);
       })
@@ -33,7 +36,7 @@ export default function PublishedResults() {
     );
   return (
     <section>
-      <p className="notice">{message}</p>
+      <p className="notice">{message} Latest shared save: {checkedTime(latestSaved)}. This timestamp confirms a saved record, not scheduler health.</p>
       <Wins bets={bets} mode="model" ready={true} />
       <div className="result-stats">
         {[
