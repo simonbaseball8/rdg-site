@@ -4,6 +4,7 @@ import { metrics, validBet, type TrackedBet, settlement } from "./journal";
 import Wins from "./wins";
 import { formatOdds } from "./board";
 export default function PublishedResults() {
+  const [ready, setReady] = useState(false);
   const [bets, setBets] = useState<TrackedBet[]>([]),
     [message, setMessage] = useState("Loading published daily slips…");
   useEffect(() => {
@@ -16,6 +17,7 @@ export default function PublishedResults() {
           throw Error("Daily archive unavailable");
         setBets(d.bets);
         setMessage(d.notice);
+        setReady(true);
       })
       .catch((e) => {
         if (e.name !== "AbortError") setMessage(e.message);
@@ -23,6 +25,12 @@ export default function PublishedResults() {
     return () => controller.abort();
   }, []);
   const m = metrics(bets);
+  if (!ready)
+    return (
+      <p className="notice" role="status">
+        {message}
+      </p>
+    );
   return (
     <section>
       <p className="notice">{message}</p>

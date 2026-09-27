@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { type Feeds, type SportFilter } from "./board";
+import { easternDate, type Feeds, type SportFilter } from "./board";
 import { dailySlips } from "./daily-slips";
 import { readJournal, writeJournal } from "./journal-store";
 export function useDailySlips(
@@ -24,8 +24,15 @@ export function useDailySlips(
         (b) => !rows.some((r) => r.id === b.id),
       );
       if (additions.length) writeJournal([...rows, ...additions]);
+      const saved =
+        additions.length ||
+        rows.some((b) =>
+          b.id.startsWith(`device-${sport}-${easternDate(now)}-`),
+        );
       setNotice(
-        "Daily model slips are saved on this device before kickoff. View them in Results → Daily model (this device).",
+        saved
+          ? "Daily model slips saved on this device. View them in Results → Daily model (this device)."
+          : "Daily model snapshots will appear when enough qualifying Florida-priced picks are available for today.",
       );
     } catch {
       setNotice(
@@ -33,5 +40,5 @@ export function useDailySlips(
       );
     }
   }, [signature, now, ready, sport]);
-  return notice;
+  return ready && sport !== "NBA" && sport !== "UFC" ? notice : "";
 }
